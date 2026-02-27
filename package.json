@@ -1,0 +1,22 @@
+{
+  "name": "marketing-ai-agent",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --filter=@repo/web",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "check": "pnpm lint && pnpm type-check",
+    "verify:rls": "node scripts/verify-rls.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "turbo": "^2.4.2",
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
+  }
+}

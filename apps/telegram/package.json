@@ -1,0 +1,22 @@
+{
+  "name": "@repo/telegram",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo \"No lint rules for @repo/telegram\""
+  },
+  "dependencies": {
+    "@repo/db": "workspace:*",
+    "@repo/types": "workspace:*",
+    "grammy": "^1.38.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
