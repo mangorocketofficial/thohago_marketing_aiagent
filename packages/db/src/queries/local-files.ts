@@ -4,4 +4,5 @@ export const listLocalFilesByOrg = async (client: SupabaseClient, orgId: string)
     .from("local_files")
     .select("*")
     .eq("org_id", orgId)
+    .eq("status", "active")
     .order("indexed_at", { ascending: false });

@@ -49,6 +49,7 @@ export type Content = {
 };
 
 export type FileType = "image" | "video" | "document";
+export type FileStatus = "active" | "deleted";
 
 export type LocalFile = {
   id: string;
@@ -58,6 +59,8 @@ export type LocalFile = {
   file_type: FileType;
   file_size: number | null;
   thumbnail_url: string | null;
+  activity_folder: string;
+  status: FileStatus;
   metadata: Record<string, unknown>;
   indexed_at: string;
 };

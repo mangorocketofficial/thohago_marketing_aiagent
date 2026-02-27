@@ -9,10 +9,19 @@
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "check": "pnpm lint && pnpm type-check",
-    "verify:rls": "node scripts/verify-rls.mjs"
+    "verify:rls": "node scripts/verify-rls.mjs",
+    "supabase:init": "pnpm exec supabase init --force",
+    "supabase:start": "pnpm exec supabase start",
+    "supabase:stop": "pnpm exec supabase stop",
+    "supabase:status": "pnpm exec supabase status",
+    "supabase:status:env": "pnpm exec supabase status -o env",
+    "supabase:db:reset": "pnpm exec supabase db reset --local --yes",
+    "supabase:db:push": "pnpm exec supabase db push --local",
+    "supabase:migration:new": "pnpm exec supabase migration new"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
+    "supabase": "2.76.15",
     "turbo": "^2.4.2",
     "typescript": "^5.8.2"
   },
