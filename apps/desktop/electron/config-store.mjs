@@ -1,7 +1,11 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { app } from "electron";
 import { SEED_ORG_ID } from "./constants.mjs";
+
+const require = createRequire(import.meta.url);
+const electron = require("electron");
+const { app } = electron;
 
 const CONFIG_FILENAME = "desktop-config.json";
 

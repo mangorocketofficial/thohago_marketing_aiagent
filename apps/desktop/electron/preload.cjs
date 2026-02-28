@@ -1,14 +1,9 @@
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const electron = require("electron");
-const { contextBridge, ipcRenderer } = electron;
+const { contextBridge, ipcRenderer } = require("electron");
 
 const subscribe = (channel, cb) => {
-  const listener = (_, payload) => cb(payload);
+  const listener = (_event, payload) => cb(payload);
   ipcRenderer.on(channel, listener);
 
-  // Return unsubscribe for renderer cleanup.
   return () => {
     ipcRenderer.removeListener(channel, listener);
   };
@@ -42,3 +37,4 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     reject: (payload) => ipcRenderer.invoke("chat:reject", payload)
   }
 });
+

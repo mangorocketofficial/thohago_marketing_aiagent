@@ -35,6 +35,7 @@ export type ContentCreatedBy = "ai" | "user";
 export type Content = {
   id: string;
   org_id: string;
+  campaign_id: string | null;
   channel: Channel;
   content_type: ContentType;
   status: ContentStatus;
@@ -60,7 +61,37 @@ export type PipelineTrigger = {
   file_type: FileType;
   status: PipelineTriggerStatus;
   source_event_id: string | null;
+  processed_at: string | null;
   created_at: string;
+};
+
+export type CampaignStatus = "draft" | "approved" | "active" | "completed" | "cancelled";
+
+export type CampaignPlanSchedule = {
+  day: number;
+  channel: string;
+  type: string;
+};
+
+export type CampaignPlan = {
+  objective: string;
+  channels: string[];
+  duration_days: number;
+  post_count: number;
+  content_types: string[];
+  suggested_schedule: CampaignPlanSchedule[];
+};
+
+export type Campaign = {
+  id: string;
+  org_id: string;
+  title: string;
+  activity_folder: string;
+  status: CampaignStatus;
+  channels: string[];
+  plan: CampaignPlan;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ChatChannel = "dashboard" | "telegram";
@@ -73,4 +104,39 @@ export type ChatMessage = {
   content: string;
   channel: ChatChannel;
   created_at: string;
+};
+
+export type SessionStatus = "running" | "paused" | "done" | "failed";
+export type OrchestratorStep =
+  | "detect"
+  | "await_user_input"
+  | "await_campaign_approval"
+  | "generate_content"
+  | "await_content_approval"
+  | "publish"
+  | "done";
+
+export type OrchestratorState = {
+  trigger_id: string;
+  activity_folder: string;
+  file_name: string;
+  file_type: FileType;
+  user_message: string | null;
+  campaign_id: string | null;
+  campaign_plan: CampaignPlan | null;
+  content_id: string | null;
+  content_draft: string | null;
+  processed_event_ids: string[];
+  last_error: string | null;
+};
+
+export type OrchestratorSession = {
+  id: string;
+  org_id: string;
+  trigger_id: string | null;
+  state: OrchestratorState;
+  current_step: OrchestratorStep;
+  status: SessionStatus;
+  created_at: string;
+  updated_at: string;
 };

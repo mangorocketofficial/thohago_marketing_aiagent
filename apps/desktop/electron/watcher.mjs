@@ -26,14 +26,22 @@ const getFileType = (extension) => {
 
 /**
  * @param {string} relativePath
+ * @param {string} watchRoot
  * @returns {string | null}
  */
-const parseActivityFolder = (relativePath) => {
+const parseActivityFolder = (relativePath, watchRoot) => {
   const parts = relativePath.split("/").filter(Boolean);
-  if (parts.length !== 2) {
-    return null;
+
+  if (parts.length === 1) {
+    // Root-level files are mapped to the watch folder name.
+    return path.basename(watchRoot);
   }
-  return parts[0];
+
+  if (parts.length === 2) {
+    return parts[0];
+  }
+
+  return null;
 };
 
 /**
@@ -52,7 +60,7 @@ export const buildFileEntry = async (filePath, watchRoot) => {
     return null;
   }
 
-  const activityFolder = parseActivityFolder(relativePath);
+  const activityFolder = parseActivityFolder(relativePath, watchRoot);
   if (!activityFolder) {
     console.warn(`[Watcher] Skipping (wrong depth): ${filePath}`);
     return null;
@@ -108,7 +116,7 @@ export const buildDeletedDescriptor = (filePath, watchRoot) => {
     return null;
   }
 
-  const activityFolder = parseActivityFolder(relativePath);
+  const activityFolder = parseActivityFolder(relativePath, watchRoot);
   if (!activityFolder) {
     console.warn(`[Watcher] Deletion skipped (wrong depth): ${filePath}`);
     return null;
@@ -137,7 +145,10 @@ export const collectInitialFiles = async (watchRoot) => {
     const rootPath = path.join(watchRoot, rootEntry.name);
 
     if (rootEntry.isFile()) {
-      console.warn(`[Scan] Skipping root-level file: ${rootPath}`);
+      const fileEntry = await buildFileEntry(rootPath, watchRoot);
+      if (fileEntry) {
+        entries.push(fileEntry);
+      }
       continue;
     }
 

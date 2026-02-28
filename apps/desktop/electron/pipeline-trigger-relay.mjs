@@ -1,9 +1,18 @@
 import { TRIGGER_DEDUP_WINDOW_MS } from "./constants.mjs";
 
-const relayEndpoint = (process.env.PIPELINE_TRIGGER_ENDPOINT ?? "").trim();
-const relayToken = (process.env.PIPELINE_TRIGGER_TOKEN ?? "").trim();
+const normalizeBase = (value) => value.replace(/\/+$/, "");
+
+const configuredRelayEndpoint = (process.env.PIPELINE_TRIGGER_ENDPOINT ?? "").trim();
+const configuredApiBase = (process.env.ORCHESTRATOR_API_BASE ?? "").trim();
+const relayEndpoint = configuredRelayEndpoint
+  ? configuredRelayEndpoint
+  : configuredApiBase
+    ? `${normalizeBase(configuredApiBase)}/trigger`
+    : "";
+const relayToken = (process.env.PIPELINE_TRIGGER_TOKEN ?? process.env.API_SECRET ?? "").trim();
 
 let warnedMissingRelay = false;
+let warnedFallbackRelay = false;
 
 /** @type {Map<string, number>} */
 const recentTriggerByKey = new Map();
@@ -45,12 +54,17 @@ export const writePipelineTrigger = async (payload) => {
     return;
   }
 
+  if (!configuredRelayEndpoint && relayEndpoint && !warnedFallbackRelay) {
+    warnedFallbackRelay = true;
+    console.warn(`[Trigger] PIPELINE_TRIGGER_ENDPOINT is missing. Using fallback: ${relayEndpoint}`);
+  }
+
   if (!relayEndpoint) {
     if (!warnedMissingRelay) {
       warnedMissingRelay = true;
       console.warn(
         "[Trigger] PIPELINE_TRIGGER_ENDPOINT is not set. " +
-          "Skipping remote trigger writes in desktop runtime."
+          "Skipping remote trigger writes in desktop runtime. Set PIPELINE_TRIGGER_ENDPOINT or ORCHESTRATOR_API_BASE."
       );
     }
     return;

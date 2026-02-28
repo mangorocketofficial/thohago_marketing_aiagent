@@ -9,7 +9,9 @@ where schemaname = 'public'
     'users',
     'organization_members',
     'contents',
+    'campaigns',
     'pipeline_triggers',
+    'orchestrator_sessions',
     'chat_messages'
   )
 order by tablename;
@@ -23,7 +25,9 @@ where schemaname = 'public'
     'users',
     'organization_members',
     'contents',
+    'campaigns',
     'pipeline_triggers',
+    'orchestrator_sessions',
     'chat_messages'
   )
 order by tablename, policyname;

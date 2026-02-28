@@ -1,7 +1,7 @@
-:root {
+﻿:root {
   font-family: "Segoe UI", "Noto Sans KR", sans-serif;
-  color: #101828;
-  background: #f3f4f6;
+  color: #0f172a;
+  background: #edf2f7;
 }
 
 * {
@@ -14,24 +14,68 @@ body {
 
 code {
   font-family: Consolas, "Courier New", monospace;
-  font-size: 0.92em;
+  font-size: 0.9em;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+h2 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+h3 {
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+
+p {
+  margin: 0;
 }
 
 .app-shell {
   min-height: 100vh;
   display: grid;
-  place-items: center;
+  gap: 16px;
+  align-content: start;
   padding: 20px;
-  background: radial-gradient(circle at top left, #dcecff 0%, #f3f4f6 45%, #e8ebf0 100%);
+  background: radial-gradient(circle at top left, #dcecff 0%, #eff2f7 45%, #e4e8ef 100%);
 }
 
 .panel {
-  width: min(980px, 100%);
-  background: rgba(255, 255, 255, 0.94);
+  width: min(1260px, 100%);
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid #d6dce4;
   border-radius: 16px;
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
-  padding: 24px;
+  padding: 18px;
+}
+
+.panel-split {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 14px;
+}
+
+.subpanel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+  background: #f8fafc;
+  display: grid;
+  gap: 12px;
+  min-height: 540px;
+  align-content: start;
+}
+
+.sub-description {
+  color: #475467;
+  font-size: 14px;
 }
 
 .eyebrow {
@@ -45,7 +89,7 @@ code {
 
 h1 {
   margin: 0 0 10px;
-  font-size: 31px;
+  font-size: 30px;
   line-height: 1.2;
 }
 
@@ -55,7 +99,7 @@ h1 {
 }
 
 .button-row {
-  margin-top: 16px;
+  margin-top: 10px;
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -66,13 +110,18 @@ button {
   background: #fff;
   color: #0f172a;
   border-radius: 10px;
-  padding: 10px 13px;
+  padding: 9px 13px;
   font-size: 14px;
   cursor: pointer;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   border-color: #8ba7d1;
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 button.primary {
@@ -82,30 +131,119 @@ button.primary {
 }
 
 .meta {
-  margin-top: 14px;
+  margin-top: 10px;
   color: #475467;
 }
 
 .meta-grid {
-  margin-top: 16px;
+  margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 6px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 7px 14px;
 }
 
 .meta-grid p {
-  margin: 0;
   color: #364152;
 }
 
 .notice {
-  margin-top: 12px;
+  margin-top: 8px;
   color: #8a1f35;
   font-size: 14px;
 }
 
+.chat-list,
+.queue-list {
+  border: 1px solid #d8e0ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.chat-item {
+  border: 1px solid #e4e8ef;
+  border-radius: 10px;
+  padding: 9px;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-assistant {
+  background: #f0f7ff;
+}
+
+.chat-user {
+  background: #f7f0ff;
+}
+
+.chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.chat-item p {
+  white-space: pre-wrap;
+  line-height: 1.42;
+}
+
+.campaign-card {
+  border: 1px solid #bfd5f5;
+  background: #e9f1ff;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.chat-input-row input {
+  border: 1px solid #c8d2e1;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.queue-item {
+  border: 1px solid #e4e8ef;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.queue-meta {
+  display: grid;
+  gap: 3px;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.queue-body {
+  white-space: pre-wrap;
+  color: #111827;
+  line-height: 1.42;
+  font-size: 14px;
+}
+
+.empty {
+  color: #6b7280;
+  font-size: 14px;
+}
+
 .table-wrap {
-  margin-top: 20px;
+  margin-top: 12px;
   overflow-x: auto;
 }
 
@@ -127,4 +265,14 @@ th {
   background: #f8fafc;
   font-weight: 600;
   color: #344054;
+}
+
+@media (max-width: 1024px) {
+  .panel-split {
+    grid-template-columns: 1fr;
+  }
+
+  .subpanel {
+    min-height: 420px;
+  }
 }
