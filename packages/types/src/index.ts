@@ -140,3 +140,27 @@ export type OrchestratorSession = {
   created_at: string;
   updated_at: string;
 };
+
+export type OnboardingStep =
+  | "intro"
+  | "account_auth"
+  | "url_input"
+  | "brand_review"
+  | "interview"
+  | "result_doc"
+  | "folder_setup"
+  | "summary_tutorial";
+
+export type OnboardingDraftUrls = {
+  websiteUrl: string;
+  naverBlogUrl: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  youtubeUrl: string;
+  threadsUrl: string;
+};
+
+export type AuthSessionSummary = {
+  userId: string;
+  email: string | null;
+};

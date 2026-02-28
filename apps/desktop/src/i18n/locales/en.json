@@ -1,0 +1,77 @@
+{
+  "onboarding": {
+    "steps": {
+      "0": "Intro",
+      "1": "Account",
+      "2": "URLs",
+      "3": "Brand Review",
+      "4": "Interview",
+      "5": "Result Draft",
+      "6": "Folder Setup",
+      "7": "Summary"
+    },
+    "intro": {
+      "greeting": "Hello!",
+      "intro": "I'm Ddo-Daeri,\nyour new marketing coworker.",
+      "promise": "I will guide you through onboarding.",
+      "cta": "Start"
+    },
+    "auth": {
+      "title": "Connect your account",
+      "description": "Sign in with email or Google to initialize your organization context.",
+      "name": "Name",
+      "email": "Email",
+      "password": "Password",
+      "signIn": "Sign in with email",
+      "signUp": "Create account with email",
+      "google": "Continue with Google",
+      "continue": "Continue"
+    },
+    "urls": {
+      "title": "Enter your brand channel URLs",
+      "description": "Website and social links are optional. Enter what you have.",
+      "website": "Website URL",
+      "naverBlog": "Naver Blog URL",
+      "instagram": "Instagram URL",
+      "facebook": "Facebook URL",
+      "threads": "Threads URL",
+      "next": "Continue to Brand Review",
+      "youtube": "YouTube URL"
+    },
+    "review": {
+      "title": "Preparing brand review",
+      "description": "Phase 1-6a validates flow and UI only. Real crawling is enabled in 1-6b.",
+      "next": "Start interview"
+    },
+    "interview": {
+      "title": "4-question interview",
+      "description": "This is a temporary input form in 1-6a. Live interview arrives in 1-6b.",
+      "q1": "Q1. How would you describe your current brand tone?",
+      "q2": "Q2. Who is your primary audience?",
+      "q3": "Q3. Any forbidden words or topics?",
+      "q4": "Q4. What are your key campaign seasons?",
+      "next": "Open result draft"
+    },
+    "result": {
+      "title": "Result document preview",
+      "description": "1-6a ships the skeleton. 1-6b will synthesize review + interview output.",
+      "next": "Set marketing folder"
+    },
+    "folder": {
+      "title": "Set your marketing folder",
+      "description": "Ddo-Daeri watches this folder for project materials.",
+      "choose": "Choose existing folder",
+      "create": "Create new folder",
+      "selected": "Selected folder",
+      "next": "Summary and tutorial"
+    },
+    "summary": {
+      "title": "You're ready",
+      "description": "Press Start to open dashboard and begin watcher runtime.",
+      "cta": "Start"
+    },
+    "language": "Language",
+    "back": "Back",
+    "error": "Something went wrong."
+  }
+}

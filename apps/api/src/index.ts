@@ -2,6 +2,7 @@ import express from "express";
 import { env } from "./lib/env";
 import { supabaseAdmin } from "./lib/supabase-admin";
 import { healthRouter } from "./routes/health";
+import { onboardingRouter } from "./routes/onboarding";
 import { sessionsRouter } from "./routes/sessions";
 import { triggerRouter } from "./routes/trigger";
 
@@ -16,6 +17,7 @@ app.use(
 app.use(healthRouter);
 app.use(triggerRouter);
 app.use(sessionsRouter);
+app.use(onboardingRouter);
 
 app.use((_req, res) => {
   res.status(404).json({

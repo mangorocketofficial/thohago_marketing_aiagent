@@ -9,9 +9,21 @@ const { app } = electron;
 
 const CONFIG_FILENAME = "desktop-config.json";
 
+const defaultOnboardingDraft = () => ({
+  websiteUrl: "",
+  naverBlogUrl: "",
+  instagramUrl: "",
+  facebookUrl: "",
+  youtubeUrl: "",
+  threadsUrl: ""
+});
+
 const defaultConfig = () => ({
   watchPath: "",
-  orgId: SEED_ORG_ID
+  orgId: SEED_ORG_ID,
+  language: "ko",
+  onboardingCompleted: false,
+  onboardingDraft: defaultOnboardingDraft()
 });
 
 const getConfigPath = () => path.join(app.getPath("userData"), CONFIG_FILENAME);
@@ -25,9 +37,18 @@ const readConfig = () => {
   try {
     const raw = fs.readFileSync(configPath, "utf8");
     const parsed = JSON.parse(raw);
+    const parsedDraft =
+      parsed?.onboardingDraft && typeof parsed.onboardingDraft === "object"
+        ? parsed.onboardingDraft
+        : {};
+
     return {
       ...defaultConfig(),
-      ...parsed
+      ...parsed,
+      onboardingDraft: {
+        ...defaultOnboardingDraft(),
+        ...parsedDraft
+      }
     };
   } catch {
     return defaultConfig();
@@ -56,5 +77,35 @@ export const saveOrgId = (orgId) => {
   return writeConfig({
     ...current,
     orgId
+  });
+};
+
+export const saveLanguage = (language) => {
+  const normalized = String(language || "").trim().toLowerCase() === "en" ? "en" : "ko";
+  const current = readConfig();
+  return writeConfig({
+    ...current,
+    language: normalized
+  });
+};
+
+export const saveOnboardingCompleted = (onboardingCompleted) => {
+  const current = readConfig();
+  return writeConfig({
+    ...current,
+    onboardingCompleted: !!onboardingCompleted
+  });
+};
+
+export const saveOnboardingDraft = (patch) => {
+  const current = readConfig();
+  const nextPatch = patch && typeof patch === "object" ? patch : {};
+  return writeConfig({
+    ...current,
+    onboardingDraft: {
+      ...defaultOnboardingDraft(),
+      ...current.onboardingDraft,
+      ...nextPatch
+    }
   });
 };

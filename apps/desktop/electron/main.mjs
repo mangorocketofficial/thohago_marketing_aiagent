@@ -1,9 +1,18 @@
 import fs from "node:fs";
+import { createServer } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SEED_ORG_ID } from "./constants.mjs";
-import { getDesktopConfig, saveOrgId, saveWatchPath } from "./config-store.mjs";
+import {
+  getDesktopConfig,
+  saveLanguage,
+  saveOnboardingCompleted,
+  saveOnboardingDraft,
+  saveOrgId,
+  saveWatchPath
+} from "./config-store.mjs";
 import {
   clearFileIndex,
   getActiveFiles,
@@ -12,6 +21,7 @@ import {
   upsertFile
 } from "./file-index.mjs";
 import { writePipelineTrigger } from "./pipeline-trigger-relay.mjs";
+import { clearAuthSession, loadAuthSession, saveAuthSession } from "./secure-auth-store.mjs";
 import { collectInitialFiles, startWatcher } from "./watcher.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +36,9 @@ const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 const configuredDesktopToken = (process.env.DESKTOP_SUPABASE_ACCESS_TOKEN ?? "").trim();
 const fallbackRlsToken = (process.env.RLS_TEST_USER_TOKEN ?? "").trim();
+const oauthCallbackPort = Number.parseInt((process.env.DESKTOP_OAUTH_CALLBACK_PORT ?? "48721").trim(), 10);
+const oauthCallbackHost = (process.env.DESKTOP_OAUTH_CALLBACK_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
+const oauthCallbackTimeoutMs = Number.parseInt((process.env.DESKTOP_OAUTH_TIMEOUT_MS ?? "90000").trim(), 10);
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -37,6 +50,9 @@ let runtimeTask = Promise.resolve();
 const runtimeState = {
   watchPath: "",
   orgId: SEED_ORG_ID,
+  language: "ko",
+  onboardingCompleted: false,
+  authSession: null,
   isRunning: false,
   initialScanCount: 0
 };
@@ -63,8 +79,11 @@ const resolveOrchestratorApiBase = () => {
 
 const orchestratorApiBase = resolveOrchestratorApiBase();
 
-const buildIdempotencyKey = (action, id = "") =>
-  `desktop:${action}:${id}:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`;
+const buildIdempotencyKey = (action, parts = []) => {
+  const normalized = parts.map((part) => String(part ?? "").trim()).join("|");
+  const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+  return `desktop:${action}:${digest}`;
+};
 
 const parseJsonResponse = async (response) => {
   const text = await response.text();
@@ -120,7 +139,85 @@ const parseJwtExpiration = (token) => {
   }
 };
 
+const parseAuthSessionPayload = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const row = payload;
+  const accessToken = typeof row.accessToken === "string" ? row.accessToken.trim() : "";
+  const refreshToken = typeof row.refreshToken === "string" ? row.refreshToken.trim() : "";
+  const expiresAt = typeof row.expiresAt === "number" && Number.isFinite(row.expiresAt) ? row.expiresAt : null;
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt
+  };
+};
+
+const isStorageUnavailableError = (error) => {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("encryption") || message.includes("safestorage") || message.includes("safe storage");
+};
+
+const isSessionExpired = (sessionPayload) => {
+  if (!sessionPayload?.accessToken) {
+    return true;
+  }
+
+  const expFromPayload =
+    typeof sessionPayload.expiresAt === "number" && Number.isFinite(sessionPayload.expiresAt)
+      ? sessionPayload.expiresAt
+      : parseJwtExpiration(sessionPayload.accessToken);
+  if (!expFromPayload) {
+    return false;
+  }
+
+  return Date.now() >= expFromPayload * 1000;
+};
+
+const randomBase64Url = (bytes = 32) => {
+  return randomBytes(bytes).toString("base64url");
+};
+
+const toCodeChallenge = (codeVerifier) =>
+  createHash("sha256").update(String(codeVerifier || ""), "utf8").digest("base64url");
+
+const parseIntegerString = (value) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+};
+
 const resolveSupabaseAccessToken = () => {
+  const runtimeToken = runtimeState.authSession?.accessToken ?? "";
+  if (runtimeToken) {
+    if (isSessionExpired(runtimeState.authSession)) {
+      return {
+        token: "",
+        message: "Desktop user session is expired. Sign in again to restore Realtime/data access."
+      };
+    }
+    return {
+      token: runtimeToken,
+      message: null
+    };
+  }
+
   const candidate = configuredDesktopToken || fallbackRlsToken;
   if (!candidate) {
     return {
@@ -185,12 +282,30 @@ const createWindow = async () => {
   return win;
 };
 
+const getDesktopRuntimeConfig = () => {
+  const config = getDesktopConfig();
+  return {
+    watchPath: (config.watchPath || "").trim(),
+    orgId: (config.orgId || SEED_ORG_ID).trim() || SEED_ORG_ID,
+    language: (config.language || "ko").trim().toLowerCase() === "en" ? "en" : "ko",
+    onboardingCompleted: !!config.onboardingCompleted,
+    onboardingDraft: {
+      websiteUrl: config.onboardingDraft?.websiteUrl ?? "",
+      naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? "",
+      instagramUrl: config.onboardingDraft?.instagramUrl ?? "",
+      facebookUrl: config.onboardingDraft?.facebookUrl ?? "",
+      youtubeUrl: config.onboardingDraft?.youtubeUrl ?? "",
+      threadsUrl: config.onboardingDraft?.threadsUrl ?? ""
+    }
+  };
+};
+
 const getWatcherStatus = () => ({
   watchPath: runtimeState.watchPath || null,
   orgId: runtimeState.orgId,
   fileCount: getActiveFiles().length,
   isRunning: runtimeState.isRunning,
-  requiresOnboarding: !runtimeState.watchPath
+  requiresOnboarding: !runtimeState.onboardingCompleted || !runtimeState.watchPath
 });
 
 const emitWatcherStatus = () => {
@@ -315,7 +430,303 @@ const getChatRuntimeConfig = () => ({
   })()
 });
 
+const runGoogleOAuthWithSystemBrowser = async () => {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Supabase env is incomplete for OAuth.");
+  }
+  if (!Number.isFinite(oauthCallbackPort) || oauthCallbackPort <= 0) {
+    throw new Error("DESKTOP_OAUTH_CALLBACK_PORT is invalid.");
+  }
+  if (!Number.isFinite(oauthCallbackTimeoutMs) || oauthCallbackTimeoutMs <= 0) {
+    throw new Error("DESKTOP_OAUTH_TIMEOUT_MS is invalid.");
+  }
+
+  const codeVerifier = randomBase64Url(64);
+  const codeChallenge = toCodeChallenge(codeVerifier);
+  const redirectUri = `http://${oauthCallbackHost}:${oauthCallbackPort}/auth/callback`;
+  console.log(`[Auth] Starting Google OAuth. callback=${redirectUri}`);
+
+  const callbackResult = await new Promise((resolve, reject) => {
+    let settled = false;
+    const settleResolve = (payload) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(payload);
+      void server.close();
+    };
+    const settleReject = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+      void server.close();
+    };
+
+    const server = createServer((req, res) => {
+      try {
+        const base = "http://127.0.0.1";
+        const requestUrl = new URL(req.url || "/", base);
+        const normalizedPath = requestUrl.pathname.replace(/\/+$/, "");
+        console.log(`[Auth] OAuth callback request: path=${requestUrl.pathname} query=${requestUrl.search}`);
+        if (normalizedPath !== "/auth/callback") {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Not Found");
+          return;
+        }
+
+        const code = requestUrl.searchParams.get("code") ?? "";
+        const error = requestUrl.searchParams.get("error");
+        const errorDescription = requestUrl.searchParams.get("error_description");
+        const accessToken = requestUrl.searchParams.get("access_token") ?? "";
+        const refreshToken = requestUrl.searchParams.get("refresh_token") ?? "";
+        const expiresAtRaw = requestUrl.searchParams.get("expires_at");
+        const expiresInRaw = requestUrl.searchParams.get("expires_in");
+
+        if (error) {
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end("<h1>Sign-in failed</h1><p>You can close this tab and return to Thohago.</p>");
+          settleReject(new Error(errorDescription || error));
+          return;
+        }
+
+        if (code) {
+          console.log("[Auth] OAuth callback received auth code.");
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end("<h1>Sign-in complete</h1><p>You can close this tab and return to Thohago.</p>");
+          settleResolve({
+            kind: "code",
+            code,
+            redirectUri
+          });
+          return;
+        }
+
+        if (accessToken && refreshToken) {
+          const expiresAtFromQuery = parseIntegerString(expiresAtRaw);
+          const expiresInSeconds = parseIntegerString(expiresInRaw);
+          const expiresAt =
+            expiresAtFromQuery ??
+            (expiresInSeconds !== null
+              ? Math.floor(Date.now() / 1000) + Math.max(1, expiresInSeconds)
+              : parseJwtExpiration(accessToken));
+
+          console.log("[Auth] OAuth callback received implicit tokens.");
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end("<h1>Sign-in complete</h1><p>You can close this tab and return to Thohago.</p>");
+          settleResolve({
+            kind: "tokens",
+            accessToken: accessToken.trim(),
+            refreshToken: refreshToken.trim(),
+            expiresAt
+          });
+          return;
+        }
+
+        if (!requestUrl.search || requestUrl.search === "?") {
+          // Some OAuth flows return tokens in URL hash (#...), not query params.
+          // Hash is not sent to the server, so we rewrite hash data into query params.
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Completing sign-in</title>
+  </head>
+  <body>
+    <h1>Completing sign-in...</h1>
+    <p>If this does not continue, close this tab and retry Google sign-in.</p>
+    <script>
+      (() => {
+        const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+        if (!hash) {
+          document.body.innerHTML = "<h1>Sign-in failed</h1><p>No authorization data was returned.</p>";
+          return;
+        }
+        const params = new URLSearchParams(hash);
+        const nextUrl = new URL(window.location.href);
+        params.forEach((value, key) => {
+          nextUrl.searchParams.set(key, value);
+        });
+        window.location.replace(nextUrl.pathname + "?" + nextUrl.searchParams.toString());
+      })();
+    </script>
+  </body>
+</html>`);
+          return;
+        }
+
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end("<h1>Invalid callback</h1><p>You can close this tab and try again.</p>");
+        settleReject(new Error("OAuth callback did not include code or tokens."));
+      } catch (error) {
+        settleReject(error);
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      settleReject(
+        new Error(
+          `OAuth callback timed out. Expected ${redirectUri}. Confirm this exact URL is in Supabase Auth Redirect URLs and try again.`
+        )
+      );
+    }, oauthCallbackTimeoutMs);
+
+    server.once("error", (error) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "EADDRINUSE") {
+        settleReject(
+          new Error(
+            `OAuth callback port ${oauthCallbackPort} is already in use. Close the conflicting process or change DESKTOP_OAUTH_CALLBACK_PORT.`
+          )
+        );
+        return;
+      }
+      settleReject(error);
+    });
+
+    server.once("close", () => {
+      clearTimeout(timeout);
+    });
+
+    server.listen(oauthCallbackPort, async () => {
+      try {
+        const authorizeUrl = new URL("/auth/v1/authorize", supabaseUrl);
+        authorizeUrl.searchParams.set("provider", "google");
+        authorizeUrl.searchParams.set("redirect_to", redirectUri);
+        authorizeUrl.searchParams.set("code_challenge", codeChallenge);
+        authorizeUrl.searchParams.set("code_challenge_method", "s256");
+        authorizeUrl.searchParams.set("flow_type", "pkce");
+        authorizeUrl.searchParams.set("response_type", "code");
+        authorizeUrl.searchParams.set("scope", "email profile");
+
+        console.log("[Auth] Opening system browser for Google OAuth.");
+        console.log(`[Auth] Authorize URL: ${authorizeUrl.toString()}`);
+        await shell.openExternal(authorizeUrl.toString());
+      } catch (error) {
+        settleReject(error);
+      }
+    });
+  });
+
+  if (callbackResult?.kind === "tokens") {
+    return {
+      accessToken: callbackResult.accessToken,
+      refreshToken: callbackResult.refreshToken,
+      expiresAt: callbackResult.expiresAt ?? parseJwtExpiration(callbackResult.accessToken)
+    };
+  }
+
+  const tokenUrl = new URL("/auth/v1/token?grant_type=pkce", supabaseUrl);
+  const tokenResponse = await fetch(tokenUrl.toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: supabaseAnonKey
+    },
+    body: JSON.stringify({
+      auth_code: callbackResult.code,
+      code_verifier: codeVerifier,
+      redirect_uri: callbackResult.redirectUri
+    })
+  });
+
+  const tokenBody = await parseJsonResponse(tokenResponse);
+  if (!tokenResponse.ok) {
+    const message = tokenBody?.error_description ?? tokenBody?.error ?? `HTTP ${tokenResponse.status}`;
+    throw new Error(typeof message === "string" ? message : `HTTP ${tokenResponse.status}`);
+  }
+
+  const accessToken = typeof tokenBody?.access_token === "string" ? tokenBody.access_token.trim() : "";
+  const refreshToken = typeof tokenBody?.refresh_token === "string" ? tokenBody.refresh_token.trim() : "";
+  const expiresIn =
+    typeof tokenBody?.expires_in === "number" && Number.isFinite(tokenBody.expires_in)
+      ? tokenBody.expires_in
+      : null;
+  if (!accessToken || !refreshToken) {
+    throw new Error("OAuth token exchange failed: missing access/refresh token.");
+  }
+
+  const expiresAt =
+    expiresIn !== null
+      ? Math.floor(Date.now() / 1000) + Math.max(1, Math.floor(expiresIn))
+      : parseJwtExpiration(accessToken);
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt
+  };
+};
+
 const registerIpcHandlers = () => {
+  ipcMain.handle("app:get-config", () => getDesktopRuntimeConfig());
+
+  ipcMain.handle("app:set-language", async (_, payload) => {
+    const language = (payload?.language ?? "").trim().toLowerCase() === "en" ? "en" : "ko";
+    saveLanguage(language);
+    runtimeState.language = language;
+    return getDesktopRuntimeConfig();
+  });
+
+  ipcMain.handle("auth:get-stored-session", () => {
+    if (runtimeState.authSession && !isSessionExpired(runtimeState.authSession)) {
+      return runtimeState.authSession;
+    }
+
+    const stored = loadAuthSession();
+    if (!stored || isSessionExpired(stored)) {
+      return null;
+    }
+
+    runtimeState.authSession = stored;
+    return stored;
+  });
+
+  ipcMain.handle("auth:save-session", async (_, payload) => {
+    const normalized = parseAuthSessionPayload(payload);
+    if (!normalized) {
+      throw new Error("Invalid auth session payload.");
+    }
+
+    try {
+      const persisted = saveAuthSession(normalized);
+      runtimeState.authSession = persisted;
+      return persisted;
+    } catch (error) {
+      if (!isStorageUnavailableError(error)) {
+        throw error;
+      }
+
+      console.warn("[Auth] secure session persistence unavailable; using in-memory session only.");
+      runtimeState.authSession = normalized;
+      return normalized;
+    }
+  });
+
+  ipcMain.handle("auth:clear-session", async () => {
+    clearAuthSession();
+    runtimeState.authSession = null;
+    return { ok: true };
+  });
+
+  ipcMain.handle("auth:start-google-oauth", async () => {
+    const sessionPayload = await runGoogleOAuthWithSystemBrowser();
+    try {
+      const persisted = saveAuthSession(sessionPayload);
+      runtimeState.authSession = persisted;
+      return persisted;
+    } catch (error) {
+      if (!isStorageUnavailableError(error)) {
+        throw error;
+      }
+
+      console.warn("[Auth] secure session persistence unavailable; using in-memory session only.");
+      runtimeState.authSession = sessionPayload;
+      return sessionPayload;
+    }
+  });
+
   ipcMain.handle("watcher:get-status", () => getWatcherStatus());
 
   ipcMain.handle("watcher:get-files", () => getActiveFiles().map((entry) => toRendererEntry(entry)));
@@ -330,6 +741,50 @@ const registerIpcHandlers = () => {
       ok: result === "",
       message: result || null
     };
+  });
+
+  ipcMain.handle("onboarding:save-draft", async (_, payload) => {
+    const rawPatch = payload?.draftPatch;
+    const patch = rawPatch && typeof rawPatch === "object" ? rawPatch : {};
+    saveOnboardingDraft(patch);
+    return getDesktopRuntimeConfig();
+  });
+
+  ipcMain.handle("onboarding:set-org-id", async (_, payload) => {
+    const orgId = (payload?.orgId ?? "").trim();
+    if (!orgId) {
+      throw new Error("orgId is required.");
+    }
+
+    saveOrgId(orgId);
+    runtimeState.orgId = orgId;
+    return getDesktopRuntimeConfig();
+  });
+
+  ipcMain.handle("onboarding:bootstrap-org", async (_, payload) => {
+    const accessToken = (payload?.accessToken ?? "").trim();
+    if (!accessToken) {
+      throw new Error("accessToken is required.");
+    }
+
+    const body = await callOrchestratorApi("/onboarding/bootstrap-org", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        name: typeof payload?.name === "string" ? payload.name.trim() : "",
+        org_name: typeof payload?.orgName === "string" ? payload.orgName.trim() : ""
+      })
+    });
+
+    const orgId = (body?.org?.id ?? "").trim();
+    if (orgId) {
+      saveOrgId(orgId);
+      runtimeState.orgId = orgId;
+    }
+
+    return body;
   });
 
   ipcMain.handle("onboarding:choose-folder", async () => {
@@ -370,6 +825,7 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle("onboarding:complete", async (_, payload) => {
     const watchPath = (payload?.watchPath ?? "").trim();
+    const payloadOrgId = (payload?.orgId ?? "").trim();
     if (!watchPath) {
       throw new Error("watchPath is required");
     }
@@ -379,13 +835,16 @@ const registerIpcHandlers = () => {
       throw new Error(`watchPath is invalid: ${resolvedPath}`);
     }
 
+    const resolvedOrgId = payloadOrgId || runtimeState.orgId || SEED_ORG_ID;
     saveWatchPath(resolvedPath);
-    saveOrgId(SEED_ORG_ID);
+    saveOrgId(resolvedOrgId);
+    saveOnboardingCompleted(true);
 
     runtimeState.watchPath = resolvedPath;
-    runtimeState.orgId = SEED_ORG_ID;
+    runtimeState.orgId = resolvedOrgId;
+    runtimeState.onboardingCompleted = true;
 
-    await enqueueRuntimeStart(resolvedPath, SEED_ORG_ID);
+    await enqueueRuntimeStart(resolvedPath, resolvedOrgId);
     return getWatcherStatus();
   });
 
@@ -432,7 +891,7 @@ const registerIpcHandlers = () => {
         body: JSON.stringify({
           event_type: "user_message",
           payload: { content },
-          idempotency_key: buildIdempotencyKey("user_message", sessionId)
+          idempotency_key: buildIdempotencyKey("user_message", [sessionId, content])
         })
       });
 
@@ -466,7 +925,7 @@ const registerIpcHandlers = () => {
         body: JSON.stringify({
           event_type: "campaign_approved",
           payload: { campaign_id: campaignId },
-          idempotency_key: buildIdempotencyKey("campaign_approved", campaignId)
+          idempotency_key: buildIdempotencyKey("campaign_approved", [sessionId, campaignId])
         })
       });
 
@@ -500,7 +959,7 @@ const registerIpcHandlers = () => {
         body: JSON.stringify({
           event_type: "content_approved",
           payload: { content_id: contentId },
-          idempotency_key: buildIdempotencyKey("content_approved", contentId)
+          idempotency_key: buildIdempotencyKey("content_approved", [sessionId, contentId])
         })
       });
 
@@ -551,7 +1010,7 @@ const registerIpcHandlers = () => {
             ...(targetType === "campaign" ? { campaign_id: id } : { content_id: id }),
             ...(reason ? { reason } : {})
           },
-          idempotency_key: buildIdempotencyKey(eventType, id)
+          idempotency_key: buildIdempotencyKey(eventType, [sessionId, id, reason])
         })
       });
 
@@ -578,14 +1037,18 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   await waitForWindowReady(mainWindow);
 
-  const config = getDesktopConfig();
-  runtimeState.orgId = (config.orgId || SEED_ORG_ID).trim() || SEED_ORG_ID;
+  const config = getDesktopRuntimeConfig();
+  runtimeState.orgId = config.orgId;
+  runtimeState.watchPath = config.watchPath;
+  runtimeState.language = config.language;
+  runtimeState.onboardingCompleted = config.onboardingCompleted;
+  const storedAuth = loadAuthSession();
+  runtimeState.authSession = storedAuth && !isSessionExpired(storedAuth) ? storedAuth : null;
 
-  if (!config.watchPath) {
+  if (!config.onboardingCompleted || !config.watchPath) {
     emitWatcherStatus();
     mainWindow.webContents.send("app:show-onboarding");
   } else {
-    runtimeState.watchPath = config.watchPath;
     emitWatcherStatus();
     await enqueueRuntimeStart(config.watchPath, runtimeState.orgId);
   }

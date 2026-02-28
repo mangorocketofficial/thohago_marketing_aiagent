@@ -23,6 +23,21 @@ type WatcherStatus = {
   requiresOnboarding: boolean;
 };
 
+type DesktopAppConfig = {
+  watchPath: string;
+  orgId: string;
+  language: "ko" | "en";
+  onboardingCompleted: boolean;
+  onboardingDraft: {
+    websiteUrl: string;
+    naverBlogUrl: string;
+    instagramUrl: string;
+    facebookUrl: string;
+    youtubeUrl: string;
+    threadsUrl: string;
+  };
+};
+
 type WatcherOpenFolderResult = {
   ok: boolean;
   message: string | null;
@@ -67,10 +82,26 @@ type ChatResumeResult = {
   idempotent?: boolean;
 };
 
+type SecureAuthSession = {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number | null;
+};
+
 declare global {
   interface Window {
     desktopRuntime: {
       platform: string;
+      app: {
+        getConfig: () => Promise<DesktopAppConfig>;
+        setLanguage: (language: "ko" | "en") => Promise<DesktopAppConfig>;
+      };
+      auth: {
+        getStoredSession: () => Promise<SecureAuthSession | null>;
+        saveSession: (payload: SecureAuthSession) => Promise<SecureAuthSession>;
+        clearSession: () => Promise<{ ok: boolean }>;
+        startGoogleOAuth: () => Promise<SecureAuthSession>;
+      };
       watcher: {
         onFileIndexed: (cb: (entry: RendererFileEntry) => void) => () => void;
         onFileDeleted: (cb: (entry: { relativePath: string; fileName: string }) => void) => () => void;
@@ -82,9 +113,27 @@ declare global {
         openFolder: () => Promise<WatcherOpenFolderResult>;
       };
       onboarding: {
+        saveDraft: (draftPatch: Partial<DesktopAppConfig["onboardingDraft"]>) => Promise<DesktopAppConfig>;
+        setOrgId: (orgId: string) => Promise<DesktopAppConfig>;
+        bootstrapOrg: (payload: {
+          accessToken: string;
+          name?: string;
+          orgName?: string;
+        }) => Promise<{
+          ok: boolean;
+          created: boolean;
+          org: {
+            id: string;
+            name: string;
+            org_type: string;
+          };
+          membership: {
+            role: "owner" | "admin" | "member";
+          };
+        }>;
         chooseFolder: () => Promise<string | null>;
         createFolder: () => Promise<string | null>;
-        complete: (watchPath: string) => Promise<WatcherStatus>;
+        complete: (payload: { watchPath: string; orgId?: string }) => Promise<WatcherStatus>;
       };
       chat: {
         onActionResult: (cb: (payload: ChatActionResult) => void) => () => void;

@@ -105,6 +105,49 @@ h1 {
   flex-wrap: wrap;
 }
 
+.onboarding-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.onboarding-stepper {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-chip {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-form input,
+.auth-form textarea {
+  border: 1px solid #c8d2e1;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.auth-form textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 button {
   border: 1px solid #c4cedc;
   background: #fff;
