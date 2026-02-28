@@ -1,6 +1,9 @@
 # Phase 1-2 Development Request
 ## Marketing AI Agent Platform — Local File Watcher Daemon
 
+> Status update (2026-02-28): Superseded by Electron pivot (`docs/architecture-pivot-electron.md`).  
+> `services/daemon` and cloud `local_files` indexing are deprecated starting Phase 1-3.
+
 ---
 
 ## Overview

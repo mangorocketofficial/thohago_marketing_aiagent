@@ -1,7 +1,8 @@
-# 마케팅 AI 에이전트 전체 아키텍처 문서
+﻿# 마케팅 AI 에이전트 전체 아키텍처 문서
 > 비영리 · NGO · 소셜벤처 · 사회적기업 특화 마케팅 자동화 플랫폼
 
 > 구현 우선순위 노트 (2026-02-27): Phase 1-1은 `docs/phase-1-1-dev-request.md`를 정본으로 구현하며, 해당 문서의 구조/스택 결정이 본 아키텍처 문서보다 우선합니다.
+> 피벗 노트 (2026-02-28): Phase 1-3부터 런타임/인터페이스 기준은 `docs/architecture-pivot-electron.md`를 우선 적용합니다.
 
 ---
 
@@ -42,7 +43,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                   레이어 4 - 인터페이스                    │
 │                                                         │
-│   [Next.js 대시보드]  [텔레그램 봇]  [로컬 데몬 .exe]      │
+│   [Electron 데스크탑 앱(메인)]  [텔레그램 봇(모바일 보조)]   │
 └─────────────────────────┬───────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────┐
@@ -62,7 +63,7 @@
 ┌─────────────────────────▼───────────────────────────────┐
 │                   레이어 1 - 데이터                        │
 │                                                         │
-│   [Supabase PostgreSQL + pgvector + Storage + RLS]      │
+│ [Supabase(PostgreSQL + Realtime + RLS)] + [로컬 파일시스템] │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -74,27 +75,22 @@
 /marketing-ai-agent                    ← 프로젝트 루트 (Turborepo)
 │
 ├── apps/                              ← 실행 애플리케이션
-│   ├── web/                           ← Next.js 대시보드
-│   └── telegram/                      ← 텔레그램 봇
+│   ├── desktop/                       ← Electron + React 메인 앱
+│   └── telegram/                      ← 텔레그램 봇 (모바일 보조)
 │
 ├── packages/                          ← 공유 패키지
 │   ├── types/                         ← 공통 TypeScript 타입
-│   ├── db/                            ← Supabase 스키마 + 쿼리
-│   ├── rag/                           ← pgvector 임베딩 로직
-│   ├── ai-agents/                     ← LangGraph 오케스트레이터
+│   ├── db/                            ← Supabase 클라이언트 + 쿼리
 │   └── config/                        ← 공통 설정 (eslint, tsconfig 등)
 │
-├── services/                          ← 서비스 모듈 (9개)
-│   ├── daemon/                        ← Python 로컬 파일 감시 데몬 (Phase 1-1 위치)
-│   ├── onboarding/                    ← 모듈 01: 온보딩
-│   ├── brand-review/                  ← 모듈 02: 브랜드 리뷰
-│   ├── campaign/                      ← 모듈 03: 캠페인 계획
-│   ├── content-gen/                   ← 모듈 04: 콘텐츠 생성
-│   ├── email-automation/              ← 모듈 05: 이메일 자동화
-│   ├── fundraising/                   ← 모듈 06: 모금 연동
-│   ├── community/                     ← 모듈 07: 댓글/커뮤니티
-│   ├── monitoring/                    ← 모듈 08: 외부 모니터링
-│   └── analytics/                     ← 모듈 09: 성과 분석
+├── supabase/
+│   ├── migrations/                    ← DB 마이그레이션
+│   ├── seed.sql
+│   └── verify-rls.sql
+│
+├── docs/
+│   ├── marketing-ai-agent-architecture_1.md
+│   └── architecture-pivot-electron.md
 │
 ├── turbo.json                         ← Turborepo 설정
 ├── pnpm-workspace.yaml
@@ -108,9 +104,10 @@
 ### 4.1 기술 스택
 - **DB**: Supabase (PostgreSQL)
 - **벡터 검색**: pgvector 익스텐션 (RAG용)
-- **파일 스토리지**: Supabase Storage (이미지/영상)
+- **로컬 파일 저장소**: Desktop 로컬 파일시스템 (raw/processed 파일)
+- **클라우드 데이터 계층**: Supabase (동기화/백업/자산 데이터)
 - **보안**: Row Level Security (RLS) - 기관별 데이터 완전 분리
-- **실시간**: Supabase Realtime (채팅 동기화)
+- **실시간**: Supabase Realtime (Electron ↔ Telegram 상태 동기화)
 
 ### 4.2 멀티테넌트 구조
 
@@ -335,10 +332,10 @@ class MarketingState(TypedDict):
 
 ## 7. 레이어 4 - 인터페이스
 
-### 7.1 Next.js 대시보드
+### 7.1 Electron 데스크탑 앱 (메인 인터페이스)
 
 ```
-대시보드 메뉴 구조
+데스크탑 앱 메뉴 구조
 ├── 홈 (대시보드)
 │   ├── 승인 대기 건수
 │   ├── 이번 주 발행 예정
@@ -358,47 +355,48 @@ class MarketingState(TypedDict):
 │   └── 도메인 벤치마크
 │
 ├── 채팅 (에이전트 대화)
-│   └── PC용 채팅 UI (텔레그램과 동일 대화 공유)
+│   └── 데스크탑 채팅 UI (텔레그램과 동일 대화 공유)
 │
 └── 설정
     ├── 기관 정보
     ├── 브랜드 가이드
-    ├── 폴더 경로 설정
+    ├── 로컬 폴더 경로 설정
     └── API 연동 관리
 ```
 
-### 7.2 텔레그램 봇
+### 7.2 텔레그램 봇 (모바일 보조)
 
 ```
 기능:
-├── 에이전트와 자연어 대화 (PC 대시보드와 동일 대화)
+├── 에이전트와 자연어 대화 (Electron과 동일 대화)
 ├── 승인 대기 알림 수신
 ├── 간편 승인 (버튼 클릭)
 └── 성과 요약 정기 보고
 ```
 
-### 7.3 로컬 데몬 (.exe)
+### 7.3 데스크탑 런타임 구성 (Electron Main)
 
 ```
-설치: 온보딩 과정 중 1회 설치
-실행: PC 부팅 시 자동 시작 (백그라운드)
+설치: 사용자 PC에 데스크탑 앱 1회 설치
+실행: 앱 실행 시 백그라운드 런타임 포함
 
 기능:
-├── 지정 폴더 감시 (Python watchdog)
-├── 새 파일/수정 감지 → 클라우드 전송
-└── 클라우드 지시 수신 → 로컬 실행
+├── 지정 폴더 감시 (chokidar)
+├── 로컬 미디어 처리 (ffmpeg/image pipeline)
+├── 초안/상태 Supabase 동기화
+└── 로컬 산출물 저장 및 이력 관리
 
-통신: HTTPS WebSocket (Supabase Realtime)
+통신: Supabase Realtime + HTTPS API
 ```
 
 ### 7.4 채팅 통합 구조
 
 ```
-PC 대시보드 채팅창 ──┐
-                    ├──→ 백엔드 AI 에이전트 (동일)
-텔레그램 봇 ─────────┘         ↕
-                         Supabase Realtime
-                      (대화 히스토리 공유)
+Electron 데스크탑 채팅 ─┐
+                       ├──→ 백엔드 AI 에이전트 (동일)
+텔레그램 봇 ────────────┘          ↕
+                           Supabase Realtime
+                        (대화 히스토리 공유)
 ```
 
 ---
@@ -489,24 +487,31 @@ Cron Job 트리거               유저 요청 트리거
 
 ## 10. Phase 개발 로드맵
 
-### Phase 1 - 핵심 뼈대 (MVP)
+### Phase 1 - 핵심 뼈대 (완료)
 ```
 목표: 기본 워크플로우 동작 검증
 
-개발 항목:
+완료 항목:
 ├── 모노레포 기본 세팅 (Turborepo)
 ├── Supabase DB 스키마 + RLS 설정
-├── 모듈 01: 온보딩 (기본 기관 정보 입력)
-├── 모듈 04: 콘텐츠 생성 (텍스트만)
-├── 로컬 데몬 (파일 감시 기본)
-├── Next.js 대시보드 (승인 대기/발행 완료)
-├── 텔레그램 봇 (기본 대화 + 알림)
-└── 오케스트레이터 기본 구조 (LangGraph)
-
-검증 지표: 파일 감지 → 콘텐츠 생성 → 승인 → 발행 전체 흐름 동작
+├── 텔레그램 봇 스캐폴드
+├── 오케스트레이터 기본 구조 설계
+└── Electron 아키텍처 피봇 기반 정리 완료
 ```
 
-### Phase 2 - 콘텐츠 고도화
+### Phase 2 - 데스크탑 런타임 고도화
+```
+목표: Electron 중심 로컬 워크플로우 완성
+
+개발 항목:
+├── Electron Main 파일 감시 (chokidar)
+├── 로컬 폴더 온보딩/설정 흐름
+├── 로컬 미디어 처리 파이프라인 (ffmpeg/image)
+├── 초안 생성/승인 대기 상태 동기화
+└── 데스크탑 승인 큐 UX 고도화
+```
+
+### Phase 3 - 콘텐츠 고도화
 ```
 목표: 멀티 포맷 콘텐츠 생성 완성
 
@@ -515,10 +520,10 @@ Cron Job 트리거               유저 요청 트리거
 ├── 모듈 02: 브랜드 리뷰 + RAG 고도화
 ├── 모듈 03: 캠페인 계획 + 스케줄링
 ├── 스케줄링 라인 (Cron + 우선순위 큐)
-└── 대시보드 스케줄 캘린더 뷰
+└── 데스크탑 스케줄 캘린더 뷰
 ```
 
-### Phase 3 - 성과 분석
+### Phase 4 - 성과 분석
 ```
 목표: 데이터 해자 구축 시작
 
@@ -530,21 +535,13 @@ Cron Job 트리거               유저 요청 트리거
 └── memory.md 자동 업데이트
 ```
 
-### Phase 4 - 커뮤니티 & 모니터링
-```
-목표: 능동적 마케팅 관리
-
-개발 항목:
-├── 모듈 07: 댓글/커뮤니티 관리
-├── 모듈 08: 외부 소스 모니터링
-└── 모니터링 에이전트 구축
-```
-
-### Phase 5 - 확장 채널
+### Phase 5 - 커뮤니티 & 확장 채널
 ```
 목표: 풀 스택 마케팅 자동화
 
 개발 항목:
+├── 모듈 07: 댓글/커뮤니티 관리
+├── 모듈 08: 외부 소스 모니터링
 ├── 모듈 05: 이메일 자동화 (뉴스레터)
 ├── 모듈 06: 모금 캠페인 연동
 └── 도메인 벤치마크 고도화 + 파인튜닝 준비
@@ -557,15 +554,15 @@ Cron Job 트리거               유저 요청 트리거
 | 영역 | 기술 |
 |------|------|
 | 모노레포 | Turborepo + pnpm |
-| 웹 대시보드 | Next.js (Vercel) |
+| 데스크탑 앱 | Electron + React + Vite |
+| 모바일 보조 | Telegram Bot (grammy) |
 | DB | Supabase (PostgreSQL + pgvector) |
-| 파일 스토리지 | Supabase Storage |
-| 실시간 통신 | Supabase Realtime |
+| 로컬 파일 처리 | Electron Main + chokidar |
+| 로컬 미디어 처리 | ffmpeg + image pipeline |
+| 클라우드 데이터 계층 | Supabase Realtime + RLS |
 | AI 오케스트레이터 | LangGraph (Python) |
 | 전략 모델 | GPT-4o / Claude Opus |
 | 실행 모델 | GPT-4o-mini / Claude Haiku |
-| 텔레그램 봇 | grammy (Phase 1-1 scaffold) |
-| 로컬 데몬 | Python (watchdog) |
 | 이미지 생성 | Pillow / Canvas API |
 | 영상 생성 | MoviePy / Remotion |
 | 스케줄러 | Supabase pg_cron |
@@ -597,3 +594,6 @@ interface ServiceModule {
 
 *문서 버전: v1.0*
 *작성일: 2026-02-27*
+
+
+

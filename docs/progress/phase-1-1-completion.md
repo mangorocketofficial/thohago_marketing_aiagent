@@ -1,5 +1,7 @@
 # Phase 1-1 Completion Report
 
+> Historical note (2026-02-28): `apps/web`/`services/daemon` scaffolds created here were superseded by the Electron pivot ADR (`docs/architecture-pivot-electron.md`) for Phase 1-3 onward.
+
 - Phase: 1-1
 - Title: Foundation Setup
 - Status: Done
@@ -101,4 +103,3 @@
   - Start Phase 1-2 service module skeletons
   - Wire auth/session flow for web dashboard
   - Define first business-level integration tests
-

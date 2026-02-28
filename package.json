@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.12.3",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --filter=@repo/web",
+    "dev": "turbo run dev --filter=@repo/desktop",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "check": "pnpm lint && pnpm type-check",

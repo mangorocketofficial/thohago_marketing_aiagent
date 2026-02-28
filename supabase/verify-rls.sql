@@ -9,7 +9,7 @@ where schemaname = 'public'
     'users',
     'organization_members',
     'contents',
-    'local_files',
+    'pipeline_triggers',
     'chat_messages'
   )
 order by tablename;
@@ -23,7 +23,7 @@ where schemaname = 'public'
     'users',
     'organization_members',
     'contents',
-    'local_files',
+    'pipeline_triggers',
     'chat_messages'
   )
 order by tablename, policyname;

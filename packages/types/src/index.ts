@@ -49,20 +49,18 @@ export type Content = {
 };
 
 export type FileType = "image" | "video" | "document";
-export type FileStatus = "active" | "deleted";
+export type PipelineTriggerStatus = "pending" | "processing" | "done" | "failed";
 
-export type LocalFile = {
+export type PipelineTrigger = {
   id: string;
   org_id: string;
+  relative_path: string;
   file_name: string;
-  file_path: string;
-  file_type: FileType;
-  file_size: number | null;
-  thumbnail_url: string | null;
   activity_folder: string;
-  status: FileStatus;
-  metadata: Record<string, unknown>;
-  indexed_at: string;
+  file_type: FileType;
+  status: PipelineTriggerStatus;
+  source_event_id: string | null;
+  created_at: string;
 };
 
 export type ChatChannel = "dashboard" | "telegram";

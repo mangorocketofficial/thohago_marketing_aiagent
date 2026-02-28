@@ -1,5 +1,7 @@
 # Phase 1-2 Completion Report
 
+> Historical note (2026-02-28): Phase 1-2 outcomes were completed as designed, then superseded by the Electron pivot ADR (`docs/architecture-pivot-electron.md`). `local_files` indexing and `services/daemon` are now deprecated.
+
 - Phase: 1-2
 - Title: Local File Watcher Daemon
 - Status: Done

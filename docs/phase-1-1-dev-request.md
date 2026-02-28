@@ -1,6 +1,9 @@
 # Phase 1-1 Development Request
 ## Marketing AI Agent Platform - Foundation Setup
 
+> Status update (2026-02-28): Superseded for runtime/interface direction by `docs/architecture-pivot-electron.md` from Phase 1-3 onward.  
+> This document remains the historical source of truth for what was implemented in Phase 1-1.
+
 ---
 
 ## Canonical Source of Truth
