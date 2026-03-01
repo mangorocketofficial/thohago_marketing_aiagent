@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createInitialCrawlState, runOnboardingCrawl } from "./crawler/index.mjs";
 import { SEED_ORG_ID } from "./constants.mjs";
 import {
   getDesktopConfig,
@@ -46,6 +47,8 @@ let mainWindow = null;
 let activeWatcher = null;
 /** @type {Promise<void>} */
 let runtimeTask = Promise.resolve();
+/** @type {Promise<void> | null} */
+let onboardingCrawlTask = null;
 
 const runtimeState = {
   watchPath: "",
@@ -54,7 +57,9 @@ const runtimeState = {
   onboardingCompleted: false,
   authSession: null,
   isRunning: false,
-  initialScanCount: 0
+  initialScanCount: 0,
+  onboardingCrawlState: createInitialCrawlState(),
+  onboardingLastSynthesis: null
 };
 
 const resolveOrchestratorApiBase = () => {
@@ -252,6 +257,52 @@ const emitChatActionError = (payload) => {
     return;
   }
   mainWindow.webContents.send("chat:action-error", payload);
+};
+
+const cloneJson = (value) => JSON.parse(JSON.stringify(value ?? null));
+
+const getOnboardingCrawlState = () => cloneJson(runtimeState.onboardingCrawlState);
+
+const emitOnboardingCrawlProgress = (payload) => {
+  if (!mainWindow) {
+    return;
+  }
+  mainWindow.webContents.send("onboarding:crawl-progress", payload);
+};
+
+const emitOnboardingCrawlComplete = (payload) => {
+  if (!mainWindow) {
+    return;
+  }
+  mainWindow.webContents.send("onboarding:crawl-complete", payload);
+};
+
+const resolveOnboardingAccessToken = (rawToken) => {
+  const direct = String(rawToken ?? "").trim();
+  if (direct) {
+    return direct;
+  }
+  const runtimeToken = String(runtimeState.authSession?.accessToken ?? "").trim();
+  return runtimeToken;
+};
+
+const normalizeInterviewAnswers = (input) => {
+  const fallback = {
+    q1: "",
+    q2: "",
+    q3: "",
+    q4: ""
+  };
+  if (!input || typeof input !== "object") {
+    return fallback;
+  }
+
+  const row = input;
+  for (const key of Object.keys(fallback)) {
+    const value = row[key];
+    fallback[key] = typeof value === "string" ? value.trim() : "";
+  }
+  return fallback;
 };
 
 const waitForWindowReady = (win) =>
@@ -747,7 +798,14 @@ const registerIpcHandlers = () => {
     const rawPatch = payload?.draftPatch;
     const patch = rawPatch && typeof rawPatch === "object" ? rawPatch : {};
     saveOnboardingDraft(patch);
-    return getDesktopRuntimeConfig();
+    const nextConfig = getDesktopRuntimeConfig();
+    if (!onboardingCrawlTask && runtimeState.onboardingCrawlState?.state !== "running") {
+      runtimeState.onboardingCrawlState = createInitialCrawlState({
+        websiteUrl: nextConfig.onboardingDraft?.websiteUrl ?? "",
+        naverBlogUrl: nextConfig.onboardingDraft?.naverBlogUrl ?? ""
+      });
+    }
+    return nextConfig;
   });
 
   ipcMain.handle("onboarding:set-org-id", async (_, payload) => {
@@ -786,6 +844,142 @@ const registerIpcHandlers = () => {
 
     return body;
   });
+
+  ipcMain.handle("onboarding:get-crawl-state", () => getOnboardingCrawlState());
+
+  ipcMain.handle("onboarding:start-crawl", async (_, payload) => {
+    const rawUrls = payload?.urls && typeof payload.urls === "object" ? payload.urls : {};
+    const urls = {
+      websiteUrl: typeof rawUrls.websiteUrl === "string" ? rawUrls.websiteUrl.trim() : "",
+      naverBlogUrl: typeof rawUrls.naverBlogUrl === "string" ? rawUrls.naverBlogUrl.trim() : ""
+    };
+
+    if (onboardingCrawlTask && runtimeState.onboardingCrawlState?.state === "running") {
+      return getOnboardingCrawlState();
+    }
+
+    runtimeState.onboardingCrawlState = createInitialCrawlState(urls);
+    runtimeState.onboardingLastSynthesis = null;
+    emitOnboardingCrawlProgress({
+      source: null,
+      sourceState: null,
+      crawlState: getOnboardingCrawlState()
+    });
+
+    onboardingCrawlTask = (async () => {
+      try {
+        const finalState = await runOnboardingCrawl({
+          urls,
+          onSourceProgress: (source, sourceState, crawlState) => {
+            runtimeState.onboardingCrawlState = cloneJson(crawlState);
+            emitOnboardingCrawlProgress({
+              source,
+              sourceState: cloneJson(sourceState),
+              crawlState: getOnboardingCrawlState()
+            });
+          }
+        });
+
+        runtimeState.onboardingCrawlState = cloneJson(finalState);
+        emitOnboardingCrawlComplete({
+          crawlState: getOnboardingCrawlState()
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Onboarding crawl failed.";
+        runtimeState.onboardingCrawlState = {
+          ...createInitialCrawlState(urls),
+          state: "done",
+          started_at: runtimeState.onboardingCrawlState?.started_at ?? new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          sources: {
+            website: {
+              ...createInitialCrawlState(urls).sources.website,
+              status: urls.websiteUrl ? "failed" : "skipped",
+              started_at: new Date().toISOString(),
+              finished_at: new Date().toISOString(),
+              error: urls.websiteUrl ? message : null
+            },
+            naver_blog: {
+              ...createInitialCrawlState(urls).sources.naver_blog,
+              status: urls.naverBlogUrl ? "failed" : "skipped",
+              started_at: new Date().toISOString(),
+              finished_at: new Date().toISOString(),
+              error: urls.naverBlogUrl ? message : null
+            }
+          }
+        };
+        emitOnboardingCrawlComplete({
+          crawlState: getOnboardingCrawlState()
+        });
+      }
+    })().finally(() => {
+      onboardingCrawlTask = null;
+    });
+
+    return getOnboardingCrawlState();
+  });
+
+  ipcMain.handle("onboarding:save-interview", async (_, payload) => {
+    const token = resolveOnboardingAccessToken(payload?.accessToken);
+    if (!token) {
+      throw new Error("A valid user access token is required.");
+    }
+
+    const orgId = (payload?.orgId ?? runtimeState.orgId ?? "").trim();
+    if (!orgId) {
+      throw new Error("orgId is required.");
+    }
+
+    const interviewAnswers = normalizeInterviewAnswers(payload?.interviewAnswers);
+    const body = await callOrchestratorApi("/onboarding/interview", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        org_id: orgId,
+        interview_answers: interviewAnswers
+      })
+    });
+
+    return body;
+  });
+
+  ipcMain.handle("onboarding:synthesize", async (_, payload) => {
+    const token = resolveOnboardingAccessToken(payload?.accessToken);
+    if (!token) {
+      throw new Error("A valid user access token is required.");
+    }
+
+    const orgId = (payload?.orgId ?? runtimeState.orgId ?? "").trim();
+    if (!orgId) {
+      throw new Error("orgId is required.");
+    }
+
+    if (onboardingCrawlTask) {
+      await onboardingCrawlTask;
+    }
+
+    const interviewAnswers = normalizeInterviewAnswers(payload?.interviewAnswers);
+    const urlMetadata = payload?.urlMetadata && typeof payload.urlMetadata === "object" ? payload.urlMetadata : {};
+    const body = await callOrchestratorApi("/onboarding/synthesize", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        org_id: orgId,
+        crawl_result: getOnboardingCrawlState(),
+        interview_answers: interviewAnswers,
+        url_metadata: urlMetadata
+      })
+    });
+
+    runtimeState.onboardingLastSynthesis = body ?? null;
+    return body;
+  });
+
+  ipcMain.handle("onboarding:get-last-synthesis", () => cloneJson(runtimeState.onboardingLastSynthesis));
 
   ipcMain.handle("onboarding:choose-folder", async () => {
     if (!mainWindow) {
@@ -1042,6 +1236,11 @@ app.whenReady().then(async () => {
   runtimeState.watchPath = config.watchPath;
   runtimeState.language = config.language;
   runtimeState.onboardingCompleted = config.onboardingCompleted;
+  runtimeState.onboardingCrawlState = createInitialCrawlState({
+    websiteUrl: config.onboardingDraft?.websiteUrl ?? "",
+    naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? ""
+  });
+  runtimeState.onboardingLastSynthesis = null;
   const storedAuth = loadAuthSession();
   runtimeState.authSession = storedAuth && !isSessionExpired(storedAuth) ? storedAuth : null;
 

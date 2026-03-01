@@ -164,3 +164,86 @@ export type AuthSessionSummary = {
   userId: string;
   email: string | null;
 };
+
+export type CrawlSourceStatus = "pending" | "running" | "done" | "failed" | "skipped";
+
+export type OnboardingCrawlSource = "website" | "naver_blog";
+
+export type OnboardingCrawlSourceResult = {
+  source: OnboardingCrawlSource;
+  url: string;
+  status: CrawlSourceStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  data: Record<string, unknown> | null;
+};
+
+export type OnboardingCrawlStatus = {
+  state: "idle" | "running" | "done";
+  started_at: string | null;
+  finished_at: string | null;
+  sources: {
+    website: OnboardingCrawlSourceResult;
+    naver_blog: OnboardingCrawlSourceResult;
+  };
+};
+
+export type InterviewAnswers = {
+  q1: string;
+  q2: string;
+  q3: string;
+  q4: string;
+};
+
+export type BrandProfile = {
+  organization_summary: string;
+  detected_tone: string;
+  tone_guardrails: string[];
+  key_themes: string[];
+  target_audience: string[];
+  forbidden_words: string[];
+  forbidden_topics: string[];
+  campaign_seasons: string[];
+  content_directions: string[];
+  confidence_notes: string[];
+};
+
+export type OnboardingResultDocument = {
+  generated_at: string;
+  organization_summary: string;
+  detected_tone: string;
+  suggested_tone_guardrails: string[];
+  key_themes: string[];
+  target_audience: string[];
+  forbidden_words: string[];
+  forbidden_topics: string[];
+  campaign_season_hints: string[];
+  recommended_initial_content_directions: string[];
+  known_data_gaps: string[];
+  confidence_notes: string[];
+};
+
+export type OrgBrandSettings = {
+  org_id: string;
+  website_url: string | null;
+  naver_blog_url: string | null;
+  instagram_url: string | null;
+  facebook_url: string | null;
+  youtube_url: string | null;
+  threads_url: string | null;
+  crawl_status: OnboardingCrawlStatus;
+  crawl_payload: Record<string, unknown>;
+  interview_answers: InterviewAnswers;
+  detected_tone: string | null;
+  tone_description: string | null;
+  target_audience: string[];
+  key_themes: string[];
+  forbidden_words: string[];
+  forbidden_topics: string[];
+  campaign_seasons: string[];
+  brand_summary: string | null;
+  result_document: OnboardingResultDocument | Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};

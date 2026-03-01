@@ -40,12 +40,12 @@
     },
     "review": {
       "title": "Preparing brand review",
-      "description": "Phase 1-6a validates flow and UI only. Real crawling is enabled in 1-6b.",
+      "description": "Website and Naver Blog crawl runs in background with best-effort status.",
       "next": "Start interview"
     },
     "interview": {
       "title": "4-question interview",
-      "description": "This is a temporary input form in 1-6a. Live interview arrives in 1-6b.",
+      "description": "Answer all 4 questions while crawl continues in the background.",
       "q1": "Q1. How would you describe your current brand tone?",
       "q2": "Q2. Who is your primary audience?",
       "q3": "Q3. Any forbidden words or topics?",
@@ -54,7 +54,7 @@
     },
     "result": {
       "title": "Result document preview",
-      "description": "1-6a ships the skeleton. 1-6b will synthesize review + interview output.",
+      "description": "Generate synthesized profile from crawl output and interview answers.",
       "next": "Set marketing folder"
     },
     "folder": {
@@ -67,7 +67,7 @@
     },
     "summary": {
       "title": "You're ready",
-      "description": "Press Start to open dashboard and begin watcher runtime.",
+      "description": "Review synthesized profile and press Start to open dashboard runtime.",
       "cta": "Start"
     },
     "language": "Language",

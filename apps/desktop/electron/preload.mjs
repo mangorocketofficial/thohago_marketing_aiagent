@@ -37,9 +37,16 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     openFolder: () => ipcRenderer.invoke("watcher:open-folder")
   },
   onboarding: {
+    onCrawlProgress: (cb) => subscribe("onboarding:crawl-progress", cb),
+    onCrawlComplete: (cb) => subscribe("onboarding:crawl-complete", cb),
     saveDraft: (draftPatch) => ipcRenderer.invoke("onboarding:save-draft", { draftPatch }),
     setOrgId: (orgId) => ipcRenderer.invoke("onboarding:set-org-id", { orgId }),
     bootstrapOrg: (payload) => ipcRenderer.invoke("onboarding:bootstrap-org", payload),
+    getCrawlState: () => ipcRenderer.invoke("onboarding:get-crawl-state"),
+    startCrawl: (payload) => ipcRenderer.invoke("onboarding:start-crawl", payload),
+    saveInterview: (payload) => ipcRenderer.invoke("onboarding:save-interview", payload),
+    synthesize: (payload) => ipcRenderer.invoke("onboarding:synthesize", payload),
+    getLastSynthesis: () => ipcRenderer.invoke("onboarding:get-last-synthesis"),
     chooseFolder: () => ipcRenderer.invoke("onboarding:choose-folder"),
     createFolder: () => ipcRenderer.invoke("onboarding:create-folder"),
     complete: (payload) => ipcRenderer.invoke("onboarding:complete", payload)

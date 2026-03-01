@@ -27,7 +27,7 @@ app.use((_req, res) => {
   });
 });
 
-const requiredTables = ["pipeline_triggers", "campaigns", "orchestrator_sessions"] as const;
+const requiredTables = ["pipeline_triggers", "campaigns", "orchestrator_sessions", "org_brand_settings"] as const;
 
 const verifyRequiredTables = async () => {
   for (const table of requiredTables) {

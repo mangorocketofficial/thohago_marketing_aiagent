@@ -189,6 +189,24 @@ button.primary {
   color: #364152;
 }
 
+.onboarding-crawl-grid {
+  margin-bottom: 8px;
+}
+
+.crawl-status-list {
+  display: grid;
+  gap: 8px;
+}
+
+.crawl-status-item {
+  border: 1px solid #dbe2ec;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 4px;
+}
+
 .notice {
   margin-top: 8px;
   color: #8a1f35;

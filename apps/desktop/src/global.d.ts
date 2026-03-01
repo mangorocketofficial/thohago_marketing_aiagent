@@ -1,5 +1,12 @@
 export {};
-import type { OrchestratorSession } from "@repo/types";
+import type {
+  BrandProfile,
+  InterviewAnswers,
+  OnboardingCrawlSourceResult,
+  OnboardingCrawlStatus,
+  OnboardingResultDocument,
+  OrchestratorSession
+} from "@repo/types";
 
 type RendererFileType = "image" | "video" | "document";
 type RendererFileStatus = "active" | "deleted";
@@ -88,6 +95,13 @@ type SecureAuthSession = {
   expiresAt: number | null;
 };
 
+type OnboardingSynthesisResponse = {
+  ok: boolean;
+  org_id: string;
+  brand_profile: BrandProfile;
+  onboarding_result_document: OnboardingResultDocument;
+};
+
 declare global {
   interface Window {
     desktopRuntime: {
@@ -113,6 +127,12 @@ declare global {
         openFolder: () => Promise<WatcherOpenFolderResult>;
       };
       onboarding: {
+        onCrawlProgress: (cb: (payload: {
+          source: "website" | "naver_blog" | null;
+          sourceState: OnboardingCrawlSourceResult | null;
+          crawlState: OnboardingCrawlStatus;
+        }) => void) => () => void;
+        onCrawlComplete: (cb: (payload: { crawlState: OnboardingCrawlStatus }) => void) => () => void;
         saveDraft: (draftPatch: Partial<DesktopAppConfig["onboardingDraft"]>) => Promise<DesktopAppConfig>;
         setOrgId: (orgId: string) => Promise<DesktopAppConfig>;
         bootstrapOrg: (payload: {
@@ -131,6 +151,36 @@ declare global {
             role: "owner" | "admin" | "member";
           };
         }>;
+        getCrawlState: () => Promise<OnboardingCrawlStatus>;
+        startCrawl: (payload: {
+          urls: {
+            websiteUrl: string;
+            naverBlogUrl: string;
+          };
+        }) => Promise<OnboardingCrawlStatus>;
+        saveInterview: (payload: {
+          accessToken?: string;
+          orgId?: string;
+          interviewAnswers: InterviewAnswers;
+        }) => Promise<{
+          ok: boolean;
+          org_id: string;
+          interview_answers: InterviewAnswers;
+        }>;
+        synthesize: (payload: {
+          accessToken?: string;
+          orgId?: string;
+          interviewAnswers: InterviewAnswers;
+          urlMetadata?: {
+            website_url?: string;
+            naver_blog_url?: string;
+            instagram_url?: string;
+            facebook_url?: string;
+            youtube_url?: string;
+            threads_url?: string;
+          };
+        }) => Promise<OnboardingSynthesisResponse>;
+        getLastSynthesis: () => Promise<OnboardingSynthesisResponse | null>;
         chooseFolder: () => Promise<string | null>;
         createFolder: () => Promise<string | null>;
         complete: (payload: { watchPath: string; orgId?: string }) => Promise<WatcherStatus>;

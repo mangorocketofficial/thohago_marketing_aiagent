@@ -1,7 +1,15 @@
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Campaign, ChatMessage, Content, OrchestratorSession } from "@repo/types";
+import type {
+  Campaign,
+  ChatMessage,
+  Content,
+  InterviewAnswers,
+  OnboardingCrawlSourceResult,
+  OnboardingCrawlStatus,
+  OrchestratorSession
+} from "@repo/types";
 
 type UiMode = "loading" | "onboarding" | "dashboard";
 type Runtime = Window["desktopRuntime"];
@@ -12,6 +20,7 @@ type DesktopAppConfig = Awaited<ReturnType<Runtime["app"]["getConfig"]>>;
 type OnboardingDraft = DesktopAppConfig["onboardingDraft"];
 type OnboardingStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type AuthMode = "sign_in" | "sign_up";
+type OnboardingSynthesisResult = Awaited<ReturnType<Runtime["onboarding"]["synthesize"]>>;
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 const ONBOARDING_STEPS: OnboardingStep[] = [0, 1, 2, 3, 4, 5, 6, 7];
 
@@ -24,12 +33,83 @@ const defaultOnboardingDraft = (): OnboardingDraft => ({
   threadsUrl: ""
 });
 
-const defaultInterviewAnswers = () => ({
+const defaultInterviewAnswers = (): InterviewAnswers => ({
   q1: "",
   q2: "",
   q3: "",
   q4: ""
 });
+
+const defaultOnboardingCrawlStatus = (): OnboardingCrawlStatus => ({
+  state: "idle",
+  started_at: null,
+  finished_at: null,
+  sources: {
+    website: {
+      source: "website",
+      url: "",
+      status: "pending",
+      started_at: null,
+      finished_at: null,
+      error: null,
+      data: null
+    },
+    naver_blog: {
+      source: "naver_blog",
+      url: "",
+      status: "pending",
+      started_at: null,
+      finished_at: null,
+      error: null,
+      data: null
+    }
+  }
+});
+
+const isCrawlSourceComplete = (source: OnboardingCrawlSourceResult): boolean =>
+  source.status === "done" || source.status === "failed" || source.status === "skipped";
+
+const isCrawlFullyComplete = (status: OnboardingCrawlStatus): boolean =>
+  isCrawlSourceComplete(status.sources.website) && isCrawlSourceComplete(status.sources.naver_blog);
+
+const formatCrawlStatusLabel = (status: OnboardingCrawlSourceResult["status"]): string => {
+  if (status === "pending") {
+    return "Pending";
+  }
+  if (status === "running") {
+    return "Running";
+  }
+  if (status === "done") {
+    return "Done";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "skipped") {
+    return "Skipped";
+  }
+  return status;
+};
+
+const formatSessionStatus = (session: OrchestratorSession | null): string => {
+  if (!session) {
+    return "-";
+  }
+  if (session.status !== "paused") {
+    return session.status;
+  }
+
+  if (session.current_step === "await_user_input") {
+    return "paused (awaiting user input)";
+  }
+  if (session.current_step === "await_campaign_approval") {
+    return "paused (awaiting campaign approval)";
+  }
+  if (session.current_step === "await_content_approval") {
+    return "paused (awaiting content approval)";
+  }
+  return "paused (waiting for next event)";
+};
 
 const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) {
@@ -174,6 +254,12 @@ const App = () => {
   const [authNotice, setAuthNotice] = useState("");
   const [isAuthPending, setIsAuthPending] = useState(false);
   const [interviewAnswers, setInterviewAnswers] = useState(defaultInterviewAnswers());
+  const [crawlStatus, setCrawlStatus] = useState<OnboardingCrawlStatus>(defaultOnboardingCrawlStatus());
+  const [isCrawlPending, setIsCrawlPending] = useState(false);
+  const [isInterviewSaving, setIsInterviewSaving] = useState(false);
+  const [isSynthesisPending, setIsSynthesisPending] = useState(false);
+  const [synthesisResult, setSynthesisResult] = useState<OnboardingSynthesisResult | null>(null);
+  const [hasSynthesisAttempted, setHasSynthesisAttempted] = useState(false);
 
   const [chatConfig, setChatConfig] = useState<ChatConfig | null>(null);
   const [activeSession, setActiveSession] = useState<OrchestratorSession | null>(null);
@@ -198,6 +284,7 @@ const App = () => {
 
   const supabase = useMemo<SupabaseClient | null>(() => getSupabaseClientForConfig(chatConfig), [chatConfig]);
   const authSupabase = useMemo<SupabaseClient | null>(() => getAuthSupabaseClient(chatConfig), [chatConfig]);
+  const crawlDone = useMemo(() => isCrawlFullyComplete(crawlStatus), [crawlStatus]);
 
   const refreshActiveSession = useCallback(async (): Promise<OrchestratorSession | null> => {
     if (!runtime) {
@@ -337,6 +424,11 @@ const App = () => {
         setChatNotice(config.message);
       }
 
+      const nextCrawlStatus = await runtime.onboarding.getCrawlState();
+      setCrawlStatus(nextCrawlStatus ?? defaultOnboardingCrawlStatus());
+      const lastSynthesis = await runtime.onboarding.getLastSynthesis();
+      setSynthesisResult(lastSynthesis?.ok ? lastSynthesis : null);
+
       await refreshActiveSession();
     };
 
@@ -384,6 +476,20 @@ const App = () => {
       setChatNotice(`Action failed (${payload.action}): ${payload.message}`);
     });
 
+    const offCrawlProgress = runtime.onboarding.onCrawlProgress((payload) => {
+      if (!payload?.crawlState) {
+        return;
+      }
+      setCrawlStatus(payload.crawlState);
+    });
+
+    const offCrawlComplete = runtime.onboarding.onCrawlComplete((payload) => {
+      if (!payload?.crawlState) {
+        return;
+      }
+      setCrawlStatus(payload.crawlState);
+    });
+
     return () => {
       offIndexed();
       offDeleted();
@@ -392,6 +498,8 @@ const App = () => {
       offShowOnboarding();
       offActionResult();
       offActionError();
+      offCrawlProgress();
+      offCrawlComplete();
     };
   }, [i18n, refreshActiveSession, runtime, scheduleRefreshActiveSession]);
 
@@ -593,6 +701,146 @@ const App = () => {
     [authForm.name, runtime]
   );
 
+  const resolveOnboardingAccessToken = useCallback(async (): Promise<string> => {
+    const direct = authSession?.access_token?.trim() ?? "";
+    if (direct) {
+      return direct;
+    }
+    const stored = await runtime.auth.getStoredSession();
+    return stored?.accessToken?.trim() ?? "";
+  }, [authSession?.access_token, runtime.auth]);
+
+  const startOnboardingCrawl = useCallback(
+    async (forceRestart = false) => {
+      if (!runtime) {
+        return;
+      }
+      if (!forceRestart && (crawlStatus.state === "running" || crawlStatus.started_at)) {
+        return;
+      }
+
+      setIsCrawlPending(true);
+      setNotice("");
+      setSynthesisResult(null);
+      setHasSynthesisAttempted(false);
+      try {
+        const nextStatus = await runtime.onboarding.startCrawl({
+          urls: {
+            websiteUrl: onboardingDraft.websiteUrl,
+            naverBlogUrl: onboardingDraft.naverBlogUrl
+          }
+        });
+        setCrawlStatus(nextStatus);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to start brand review crawl.");
+      } finally {
+        setIsCrawlPending(false);
+      }
+    },
+    [crawlStatus.started_at, crawlStatus.state, onboardingDraft.naverBlogUrl, onboardingDraft.websiteUrl, runtime]
+  );
+
+  const persistInterviewAnswers = useCallback(
+    async (answers: InterviewAnswers, options?: { silent?: boolean }) => {
+      if (!runtime) {
+        return false;
+      }
+      const orgId = desktopConfig?.orgId?.trim() ?? "";
+      if (!orgId) {
+        if (!options?.silent) {
+          setNotice("Organization context is missing.");
+        }
+        return false;
+      }
+
+      const accessToken = await resolveOnboardingAccessToken();
+      if (!accessToken) {
+        if (!options?.silent) {
+          setNotice("Sign in session is missing. Please sign in again.");
+        }
+        return false;
+      }
+
+      setIsInterviewSaving(true);
+      try {
+        await runtime.onboarding.saveInterview({
+          accessToken,
+          orgId,
+          interviewAnswers: answers
+        });
+        if (!options?.silent) {
+          setNotice("Interview answers saved.");
+        }
+        return true;
+      } catch (error) {
+        if (!options?.silent) {
+          setNotice(error instanceof Error ? error.message : "Failed to save interview answers.");
+        }
+        return false;
+      } finally {
+        setIsInterviewSaving(false);
+      }
+    },
+    [desktopConfig?.orgId, resolveOnboardingAccessToken, runtime]
+  );
+
+  const synthesizeOnboardingResult = useCallback(async () => {
+    if (!runtime) {
+      return;
+    }
+    const orgId = desktopConfig?.orgId?.trim() ?? "";
+    if (!orgId) {
+      setNotice("Organization context is missing.");
+      return;
+    }
+
+    const accessToken = await resolveOnboardingAccessToken();
+    if (!accessToken) {
+      setNotice("Sign in session is missing. Please sign in again.");
+      return;
+    }
+
+    setIsSynthesisPending(true);
+    setHasSynthesisAttempted(true);
+    setNotice("");
+    try {
+      const response = await runtime.onboarding.synthesize({
+        accessToken,
+        orgId,
+        interviewAnswers,
+        urlMetadata: {
+          website_url: onboardingDraft.websiteUrl,
+          naver_blog_url: onboardingDraft.naverBlogUrl,
+          instagram_url: onboardingDraft.instagramUrl,
+          facebook_url: onboardingDraft.facebookUrl,
+          youtube_url: onboardingDraft.youtubeUrl,
+          threads_url: onboardingDraft.threadsUrl
+        }
+      });
+      if (!response?.ok) {
+        throw new Error("Result synthesis failed.");
+      }
+
+      setSynthesisResult(response);
+      setNotice("Result document generated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to generate result document.");
+    } finally {
+      setIsSynthesisPending(false);
+    }
+  }, [
+    desktopConfig?.orgId,
+    interviewAnswers,
+    onboardingDraft.facebookUrl,
+    onboardingDraft.instagramUrl,
+    onboardingDraft.naverBlogUrl,
+    onboardingDraft.threadsUrl,
+    onboardingDraft.websiteUrl,
+    onboardingDraft.youtubeUrl,
+    resolveOnboardingAccessToken,
+    runtime
+  ]);
+
   const submitEmailAuth = async () => {
     if (!authSupabase) {
       setAuthNotice("Supabase auth config is missing.");
@@ -776,6 +1024,37 @@ const App = () => {
     };
   }, [authSession, bootstrapOrgContext, desktopConfig?.orgId, mode, onboardingStep]);
 
+  useEffect(() => {
+    if (mode !== "onboarding") {
+      return;
+    }
+    if (onboardingStep < 3) {
+      return;
+    }
+    if (crawlStatus.state === "running" || crawlStatus.started_at) {
+      return;
+    }
+    void startOnboardingCrawl(false);
+  }, [crawlStatus.started_at, crawlStatus.state, mode, onboardingStep, startOnboardingCrawl]);
+
+  useEffect(() => {
+    if (mode !== "onboarding" || onboardingStep !== 5) {
+      return;
+    }
+    if (!crawlDone || isSynthesisPending || synthesisResult || hasSynthesisAttempted) {
+      return;
+    }
+    void synthesizeOnboardingResult();
+  }, [
+    crawlDone,
+    hasSynthesisAttempted,
+    isSynthesisPending,
+    mode,
+    onboardingStep,
+    synthesisResult,
+    synthesizeOnboardingResult
+  ]);
+
   const moveToStep = (step: OnboardingStep) => {
     setOnboardingStep(step);
     setNotice("");
@@ -800,15 +1079,36 @@ const App = () => {
     }
 
     await persistDraftPatch(onboardingDraft);
+    setCrawlStatus(defaultOnboardingCrawlStatus());
+    setSynthesisResult(null);
+    setHasSynthesisAttempted(false);
     moveToStep(3);
   };
 
-  const handleInterviewNext = () => {
-    if (!interviewAnswers.q1.trim() || !interviewAnswers.q2.trim()) {
-      setNotice("Please answer at least Q1 and Q2.");
+  const handleInterviewNext = async () => {
+    if (!interviewAnswers.q1.trim() || !interviewAnswers.q2.trim() || !interviewAnswers.q3.trim() || !interviewAnswers.q4.trim()) {
+      setNotice("Please answer all 4 questions.");
+      return;
+    }
+
+    const saved = await persistInterviewAnswers(interviewAnswers);
+    if (!saved) {
       return;
     }
     moveToStep(5);
+  };
+
+  const setInterviewValue = (key: keyof InterviewAnswers, value: string) => {
+    setInterviewAnswers((prev) => ({
+      ...prev,
+      [key]: value
+    }));
+    setHasSynthesisAttempted(false);
+    setSynthesisResult(null);
+  };
+
+  const handleInterviewBlur = async () => {
+    await persistInterviewAnswers(interviewAnswers, { silent: true });
   };
 
   const chooseFolder = async () => {
@@ -987,11 +1287,21 @@ const App = () => {
 
   if (mode === "onboarding") {
     const activeStepLabel = t(`onboarding.steps.${onboardingStep}`);
+    const crawlSourceRows = [
+      {
+        label: "Website",
+        source: crawlStatus.sources.website
+      },
+      {
+        label: "Naver Blog",
+        source: crawlStatus.sources.naver_blog
+      }
+    ];
     return (
       <main className="app-shell">
         <section className="panel onboarding-panel">
           <div className="onboarding-head">
-            <p className="eyebrow">Phase 1-6a</p>
+            <p className="eyebrow">Phase 1-6b</p>
             <div className="button-row">
               <span className="meta">{t("onboarding.language")}</span>
               <button
@@ -1156,7 +1466,7 @@ const App = () => {
           {onboardingStep === 3 ? (
             <>
               <p className="description">{t("onboarding.review.description")}</p>
-              <div className="meta-grid">
+              <div className="meta-grid onboarding-crawl-grid">
                 <p>
                   Website: <strong>{onboardingDraft.websiteUrl || "-"}</strong>
                 </p>
@@ -1170,8 +1480,32 @@ const App = () => {
                   YouTube: <strong>{onboardingDraft.youtubeUrl || "-"}</strong>
                 </p>
               </div>
+              <div className="crawl-status-list">
+                {crawlSourceRows.map((row) => (
+                  <article key={row.label} className="crawl-status-item">
+                    <p>
+                      <strong>{row.label}</strong>
+                    </p>
+                    <p>
+                      Status: <strong>{formatCrawlStatusLabel(row.source.status)}</strong>
+                    </p>
+                    <p>
+                      URL: <strong>{row.source.url || "-"}</strong>
+                    </p>
+                    {row.source.error ? <p className="notice">{row.source.error}</p> : null}
+                  </article>
+                ))}
+              </div>
+              {crawlDone ? (
+                <p className="meta">Brand review crawl completed (with best-effort partial failures allowed).</p>
+              ) : (
+                <p className="meta">Crawl is running in the background. You can continue to interview now.</p>
+              )}
               <div className="button-row">
                 <button onClick={() => moveToStep(2)}>{t("onboarding.back")}</button>
+                <button disabled={isCrawlPending || crawlStatus.state === "running"} onClick={() => void startOnboardingCrawl(true)}>
+                  Retry Crawl
+                </button>
                 <button className="primary" onClick={() => moveToStep(4)}>
                   {t("onboarding.review.next")}
                 </button>
@@ -1182,31 +1516,37 @@ const App = () => {
           {onboardingStep === 4 ? (
             <>
               <p className="description">{t("onboarding.interview.description")}</p>
+              {!crawlDone ? <p className="meta">Brand review crawl is still running. Keep answering interview questions.</p> : null}
               <div className="auth-form">
                 <textarea
                   value={interviewAnswers.q1}
                   placeholder={t("onboarding.interview.q1")}
-                  onChange={(event) => setInterviewAnswers((prev) => ({ ...prev, q1: event.target.value }))}
+                  onChange={(event) => setInterviewValue("q1", event.target.value)}
+                  onBlur={() => void handleInterviewBlur()}
                 />
                 <textarea
                   value={interviewAnswers.q2}
                   placeholder={t("onboarding.interview.q2")}
-                  onChange={(event) => setInterviewAnswers((prev) => ({ ...prev, q2: event.target.value }))}
+                  onChange={(event) => setInterviewValue("q2", event.target.value)}
+                  onBlur={() => void handleInterviewBlur()}
                 />
                 <textarea
                   value={interviewAnswers.q3}
                   placeholder={t("onboarding.interview.q3")}
-                  onChange={(event) => setInterviewAnswers((prev) => ({ ...prev, q3: event.target.value }))}
+                  onChange={(event) => setInterviewValue("q3", event.target.value)}
+                  onBlur={() => void handleInterviewBlur()}
                 />
                 <textarea
                   value={interviewAnswers.q4}
                   placeholder={t("onboarding.interview.q4")}
-                  onChange={(event) => setInterviewAnswers((prev) => ({ ...prev, q4: event.target.value }))}
+                  onChange={(event) => setInterviewValue("q4", event.target.value)}
+                  onBlur={() => void handleInterviewBlur()}
                 />
               </div>
+              {isInterviewSaving ? <p className="meta">Saving interview answers...</p> : null}
               <div className="button-row">
                 <button onClick={() => moveToStep(3)}>{t("onboarding.back")}</button>
-                <button className="primary" onClick={() => handleInterviewNext()}>
+                <button className="primary" disabled={isInterviewSaving} onClick={() => void handleInterviewNext()}>
                   {t("onboarding.interview.next")}
                 </button>
               </div>
@@ -1216,23 +1556,32 @@ const App = () => {
           {onboardingStep === 5 ? (
             <>
               <p className="description">{t("onboarding.result.description")}</p>
-              <div className="meta-grid">
-                <p>
-                  Q1: <strong>{interviewAnswers.q1 || "-"}</strong>
-                </p>
-                <p>
-                  Q2: <strong>{interviewAnswers.q2 || "-"}</strong>
-                </p>
-                <p>
-                  Q3: <strong>{interviewAnswers.q3 || "-"}</strong>
-                </p>
-                <p>
-                  Q4: <strong>{interviewAnswers.q4 || "-"}</strong>
-                </p>
-              </div>
+              {!crawlDone ? <p className="meta">Waiting for background crawl to finish before synthesis.</p> : null}
+              {isSynthesisPending ? <p className="meta">Generating result document...</p> : null}
+              {synthesisResult?.ok ? (
+                <div className="meta-grid">
+                  <p>
+                    Tone: <strong>{synthesisResult.brand_profile.detected_tone || "-"}</strong>
+                  </p>
+                  <p>
+                    Themes: <strong>{synthesisResult.brand_profile.key_themes.join(", ") || "-"}</strong>
+                  </p>
+                  <p>
+                    Audience: <strong>{synthesisResult.brand_profile.target_audience.join(", ") || "-"}</strong>
+                  </p>
+                  <p>
+                    Campaign Seasons: <strong>{synthesisResult.brand_profile.campaign_seasons.join(", ") || "-"}</strong>
+                  </p>
+                </div>
+              ) : (
+                <p className="empty">Synthesis has not been generated yet.</p>
+              )}
               <div className="button-row">
                 <button onClick={() => moveToStep(4)}>{t("onboarding.back")}</button>
-                <button className="primary" onClick={() => moveToStep(6)}>
+                <button disabled={!crawlDone || isSynthesisPending} onClick={() => void synthesizeOnboardingResult()}>
+                  {synthesisResult ? "Regenerate Result" : "Generate Result"}
+                </button>
+                <button className="primary" disabled={!synthesisResult || isSynthesisPending} onClick={() => moveToStep(6)}>
                   {t("onboarding.result.next")}
                 </button>
               </div>
@@ -1267,6 +1616,12 @@ const App = () => {
                 </p>
                 <p>
                   Watch Folder: <strong>{selectedPath || "-"}</strong>
+                </p>
+                <p>
+                  Detected Tone: <strong>{synthesisResult?.brand_profile.detected_tone || "-"}</strong>
+                </p>
+                <p>
+                  Key Themes: <strong>{synthesisResult?.brand_profile.key_themes.join(", ") || "-"}</strong>
                 </p>
               </div>
               <div className="button-row">
@@ -1315,7 +1670,7 @@ const App = () => {
             Session Step: <strong>{activeSession?.current_step ?? "-"}</strong>
           </p>
           <p>
-            Session Status: <strong>{activeSession?.status ?? "-"}</strong>
+            Session Status: <strong>{formatSessionStatus(activeSession)}</strong>
           </p>
         </div>
         <div className="button-row">
