@@ -260,6 +260,118 @@ const emitChatActionError = (payload) => {
 };
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value ?? null));
+const CRAWL_PAYLOAD_MAX_CHARS = 95_000;
+
+const normalizeWhitespace = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+
+const clampText = (value, maxLength = 500) => {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+};
+
+const isPlainObject = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+
+const sanitizeCrawlValue = (
+  value,
+  options = {
+    depth: 0,
+    maxDepth: 5,
+    maxArray: 24,
+    maxKeys: 36,
+    maxStringLength: 500
+  }
+) => {
+  if (value === null || value === undefined) {
+    return value ?? null;
+  }
+  if (typeof value === "string") {
+    return clampText(value, options.maxStringLength);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (options.depth >= options.maxDepth) {
+    if (Array.isArray(value)) {
+      return [];
+    }
+    if (isPlainObject(value)) {
+      return {};
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, options.maxArray)
+      .map((item) =>
+        sanitizeCrawlValue(item, {
+          ...options,
+          depth: options.depth + 1
+        })
+      );
+  }
+  if (isPlainObject(value)) {
+    const next = {};
+    for (const key of Object.keys(value).slice(0, options.maxKeys)) {
+      next[key] = sanitizeCrawlValue(value[key], {
+        ...options,
+        depth: options.depth + 1
+      });
+    }
+    return next;
+  }
+  return clampText(String(value), options.maxStringLength);
+};
+
+const buildCrawlPayloadForSynthesis = (crawlState) => {
+  const attemptA = sanitizeCrawlValue(crawlState);
+  if (JSON.stringify(attemptA ?? null).length <= CRAWL_PAYLOAD_MAX_CHARS) {
+    return attemptA;
+  }
+
+  const attemptB = sanitizeCrawlValue(crawlState, {
+    depth: 0,
+    maxDepth: 3,
+    maxArray: 10,
+    maxKeys: 20,
+    maxStringLength: 220
+  });
+  if (JSON.stringify(attemptB ?? null).length <= CRAWL_PAYLOAD_MAX_CHARS) {
+    return attemptB;
+  }
+
+  const sources = isPlainObject(attemptB?.sources) ? attemptB.sources : {};
+  const summarizeSource = (key) => {
+    const source = isPlainObject(sources[key]) ? sources[key] : {};
+    return {
+      source: key,
+      url: typeof source.url === "string" ? clampText(source.url, 300) : "",
+      status: typeof source.status === "string" ? source.status : "unknown",
+      error: typeof source.error === "string" ? clampText(source.error, 220) : null,
+      data: {
+        truncated: true
+      }
+    };
+  };
+
+  return {
+    state: typeof attemptB?.state === "string" ? attemptB.state : "done",
+    started_at: typeof attemptB?.started_at === "string" ? attemptB.started_at : null,
+    finished_at: typeof attemptB?.finished_at === "string" ? attemptB.finished_at : null,
+    sources: {
+      website: summarizeSource("website"),
+      naver_blog: summarizeSource("naver_blog"),
+      instagram: summarizeSource("instagram")
+    },
+    truncated: true,
+    reason: "crawl_payload_too_large"
+  };
+};
 
 const getOnboardingCrawlState = () => cloneJson(runtimeState.onboardingCrawlState);
 
@@ -843,7 +955,8 @@ const registerIpcHandlers = () => {
     if (!onboardingCrawlTask && runtimeState.onboardingCrawlState?.state !== "running") {
       runtimeState.onboardingCrawlState = createInitialCrawlState({
         websiteUrl: nextConfig.onboardingDraft?.websiteUrl ?? "",
-        naverBlogUrl: nextConfig.onboardingDraft?.naverBlogUrl ?? ""
+        naverBlogUrl: nextConfig.onboardingDraft?.naverBlogUrl ?? "",
+        instagramUrl: nextConfig.onboardingDraft?.instagramUrl ?? ""
       });
     }
     return nextConfig;
@@ -892,7 +1005,8 @@ const registerIpcHandlers = () => {
     const rawUrls = payload?.urls && typeof payload.urls === "object" ? payload.urls : {};
     const urls = {
       websiteUrl: typeof rawUrls.websiteUrl === "string" ? rawUrls.websiteUrl.trim() : "",
-      naverBlogUrl: typeof rawUrls.naverBlogUrl === "string" ? rawUrls.naverBlogUrl.trim() : ""
+      naverBlogUrl: typeof rawUrls.naverBlogUrl === "string" ? rawUrls.naverBlogUrl.trim() : "",
+      instagramUrl: typeof rawUrls.instagramUrl === "string" ? rawUrls.instagramUrl.trim() : ""
     };
 
     if (onboardingCrawlTask && runtimeState.onboardingCrawlState?.state === "running") {
@@ -946,6 +1060,13 @@ const registerIpcHandlers = () => {
               started_at: new Date().toISOString(),
               finished_at: new Date().toISOString(),
               error: urls.naverBlogUrl ? message : null
+            },
+            instagram: {
+              ...createInitialCrawlState(urls).sources.instagram,
+              status: urls.instagramUrl ? "failed" : "skipped",
+              started_at: new Date().toISOString(),
+              finished_at: new Date().toISOString(),
+              error: urls.instagramUrl ? message : null
             }
           }
         };
@@ -1004,7 +1125,8 @@ const registerIpcHandlers = () => {
     const interviewAnswers = normalizeInterviewAnswers(payload?.interviewAnswers);
     const urlMetadata = payload?.urlMetadata && typeof payload.urlMetadata === "object" ? payload.urlMetadata : {};
     const synthesisModeRaw = typeof payload?.synthesisMode === "string" ? payload.synthesisMode.trim() : "";
-    const synthesisMode = synthesisModeRaw || "phase_1_7a";
+    const synthesisMode = synthesisModeRaw || "phase_1_7b";
+    const crawlPayload = buildCrawlPayloadForSynthesis(getOnboardingCrawlState());
     const body = await callOrchestratorApi("/onboarding/synthesize", {
       method: "POST",
       headers: {
@@ -1012,7 +1134,7 @@ const registerIpcHandlers = () => {
       },
       body: JSON.stringify({
         org_id: orgId,
-        crawl_result: getOnboardingCrawlState(),
+        crawl_result: crawlPayload,
         interview_answers: interviewAnswers,
         url_metadata: urlMetadata,
         synthesis_mode: synthesisMode
@@ -1304,7 +1426,8 @@ app.whenReady().then(async () => {
   runtimeState.onboardingCompleted = config.onboardingCompleted;
   runtimeState.onboardingCrawlState = createInitialCrawlState({
     websiteUrl: config.onboardingDraft?.websiteUrl ?? "",
-    naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? ""
+    naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? "",
+    instagramUrl: config.onboardingDraft?.instagramUrl ?? ""
   });
   runtimeState.onboardingLastSynthesis = null;
   const storedAuth = loadAuthSession();

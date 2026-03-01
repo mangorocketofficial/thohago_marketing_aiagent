@@ -63,15 +63,26 @@ const defaultOnboardingCrawlStatus = (): OnboardingCrawlStatus => ({
       finished_at: null,
       error: null,
       data: null
+    },
+    instagram: {
+      source: "instagram",
+      url: "",
+      status: "pending",
+      started_at: null,
+      finished_at: null,
+      error: null,
+      data: null
     }
   }
 });
 
 const isCrawlSourceComplete = (source: OnboardingCrawlSourceResult): boolean =>
-  source.status === "done" || source.status === "failed" || source.status === "skipped";
+  source.status === "done" || source.status === "partial" || source.status === "failed" || source.status === "skipped";
 
 const isCrawlFullyComplete = (status: OnboardingCrawlStatus): boolean =>
-  isCrawlSourceComplete(status.sources.website) && isCrawlSourceComplete(status.sources.naver_blog);
+  isCrawlSourceComplete(status.sources.website) &&
+  isCrawlSourceComplete(status.sources.naver_blog) &&
+  isCrawlSourceComplete(status.sources.instagram);
 
 const formatCrawlStatusLabel = (status: OnboardingCrawlSourceResult["status"]): string => {
   if (status === "pending") {
@@ -82,6 +93,9 @@ const formatCrawlStatusLabel = (status: OnboardingCrawlSourceResult["status"]): 
   }
   if (status === "done") {
     return "Done";
+  }
+  if (status === "partial") {
+    return "Partial";
   }
   if (status === "failed") {
     return "Failed";
@@ -748,7 +762,8 @@ const App = () => {
         const nextStatus = await runtime.onboarding.startCrawl({
           urls: {
             websiteUrl: onboardingDraft.websiteUrl,
-            naverBlogUrl: onboardingDraft.naverBlogUrl
+            naverBlogUrl: onboardingDraft.naverBlogUrl,
+            instagramUrl: onboardingDraft.instagramUrl
           }
         });
         setCrawlStatus(nextStatus);
@@ -758,7 +773,14 @@ const App = () => {
         setIsCrawlPending(false);
       }
     },
-    [crawlStatus.started_at, crawlStatus.state, onboardingDraft.naverBlogUrl, onboardingDraft.websiteUrl, runtime]
+    [
+      crawlStatus.started_at,
+      crawlStatus.state,
+      onboardingDraft.instagramUrl,
+      onboardingDraft.naverBlogUrl,
+      onboardingDraft.websiteUrl,
+      runtime
+    ]
   );
 
   const persistInterviewAnswers = useCallback(
@@ -828,7 +850,7 @@ const App = () => {
       const response = await runtime.onboarding.synthesize({
         accessToken,
         orgId,
-        synthesisMode: "phase_1_7a",
+        synthesisMode: "phase_1_7b",
         interviewAnswers,
         urlMetadata: {
           website_url: onboardingDraft.websiteUrl,
@@ -1323,13 +1345,19 @@ const App = () => {
       {
         label: "Naver Blog",
         source: crawlStatus.sources.naver_blog
+      },
+      {
+        label: "Instagram",
+        source: crawlStatus.sources.instagram
       }
     ];
+    const instagramStatus = crawlStatus.sources.instagram.status;
+    const showInstagramGuidance = instagramStatus === "partial" || instagramStatus === "failed";
     return (
       <main className="app-shell">
         <section className="panel onboarding-panel">
           <div className="onboarding-head">
-            <p className="eyebrow">Phase 1-6b</p>
+            <p className="eyebrow">Phase 1-7b</p>
             <div className="button-row">
               <span className="meta">{t("onboarding.language")}</span>
               <button
@@ -1588,6 +1616,20 @@ const App = () => {
               {isSynthesisPending ? <p className="meta">Generating result document...</p> : null}
               {synthesisResult?.ok ? (
                 <>
+                  <div className="source-coverage-row">
+                    {crawlSourceRows.map((row) => (
+                      <span key={`coverage-${row.label}`} className={`source-coverage-badge status-${row.source.status}`}>
+                        {row.label}: {formatCrawlStatusLabel(row.source.status)}
+                      </span>
+                    ))}
+                  </div>
+                  {showInstagramGuidance ? (
+                    <p className="meta">
+                      {instagramStatus === "partial"
+                        ? "Instagram crawl collected only partial public metadata. The review includes explicit data limitation notes."
+                        : "Instagram crawl could not collect profile metadata. The review uses website/blog/interview evidence and records this limitation."}
+                    </p>
+                  ) : null}
                   <div className="meta-grid">
                     <p>
                       Tone: <strong>{synthesisResult.brand_profile.detected_tone || "-"}</strong>

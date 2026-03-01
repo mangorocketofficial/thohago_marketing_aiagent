@@ -165,9 +165,9 @@ export type AuthSessionSummary = {
   email: string | null;
 };
 
-export type CrawlSourceStatus = "pending" | "running" | "done" | "failed" | "skipped";
+export type CrawlSourceStatus = "pending" | "running" | "done" | "partial" | "failed" | "skipped";
 
-export type OnboardingCrawlSource = "website" | "naver_blog";
+export type OnboardingCrawlSource = "website" | "naver_blog" | "instagram";
 
 export type OnboardingCrawlSourceResult = {
   source: OnboardingCrawlSource;
@@ -186,6 +186,7 @@ export type OnboardingCrawlStatus = {
   sources: {
     website: OnboardingCrawlSourceResult;
     naver_blog: OnboardingCrawlSourceResult;
+    instagram: OnboardingCrawlSourceResult;
   };
 };
 
@@ -230,6 +231,7 @@ export type OnboardingResultDocument = {
   known_data_gaps: string[];
   confidence_notes: string[];
   review_markdown?: string;
+  version?: "phase_1_7a" | "phase_1_7b";
   report_version?: "phase_1_7a" | "phase_1_7b";
   template_ref?: string;
   data_coverage_notice?: string;

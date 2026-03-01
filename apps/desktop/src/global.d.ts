@@ -130,7 +130,7 @@ declare global {
       };
       onboarding: {
         onCrawlProgress: (cb: (payload: {
-          source: "website" | "naver_blog" | null;
+          source: "website" | "naver_blog" | "instagram" | null;
           sourceState: OnboardingCrawlSourceResult | null;
           crawlState: OnboardingCrawlStatus;
         }) => void) => () => void;
@@ -158,6 +158,7 @@ declare global {
           urls: {
             websiteUrl: string;
             naverBlogUrl: string;
+            instagramUrl: string;
           };
         }) => Promise<OnboardingCrawlStatus>;
         saveInterview: (payload: {

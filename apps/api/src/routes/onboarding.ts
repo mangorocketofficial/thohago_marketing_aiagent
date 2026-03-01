@@ -8,7 +8,7 @@ const MAX_TEXT_LENGTH = 4000;
 const MAX_JSON_LENGTH = 120_000;
 const MAX_URL_LENGTH = 1024;
 const REVIEW_TEMPLATE_REF = "월드프렌즈코리아_브랜드리뷰.md";
-const PHASE_1_7_REPORT_VERSION = "phase_1_7a";
+const PHASE_1_7_REPORT_VERSION = "phase_1_7b";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const REQUIRED_REVIEW_HEADINGS = [
@@ -27,6 +27,11 @@ const parseOptionalString = (value: unknown): string | null => {
   }
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+};
+
+const normalizeSynthesisMode = (value: unknown): "phase_1_7a" | "phase_1_7b" => {
+  const normalized = parseOptionalString(value);
+  return normalized === "phase_1_7a" ? "phase_1_7a" : PHASE_1_7_REPORT_VERSION;
 };
 
 const parseRequiredString = (value: unknown, field: string, maxLength = 200): string => {
@@ -503,6 +508,9 @@ const buildDataCoverageNotice = (crawlResult: Record<string, unknown>): string =
     if (status === "done") {
       return "정상 수집";
     }
+    if (status === "partial") {
+      return "부분 수집";
+    }
     if (status === "failed") {
       return "수집 실패";
     }
@@ -520,11 +528,27 @@ const buildDataCoverageNotice = (crawlResult: Record<string, unknown>): string =
 
   const websiteStatus = getCrawlSourceStatus(crawlResult, "website");
   const naverStatus = getCrawlSourceStatus(crawlResult, "naver_blog");
+  const instagramStatus = getCrawlSourceStatus(crawlResult, "instagram");
+  const instagramSummary = (() => {
+    if (instagramStatus === "done") {
+      return "프로필 + 최근 게시물 메타 확보";
+    }
+    if (instagramStatus === "partial") {
+      return "공개 메타데이터만 제한 확보";
+    }
+    if (instagramStatus === "failed") {
+      return "username-only fallback";
+    }
+    if (instagramStatus === "skipped") {
+      return "URL 미입력";
+    }
+    return "상태 미확정";
+  })();
 
   return [
     `웹사이트: ${toLabel(websiteStatus)}`,
     `네이버 블로그: ${toLabel(naverStatus)}`,
-    "인스타그램: 1-7a 단계에서는 직접 크롤링 없이 입력 URL/인터뷰 기반으로 제한 분석"
+    `인스타그램: ${toLabel(instagramStatus)} (${instagramSummary})`
   ].join(", ");
 };
 
@@ -535,6 +559,19 @@ const collectKnownDataGaps = (
   const gaps: string[] = [];
   const websiteStatus = getCrawlSourceStatus(crawlResult, "website");
   const naverStatus = getCrawlSourceStatus(crawlResult, "naver_blog");
+  const instagramStatus = getCrawlSourceStatus(crawlResult, "instagram");
+  const instagramSource = getCrawlSource(crawlResult, "instagram");
+  const instagramData = toRecord(instagramSource.data);
+  const instagramPosts = parseStringArray(
+    Array.isArray(instagramData.recent_posts)
+      ? instagramData.recent_posts.map((entry) =>
+          entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).caption === "string"
+            ? ((entry as Record<string, unknown>).caption as string)
+            : ""
+        )
+      : [],
+    6
+  );
 
   if (websiteStatus !== "done") {
     gaps.push("웹사이트 데이터 수집이 완전하지 않아 구조/메시지 분석의 정확도에 제한이 있습니다.");
@@ -542,7 +579,15 @@ const collectKnownDataGaps = (
   if (naverStatus !== "done") {
     gaps.push("네이버 블로그 데이터 수집이 완전하지 않아 콘텐츠/SEO 분석의 정확도에 제한이 있습니다.");
   }
-  gaps.push("인스타그램은 1-7a에서 직접 크롤링하지 않으므로 공개 프로필 수준의 제한 분석만 가능합니다.");
+  if (instagramStatus === "skipped") {
+    gaps.push("인스타그램 URL이 입력되지 않아 채널별 일관성 분석은 웹사이트/네이버 블로그 중심으로 진행했습니다.");
+  } else if (instagramStatus === "partial") {
+    gaps.push("인스타그램은 공개 메타데이터 일부만 수집되어 포스트 단위 정밀 진단 범위가 제한됩니다.");
+  } else if (instagramStatus === "failed") {
+    gaps.push("인스타그램 수집이 실패하여 username-only fallback 기반의 제한 분석을 반영했습니다.");
+  } else if (instagramStatus === "done" && instagramPosts.length < 2) {
+    gaps.push("인스타그램 최근 게시물 샘플 수가 제한적이어서 채널 톤/일관성 분석의 정밀도가 낮을 수 있습니다.");
+  }
 
   if (!interviewAnswers.q2.trim()) {
     gaps.push("타깃 오디언스 입력이 제한적이어서 일부 타깃 인사이트를 추정했습니다.");
@@ -585,9 +630,11 @@ const buildOnboardingDocument = (params: {
   knownDataGaps: string[];
   reviewMarkdown: string;
   dataCoverageNotice: string;
+  reportVersion: "phase_1_7a" | "phase_1_7b";
 }): SynthesizedDocument & {
   review_markdown: string;
   report_version: string;
+  version: string;
   template_ref: string;
   data_coverage_notice: string;
 } => ({
@@ -604,7 +651,8 @@ const buildOnboardingDocument = (params: {
   known_data_gaps: params.knownDataGaps,
   confidence_notes: params.profile.confidence_notes,
   review_markdown: params.reviewMarkdown,
-  report_version: PHASE_1_7_REPORT_VERSION,
+  version: params.reportVersion,
+  report_version: params.reportVersion,
   template_ref: REVIEW_TEMPLATE_REF,
   data_coverage_notice: params.dataCoverageNotice
 });
@@ -631,7 +679,14 @@ const callAnthropicText = async (params: {
         max_tokens: params.maxTokens,
         temperature: 0.2,
         system: params.systemPrompt,
-        messages: [{ role: "user", content: params.userPrompt }]
+        messages: [{ role: "user", content: params.userPrompt }],
+        tools: [
+          {
+            type: "web_search_20250305",
+            name: "web_search",
+            max_uses: 5
+          }
+        ]
       })
     });
 
@@ -641,8 +696,13 @@ const callAnthropicText = async (params: {
       return null;
     }
 
-    const text = body.content?.find((entry) => entry.type === "text" && !!entry.text?.trim())?.text?.trim();
-    return text || null;
+    const text =
+      body.content
+        ?.filter((entry) => entry.type === "text" && !!entry.text?.trim())
+        .map((entry) => entry.text?.trim() ?? "")
+        .filter(Boolean)
+        .join("\n\n") ?? "";
+    return text.trim() || null;
   } catch (error) {
     console.warn("[Onboarding] Anthropic review generation error:", error);
     return null;
@@ -710,8 +770,10 @@ const buildFallbackReviewMarkdown = (params: {
 }): string => {
   const websiteSource = getCrawlSource(params.crawlResult, "website");
   const naverSource = getCrawlSource(params.crawlResult, "naver_blog");
+  const instagramSource = getCrawlSource(params.crawlResult, "instagram");
   const websiteData = toRecord(websiteSource.data);
   const naverData = toRecord(naverSource.data);
+  const instagramData = toRecord(instagramSource.data);
   const websiteHeadings = parseStringArray(websiteData.headings, 6);
   const websiteParagraphs = parseStringArray(websiteData.paragraphs, 4);
   const naverPosts = parseStringArray(
@@ -724,9 +786,28 @@ const buildFallbackReviewMarkdown = (params: {
       : [],
     6
   );
+  const instagramPosts = parseStringArray(
+    Array.isArray(instagramData.recent_posts)
+      ? instagramData.recent_posts.map((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return "";
+          }
+          const row = entry as Record<string, unknown>;
+          if (typeof row.caption === "string") {
+            return row.caption;
+          }
+          if (typeof row.title === "string") {
+            return row.title;
+          }
+          return "";
+        })
+      : [],
+    6
+  );
 
   const websiteStatus = getCrawlSourceStatus(params.crawlResult, "website");
   const naverStatus = getCrawlSourceStatus(params.crawlResult, "naver_blog");
+  const instagramStatus = getCrawlSourceStatus(params.crawlResult, "instagram");
 
   const websiteIssues: ReviewIssue[] = [];
   if (websiteStatus !== "done") {
@@ -763,14 +844,46 @@ const buildFallbackReviewMarkdown = (params: {
     }
   }
 
-  const instagramIssues: ReviewIssue[] = [
-    {
-      issue: "1-7a 단계에서는 인스타그램 본문 데이터를 직접 수집하지 않아 정밀 감사가 제한됩니다.",
+  const instagramIssues: ReviewIssue[] = [];
+  if (instagramStatus === "failed") {
+    instagramIssues.push({
+      issue: "인스타그램 크롤링이 실패해 username-only fallback 상태입니다.",
       location: "인스타그램 채널",
       severity: "높음",
-      suggestion: "프로필/최근 게시물 수준 공개 데이터 접근 또는 1-7b 확장 수집을 적용하세요."
+      suggestion: "공개 계정 여부, URL 형식, 접속 제한 여부를 점검한 후 재시도하세요."
+    });
+  } else if (instagramStatus === "partial") {
+    instagramIssues.push({
+      issue: "인스타그램은 공개 메타데이터만 부분 수집되어 게시물 단위 진단 범위가 제한됩니다.",
+      location: "프로필/메타",
+      severity: "중간",
+      suggestion: "바이오, 링크, 대표 포스트 캡션에 핵심 메시지/CTA를 명시해 메타 기반 분석 품질을 높이세요."
+    });
+  } else if (instagramStatus === "skipped") {
+    instagramIssues.push({
+      issue: "인스타그램 URL이 미입력 상태로 채널별 정합성 분석 근거가 부족합니다.",
+      location: "인스타그램 채널",
+      severity: "중간",
+      suggestion: "공개 프로필 URL을 입력해 교차 채널 일관성 검토 범위를 확대하세요."
+    });
+  } else {
+    if (instagramPosts.length < 2) {
+      instagramIssues.push({
+        issue: "최근 게시물 표본이 적어 운영 톤/콘텐츠 패턴 판단의 정밀도가 낮습니다.",
+        location: "최근 게시물",
+        severity: "중간",
+        suggestion: "캡션 구조(문제-근거-행동유도)를 표준화하고 핵심 게시물 표본을 확장하세요."
+      });
     }
-  ];
+    if (!parseOptionalString(instagramData.biography) && !parseOptionalString(instagramData.meta_description)) {
+      instagramIssues.push({
+        issue: "바이오/메타 설명이 약해 기관 정체성과 행동 유도가 즉시 전달되지 않습니다.",
+        location: "프로필 바이오",
+        severity: "중간",
+        suggestion: "기관 역할, 수혜 대상, CTA 링크 목적을 2-3줄로 압축해 반영하세요."
+      });
+    }
+  }
 
   const naverIssues: ReviewIssue[] = [];
   if (naverStatus !== "done") {
@@ -809,7 +922,7 @@ const buildFallbackReviewMarkdown = (params: {
   const priorities = [
     "웹사이트 핵심 랜딩 메시지와 CTA를 미션 중심으로 재정렬",
     "네이버 블로그의 카테고리/SEO 설명을 강화해 검색 유입 개선",
-    "인스타그램 채널은 1-7b 확장 전까지 공개 프로필 수준 운영 원칙을 명확화"
+    "인스타그램 프로필/게시물 메타 기준으로 채널 역할과 CTA 연결 구조를 표준화"
   ];
 
   const websiteSummary = websiteHeadings.length
@@ -818,13 +931,23 @@ const buildFallbackReviewMarkdown = (params: {
   const naverSummary = naverPosts.length
     ? `최근 노출 게시물 예시는 ${naverPosts.slice(0, 3).join(", ")} 입니다.`
     : "네이버 블로그 최근 게시물 데이터가 제한적입니다.";
+  const instagramSummary =
+    instagramStatus === "done"
+      ? instagramPosts.length
+        ? `최근 게시물 메타 샘플: ${instagramPosts.slice(0, 2).join(" / ")}`
+        : "최근 게시물 메타가 제한되어 채널 톤 일관성 진단은 부분적으로 수행했습니다."
+      : instagramStatus === "partial"
+        ? "프로필 공개 메타만 확보되어 바이오/메타 중심으로 제한 분석했습니다."
+        : instagramStatus === "failed"
+          ? "수집 실패로 username-only fallback 상태이며, 인터뷰/타 채널 근거 중심으로 제한 분석했습니다."
+          : "URL 미입력으로 인스타그램 채널 분석은 제외되었습니다.";
 
   return [
     `# 브랜드 리뷰: ${params.org.name}`,
     "",
     `**작성일:** ${new Date().toLocaleDateString("ko-KR")}`,
-    "**검토 채널:** 웹사이트, 인스타그램(제한), 네이버 블로그",
-    "**리뷰 유형:** 종합 브랜드 감사 (Phase 1-7a)",
+    "**검토 채널:** 웹사이트, 인스타그램, 네이버 블로그",
+    "**리뷰 유형:** 종합 브랜드 감사 (Phase 1-7b)",
     `**데이터 수집 범위:** ${params.dataCoverageNotice}`,
     "",
     "---",
@@ -864,13 +987,13 @@ const buildFallbackReviewMarkdown = (params: {
     toIssueTable(instagramIssues),
     "",
     "#### 2-2. 명확성",
-    "1-7a 단계에서는 인스타그램 게시물 단위 분석 없이 입력 URL과 인터뷰 맥락 중심으로만 평가했습니다.",
+    instagramSummary,
     "",
     "#### 2-3. 일관성",
-    "웹사이트/블로그의 핵심 메시지 축을 인스타그램 바이오 문구와 일치시키는 운영 가이드가 필요합니다.",
+    "웹사이트/블로그의 핵심 메시지 축을 인스타그램 바이오/캡션 CTA와 동일한 문장 구조로 맞추는 운영 가이드가 필요합니다.",
     "",
     "#### 2-4. 전문성",
-    "공개 데이터 접근이 제한된 상태이므로 게시 빈도/반응률 기반 정밀 진단은 1-7b에서 확장합니다.",
+    "공개 데이터 기반 분석 특성상 반응률/비공개 지표 진단은 제한되며, 근거 가능한 범위에서 메시지 품질/일관성 중심으로 평가했습니다.",
     "",
     "### 3. 네이버 블로그",
     "",
@@ -979,16 +1102,29 @@ const buildBrandReviewPrompt = (params: {
   knownDataGaps: string[];
 }): { systemPrompt: string; userPrompt: string } => {
   const systemPrompt = [
-    "당신은 한국 NGO/소셜벤처 전문 디지털 마케팅 컨설턴트입니다.",
-    "실행 가능한 제안과 근거 중심으로 한국어 마크다운 보고서를 작성하세요.",
-    "표/섹션 구조를 엄격히 지키고, 크롤링 실패 채널은 데이터 한계를 명확히 고지하세요."
+    "당신은 한국 NGO·소셜벤처·사회적기업 전문 디지털 마케팅 컨설턴트입니다.",
+    "10년 이상의 경험을 바탕으로 온라인 채널 감사, 브랜드 전략 수립, 콘텐츠 마케팅을 전문으로 합니다.",
+    "",
+    "작성 원칙:",
+    "- 구체적인 수치와 예시를 반드시 포함",
+    "- 모호한 표현 대신 실행 가능한 제안",
+    "- 한국 NGO/소셜벤처 특수성 반영 (제한된 예산, 소규모 팀, 공익적 미션)",
+    "- 이슈 심각도: 높음/중간/낮음 분류",
+    "- 수정 제안: Before(현재:)/After(수정안:) 형식",
+    "- 2026년 SNS 트렌드 반영",
+    "",
+    "웹서치 활용 원칙:",
+    "- 크롤링 데이터가 부족한 채널은 웹서치를 활용해 공개된 정보를 보충하세요",
+    "- 기관명, SNS 계정명으로 검색하여 최신 활동, 평판, 콘텐츠 현황을 확인하세요",
+    "- 검색 결과를 사실 기반 분석에 반영하세요"
   ].join("\n");
 
   const websiteSource = getCrawlSource(params.crawlResult, "website");
   const naverSource = getCrawlSource(params.crawlResult, "naver_blog");
+  const instagramSource = getCrawlSource(params.crawlResult, "instagram");
 
   const userPrompt = [
-    "다음 데이터를 바탕으로 브랜드 리뷰 마크다운을 작성하세요.",
+    "다음 기관의 온라인 채널을 종합 감사하고 전문적인 브랜드 리뷰 보고서를 작성해주세요.",
     "",
     "## 기관 정보",
     `- 기관명: ${params.org.name}`,
@@ -1001,6 +1137,9 @@ const buildBrandReviewPrompt = (params: {
     "",
     "### 네이버 블로그",
     toPromptJson(naverSource),
+    "",
+    "### 인스타그램",
+    toPromptJson(instagramSource),
     "",
     "## 인터뷰 답변",
     `- 톤: ${params.interviewAnswers.q1 || "미입력"}`,
@@ -1016,8 +1155,12 @@ const buildBrandReviewPrompt = (params: {
     "- 반드시 한국어 마크다운으로 작성",
     "- 아래 섹션 순서를 정확히 유지",
     "- 각 채널 이슈 표에 심각도(높음/중간/낮음) 포함",
-    "- 수정 제안은 Before/After 코드블록으로 제시",
+    "- 수정 제안은 채널별 최소 1개 이상 Before/After 코드블록으로 제시",
     "- 2026년 전략 제안은 5개 이상 작성",
+    "- 전략 제안의 각 항목에 난이도(쉬움/보통/어려움)를 표시",
+    "- 본문 마지막에 데이터 범위/한계 요약 문장을 반드시 포함",
+    "- 문서가 끊기지 않도록 마지막 문장까지 반드시 완성",
+    "- 크롤링 데이터가 부족한 부분은 웹서치를 통해 추가 정보를 확인한 뒤 분석에 반영",
     "",
     "## 필수 섹션 순서",
     "1) # 브랜드 리뷰: [기관명]",
@@ -1028,7 +1171,7 @@ const buildBrandReviewPrompt = (params: {
     "6) ## 수정 제안 (주요 항목)",
     "7) ## 2026년 통합 전략 제안",
     "",
-    "인스타그램은 1-7a에서 직접 크롤링하지 않으므로, 데이터 제한을 명시하고 가능한 범위에서 분석하세요."
+    "인스타그램은 best-effort 수집 결과(done/partial/failed/skipped)를 그대로 반영하고, partial/failed/skipped일 때는 한계와 대체 근거를 명시하세요."
   ].join("\n");
 
   return {
@@ -1085,8 +1228,35 @@ const validateReviewMarkdown = (value: string): { ok: boolean; reasons: string[]
   }
 
   const minSectionCount = (normalized.match(/^##\s+/gm) ?? []).length;
-  if (minSectionCount < 6) {
+  if (minSectionCount < 5) {
     reasons.push("insufficient_sections");
+  }
+
+  const strategyCount = (normalized.match(/^\d+\.\s+/gm) ?? []).length;
+  if (strategyCount < 5) {
+    reasons.push("insufficient_strategy_items");
+  }
+
+  const difficultyLabelCount = (normalized.match(/(쉬움|보통|어려움)/g) ?? []).length;
+  if (difficultyLabelCount < 3) {
+    reasons.push("missing_difficulty_labels");
+  }
+
+  const channelNames = ["웹사이트", "인스타그램", "네이버 블로그"];
+  for (const channelName of channelNames) {
+    if (!normalized.includes(channelName)) {
+      reasons.push(`missing_channel_marker:${channelName}`);
+    }
+  }
+
+  const beforeCount = (normalized.match(/현재:/g) ?? []).length;
+  const afterCount = (normalized.match(/수정안:/g) ?? []).length;
+  if (beforeCount < 1 || afterCount < 1) {
+    reasons.push("insufficient_before_after_examples");
+  }
+
+  if (!/(데이터 수집 범위|데이터 범위\/한계|데이터 범위)/.test(normalized)) {
+    reasons.push("missing_data_coverage_notice");
   }
 
   return {
@@ -1137,7 +1307,7 @@ const generateReviewMarkdown = async (params: {
   const firstDraft = await callAnthropicText({
     systemPrompt: prompt.systemPrompt,
     userPrompt: prompt.userPrompt,
-    maxTokens: 3200
+    maxTokens: 10000
   });
   const firstValidation = validateReviewMarkdown(firstDraft ?? "");
   if (firstValidation.ok) {
@@ -1152,7 +1322,7 @@ const generateReviewMarkdown = async (params: {
   const secondDraft = await callAnthropicText({
     systemPrompt: prompt.systemPrompt,
     userPrompt: regenerationPrompt,
-    maxTokens: 4200
+    maxTokens: 12000
   });
   const secondValidation = validateReviewMarkdown(secondDraft ?? "");
   if (secondValidation.ok) {
@@ -1353,7 +1523,7 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       body.url_metadata && typeof body.url_metadata === "object" && !Array.isArray(body.url_metadata)
         ? (body.url_metadata as Record<string, unknown>)
         : {};
-    const synthesisMode = parseOptionalString(body.synthesis_mode) ?? PHASE_1_7_REPORT_VERSION;
+    const synthesisMode = normalizeSynthesisMode(body.synthesis_mode);
 
     const fallbackSynthesis = synthesizeProfile({
       crawlResult,
@@ -1390,7 +1560,8 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       profile,
       knownDataGaps,
       reviewMarkdown,
-      dataCoverageNotice
+      dataCoverageNotice,
+      reportVersion: synthesisMode
     });
 
     const crawlSources = parseObject(crawlResult.sources ?? {}, "crawl_result.sources");
@@ -1407,6 +1578,10 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
           status:
             parseOptionalString((crawlSources.naver_blog as Record<string, unknown> | undefined)?.status) ?? "unknown",
           error: parseOptionalString((crawlSources.naver_blog as Record<string, unknown> | undefined)?.error)
+        },
+        instagram: {
+          status: parseOptionalString((crawlSources.instagram as Record<string, unknown> | undefined)?.status) ?? "unknown",
+          error: parseOptionalString((crawlSources.instagram as Record<string, unknown> | undefined)?.error)
         }
       }
     };
