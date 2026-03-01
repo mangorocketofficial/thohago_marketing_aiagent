@@ -23,3 +23,4 @@
 ## Latest Completion
 
 - 1-7d: `docs/progress/phase-1-7d-completion.md` (Instagram Graph Business Discovery Crawler Replacement)
+- 1-7e: `docs/progress/phase-1-7e-completion.md` (Naver Blog Hybrid Collection via Search API + RSS Fallback)

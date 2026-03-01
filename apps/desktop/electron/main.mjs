@@ -281,7 +281,9 @@ const sanitizeCrawlValue = (
   value,
   options = {
     depth: 0,
-    maxDepth: 5,
+    // Keep per-post objects in crawl_payload (e.g. naver_blog.recent_posts[*]).
+    // Depth path: root(0)->sources(1)->naver_blog(2)->data(3)->recent_posts(4)->post(5).
+    maxDepth: 6,
     maxArray: 24,
     maxKeys: 36,
     maxStringLength: 500
@@ -336,8 +338,8 @@ const buildCrawlPayloadForSynthesis = (crawlState) => {
 
   const attemptB = sanitizeCrawlValue(crawlState, {
     depth: 0,
-    maxDepth: 3,
-    maxArray: 10,
+    maxDepth: 5,
+    maxArray: 8,
     maxKeys: 20,
     maxStringLength: 220
   });
