@@ -10,3 +10,4 @@
 | 1-5b | Frontend Integration | Done | 2026-02-28 | [phase-1-5b-completion.md](./phase-1-5b-completion.md) |
 | 1-6a | Onboarding UX + Auth Hardening | Done | 2026-02-28 | [phase-1-6a-completion.md](./phase-1-6a-completion.md) |
 | 1-6b | Brand Review + Interview + Synthesis MVP | Done | 2026-03-01 | [phase-1-6b-completion.md](./phase-1-6b-completion.md) |
+| 1-7a | Brand Review Markdown Foundation (Contract-Safe) | Done | 2026-03-01 | [phase-1-7a-completion.md](./phase-1-7a-completion.md) |

@@ -305,6 +305,47 @@ const normalizeInterviewAnswers = (input) => {
   return fallback;
 };
 
+const resolveReviewMarkdown = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const direct = typeof payload.review_markdown === "string" ? payload.review_markdown.trim() : "";
+  if (direct) {
+    return direct;
+  }
+
+  const document = payload.onboarding_result_document;
+  if (!document || typeof document !== "object") {
+    return "";
+  }
+
+  const nested = typeof document.review_markdown === "string" ? document.review_markdown.trim() : "";
+  return nested;
+};
+
+const exportBrandReviewToFolder = async ({ watchPath, synthesisPayload }) => {
+  const normalizedPath = String(watchPath ?? "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const markdown = resolveReviewMarkdown(synthesisPayload);
+  if (!markdown) {
+    return null;
+  }
+
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    const filePath = path.join(normalizedPath, `브랜드리뷰_${date}.md`);
+    await fs.promises.writeFile(filePath, markdown, "utf8");
+    return filePath;
+  } catch (error) {
+    console.warn("[Onboarding] Failed to export brand review markdown:", error);
+    return null;
+  }
+};
+
 const waitForWindowReady = (win) =>
   win.webContents.isLoadingMainFrame()
     ? new Promise((resolve) => win.webContents.once("did-finish-load", resolve))
@@ -962,6 +1003,8 @@ const registerIpcHandlers = () => {
 
     const interviewAnswers = normalizeInterviewAnswers(payload?.interviewAnswers);
     const urlMetadata = payload?.urlMetadata && typeof payload.urlMetadata === "object" ? payload.urlMetadata : {};
+    const synthesisModeRaw = typeof payload?.synthesisMode === "string" ? payload.synthesisMode.trim() : "";
+    const synthesisMode = synthesisModeRaw || "phase_1_7a";
     const body = await callOrchestratorApi("/onboarding/synthesize", {
       method: "POST",
       headers: {
@@ -971,12 +1014,25 @@ const registerIpcHandlers = () => {
         org_id: orgId,
         crawl_result: getOnboardingCrawlState(),
         interview_answers: interviewAnswers,
-        url_metadata: urlMetadata
+        url_metadata: urlMetadata,
+        synthesis_mode: synthesisMode
       })
     });
 
-    runtimeState.onboardingLastSynthesis = body ?? null;
-    return body;
+    const reviewExportPath = await exportBrandReviewToFolder({
+      watchPath: runtimeState.watchPath,
+      synthesisPayload: body
+    });
+    const responseWithExport =
+      reviewExportPath && body && typeof body === "object"
+        ? {
+            ...body,
+            review_export_path: reviewExportPath
+          }
+        : body;
+
+    runtimeState.onboardingLastSynthesis = responseWithExport ?? null;
+    return responseWithExport;
   });
 
   ipcMain.handle("onboarding:get-last-synthesis", () => cloneJson(runtimeState.onboardingLastSynthesis));
@@ -1037,6 +1093,16 @@ const registerIpcHandlers = () => {
     runtimeState.watchPath = resolvedPath;
     runtimeState.orgId = resolvedOrgId;
     runtimeState.onboardingCompleted = true;
+    const reviewExportPath = await exportBrandReviewToFolder({
+      watchPath: resolvedPath,
+      synthesisPayload: runtimeState.onboardingLastSynthesis
+    });
+    if (reviewExportPath && runtimeState.onboardingLastSynthesis && typeof runtimeState.onboardingLastSynthesis === "object") {
+      runtimeState.onboardingLastSynthesis = {
+        ...runtimeState.onboardingLastSynthesis,
+        review_export_path: reviewExportPath
+      };
+    }
 
     await enqueueRuntimeStart(resolvedPath, resolvedOrgId);
     return getWatcherStatus();

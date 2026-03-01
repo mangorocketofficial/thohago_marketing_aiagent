@@ -72,10 +72,11 @@ if (!Number.isFinite(apiPort) || apiPort <= 0) {
 
 export const env = {
   apiPort,
-  apiSecret: readEnv("API_SECRET"),
+  apiSecret: requireEnv("API_SECRET"),
   supabaseUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseServiceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
   anthropicApiKey: readEnv("ANTHROPIC_API_KEY"),
-  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-opus-4-5")
+  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-opus-4-5"),
+  openAiApiKey: readEnv("OPENAI_API_KEY"),
+  openAiProfileModel: readEnv("OPENAI_PROFILE_MODEL", "gpt-4o-mini")
 };
-

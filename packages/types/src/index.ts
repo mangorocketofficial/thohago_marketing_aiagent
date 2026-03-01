@@ -207,6 +207,13 @@ export type BrandProfile = {
   campaign_seasons: string[];
   content_directions: string[];
   confidence_notes: string[];
+  channel_roles?: {
+    website?: string;
+    naver_blog?: string;
+    instagram?: string;
+  };
+  top_priorities?: string[];
+  suggested_hashtags?: string[];
 };
 
 export type OnboardingResultDocument = {
@@ -222,6 +229,11 @@ export type OnboardingResultDocument = {
   recommended_initial_content_directions: string[];
   known_data_gaps: string[];
   confidence_notes: string[];
+  review_markdown?: string;
+  report_version?: "phase_1_7a" | "phase_1_7b";
+  template_ref?: string;
+  data_coverage_notice?: string;
+  synthesis_mode?: string;
 };
 
 export type OrgBrandSettings = {

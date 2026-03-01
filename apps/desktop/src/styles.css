@@ -207,6 +207,38 @@ button.primary {
   gap: 4px;
 }
 
+.markdown-card {
+  margin-top: 12px;
+  border: 1px solid #dbe2ec;
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.markdown-viewer {
+  max-height: 440px;
+  overflow: auto;
+  padding: 14px;
+  color: #1f2937;
+  line-height: 1.55;
+}
+
+.markdown-viewer h1,
+.markdown-viewer h2,
+.markdown-viewer h3 {
+  margin: 14px 0 8px;
+}
+
+.markdown-viewer p,
+.markdown-viewer li {
+  margin: 6px 0;
+}
+
+.markdown-viewer table {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
 .notice {
   margin-top: 8px;
   color: #8a1f35;

@@ -1,11 +1,25 @@
 import { Router } from "express";
 import { requireUserJwt } from "../lib/auth";
+import { env } from "../lib/env";
 import { HttpError, toHttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_JSON_LENGTH = 120_000;
 const MAX_URL_LENGTH = 1024;
+const REVIEW_TEMPLATE_REF = "월드프렌즈코리아_브랜드리뷰.md";
+const PHASE_1_7_REPORT_VERSION = "phase_1_7a";
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const REQUIRED_REVIEW_HEADINGS = [
+  "# 브랜드 리뷰:",
+  "## 종합 요약",
+  "## 채널별 상세 분석",
+  "## 채널 간 브랜드 일관성 분석",
+  "## 법적 / 컴플라이언스 플래그",
+  "## 수정 제안 (주요 항목)",
+  "## 2026년 통합 전략 제안"
+] as const;
 
 const parseOptionalString = (value: unknown): string | null => {
   if (typeof value !== "string") {
@@ -57,6 +71,29 @@ const parseJsonSize = (value: unknown, field: string, maxLength = MAX_JSON_LENGT
   if (serialized.length > maxLength) {
     throw new HttpError(413, "payload_too_large", `${field} is too large.`);
   }
+};
+
+const toRecord = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+};
+
+const extractJsonObject = (value: string): string | null => {
+  const start = value.indexOf("{");
+  const end = value.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+  return value.slice(start, end + 1);
+};
+
+const truncateText = (value: string, maxLength = 12_000): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}\n... [truncated]`;
 };
 
 const resolveOrgName = (value: unknown, fallbackEmail: string | null): string => {
@@ -176,6 +213,36 @@ const createInitialOrg = async (params: {
     orgId: org.id,
     orgName: org.name,
     orgType: org.org_type
+  };
+};
+
+type OrganizationContext = {
+  id: string;
+  name: string;
+  org_type: string;
+  website: string | null;
+};
+
+const getOrganizationContext = async (orgId: string): Promise<OrganizationContext | null> => {
+  const { data, error } = await supabaseAdmin
+    .from("organizations")
+    .select("id, name, org_type, website")
+    .eq("id", orgId)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to query organization: ${error.message}`);
+  }
+
+  if (!data?.id) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : "Organization",
+    org_type: typeof data.org_type === "string" && data.org_type.trim() ? data.org_type.trim() : "nonprofit",
+    website: parseOptionalString(data.website)
   };
 };
 
@@ -354,6 +421,814 @@ const synthesizeProfile = (params: {
   };
 };
 
+type SynthesizedProfile = ReturnType<typeof synthesizeProfile>["profile"];
+type SynthesizedDocument = ReturnType<typeof synthesizeProfile>["document"];
+
+type ReviewIssue = {
+  issue: string;
+  location: string;
+  severity: "높음" | "중간" | "낮음";
+  suggestion: string;
+};
+
+type AnthropicTextBlock = {
+  type?: string;
+  text?: string;
+};
+
+type AnthropicResponse = {
+  content?: AnthropicTextBlock[];
+  error?: {
+    message?: string;
+  };
+};
+
+type OpenAiChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
+};
+
+const toPromptJson = (value: unknown, maxLength = 18_000): string => {
+  const serialized = JSON.stringify(value ?? null, null, 2);
+  return truncateText(serialized, maxLength);
+};
+
+const toInlineText = (value: unknown, fallback = "-"): string => {
+  const direct = parseOptionalString(value);
+  if (!direct) {
+    return fallback;
+  }
+  return direct.replace(/\s+/g, " ").trim();
+};
+
+const toIssueTable = (issues: ReviewIssue[]): string => {
+  const rows = issues.length
+    ? issues
+    : [
+        {
+          issue: "수집 데이터가 제한되어 세부 이슈를 식별하지 못했습니다.",
+          location: "-",
+          severity: "중간",
+          suggestion: "접근 가능한 채널 데이터를 보강한 뒤 재검토하세요."
+        }
+      ];
+
+  const escapeCell = (value: string) => value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
+  return [
+    "| 이슈 | 위치 | 심각도 | 개선 제안 |",
+    "|------|------|--------|-----------|",
+    ...rows.map(
+      (row) =>
+        `| ${escapeCell(row.issue)} | ${escapeCell(row.location)} | ${escapeCell(row.severity)} | ${escapeCell(row.suggestion)} |`
+    )
+  ].join("\n");
+};
+
+const getCrawlSource = (crawlResult: Record<string, unknown>, sourceKey: string): Record<string, unknown> => {
+  const sources = toRecord(crawlResult.sources);
+  return toRecord(sources[sourceKey]);
+};
+
+const getCrawlSourceStatus = (crawlResult: Record<string, unknown>, sourceKey: string): string =>
+  parseOptionalString(getCrawlSource(crawlResult, sourceKey).status) ?? "unknown";
+
+const buildDataCoverageNotice = (crawlResult: Record<string, unknown>): string => {
+  const toLabel = (status: string): string => {
+    if (status === "done") {
+      return "정상 수집";
+    }
+    if (status === "failed") {
+      return "수집 실패";
+    }
+    if (status === "skipped") {
+      return "미입력(건너뜀)";
+    }
+    if (status === "running") {
+      return "수집 중";
+    }
+    if (status === "pending") {
+      return "대기";
+    }
+    return "상태 미확인";
+  };
+
+  const websiteStatus = getCrawlSourceStatus(crawlResult, "website");
+  const naverStatus = getCrawlSourceStatus(crawlResult, "naver_blog");
+
+  return [
+    `웹사이트: ${toLabel(websiteStatus)}`,
+    `네이버 블로그: ${toLabel(naverStatus)}`,
+    "인스타그램: 1-7a 단계에서는 직접 크롤링 없이 입력 URL/인터뷰 기반으로 제한 분석"
+  ].join(", ");
+};
+
+const collectKnownDataGaps = (
+  crawlResult: Record<string, unknown>,
+  interviewAnswers: ReturnType<typeof defaultInterviewAnswers>
+): string[] => {
+  const gaps: string[] = [];
+  const websiteStatus = getCrawlSourceStatus(crawlResult, "website");
+  const naverStatus = getCrawlSourceStatus(crawlResult, "naver_blog");
+
+  if (websiteStatus !== "done") {
+    gaps.push("웹사이트 데이터 수집이 완전하지 않아 구조/메시지 분석의 정확도에 제한이 있습니다.");
+  }
+  if (naverStatus !== "done") {
+    gaps.push("네이버 블로그 데이터 수집이 완전하지 않아 콘텐츠/SEO 분석의 정확도에 제한이 있습니다.");
+  }
+  gaps.push("인스타그램은 1-7a에서 직접 크롤링하지 않으므로 공개 프로필 수준의 제한 분석만 가능합니다.");
+
+  if (!interviewAnswers.q2.trim()) {
+    gaps.push("타깃 오디언스 입력이 제한적이어서 일부 타깃 인사이트를 추정했습니다.");
+  }
+  if (!interviewAnswers.q4.trim()) {
+    gaps.push("시즌/캠페인 시점 정보가 부족해 계절 전략 제안은 일반화되었습니다.");
+  }
+
+  return gaps;
+};
+
+const normalizeBrandProfile = (raw: unknown, fallback: SynthesizedProfile): SynthesizedProfile => {
+  const row = toRecord(raw);
+  const tone = parseOptionalString(row.detected_tone) ?? fallback.detected_tone;
+  const toneGuardrails = parseStringArray(row.tone_guardrails, 8);
+  const keyThemes = parseStringArray(row.key_themes, 10);
+  const audience = parseStringArray(row.target_audience, 10);
+  const forbiddenWords = parseStringArray(row.forbidden_words, 16);
+  const forbiddenTopics = parseStringArray(row.forbidden_topics, 16);
+  const campaignSeasons = parseStringArray(row.campaign_seasons, 12);
+  const contentDirections = parseStringArray(row.content_directions, 12);
+  const confidenceNotes = parseStringArray(row.confidence_notes, 12);
+
+  return {
+    organization_summary: parseOptionalString(row.organization_summary) ?? fallback.organization_summary,
+    detected_tone: tone,
+    tone_guardrails: toneGuardrails.length ? toneGuardrails : fallback.tone_guardrails,
+    key_themes: keyThemes.length ? keyThemes : fallback.key_themes,
+    target_audience: audience.length ? audience : fallback.target_audience,
+    forbidden_words: forbiddenWords.length ? forbiddenWords : fallback.forbidden_words,
+    forbidden_topics: forbiddenTopics.length ? forbiddenTopics : fallback.forbidden_topics,
+    campaign_seasons: campaignSeasons.length ? campaignSeasons : fallback.campaign_seasons,
+    content_directions: contentDirections.length ? contentDirections : fallback.content_directions,
+    confidence_notes: confidenceNotes.length ? confidenceNotes : fallback.confidence_notes
+  };
+};
+
+const buildOnboardingDocument = (params: {
+  profile: SynthesizedProfile;
+  knownDataGaps: string[];
+  reviewMarkdown: string;
+  dataCoverageNotice: string;
+}): SynthesizedDocument & {
+  review_markdown: string;
+  report_version: string;
+  template_ref: string;
+  data_coverage_notice: string;
+} => ({
+  generated_at: new Date().toISOString(),
+  organization_summary: params.profile.organization_summary,
+  detected_tone: params.profile.detected_tone,
+  suggested_tone_guardrails: params.profile.tone_guardrails,
+  key_themes: params.profile.key_themes,
+  target_audience: params.profile.target_audience,
+  forbidden_words: params.profile.forbidden_words,
+  forbidden_topics: params.profile.forbidden_topics,
+  campaign_season_hints: params.profile.campaign_seasons,
+  recommended_initial_content_directions: params.profile.content_directions,
+  known_data_gaps: params.knownDataGaps,
+  confidence_notes: params.profile.confidence_notes,
+  review_markdown: params.reviewMarkdown,
+  report_version: PHASE_1_7_REPORT_VERSION,
+  template_ref: REVIEW_TEMPLATE_REF,
+  data_coverage_notice: params.dataCoverageNotice
+});
+
+const callAnthropicText = async (params: {
+  systemPrompt: string;
+  userPrompt: string;
+  maxTokens: number;
+}): Promise<string | null> => {
+  if (!env.anthropicApiKey) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(ANTHROPIC_MESSAGES_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.anthropicApiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: env.anthropicModel,
+        max_tokens: params.maxTokens,
+        temperature: 0.2,
+        system: params.systemPrompt,
+        messages: [{ role: "user", content: params.userPrompt }]
+      })
+    });
+
+    const body = (await response.json().catch(() => ({}))) as AnthropicResponse;
+    if (!response.ok) {
+      console.warn(`[Onboarding] Anthropic review generation failed (${response.status}): ${body.error?.message ?? "unknown"}`);
+      return null;
+    }
+
+    const text = body.content?.find((entry) => entry.type === "text" && !!entry.text?.trim())?.text?.trim();
+    return text || null;
+  } catch (error) {
+    console.warn("[Onboarding] Anthropic review generation error:", error);
+    return null;
+  }
+};
+
+const callOpenAiJson = async (params: {
+  systemPrompt: string;
+  userPrompt: string;
+}): Promise<Record<string, unknown> | null> => {
+  if (!env.openAiApiKey) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${env.openAiApiKey}`
+      },
+      body: JSON.stringify({
+        model: env.openAiProfileModel,
+        temperature: 0,
+        response_format: {
+          type: "json_object"
+        },
+        messages: [
+          { role: "system", content: params.systemPrompt },
+          { role: "user", content: params.userPrompt }
+        ]
+      })
+    });
+
+    const body = (await response.json().catch(() => ({}))) as OpenAiChatCompletionResponse;
+    if (!response.ok) {
+      console.warn(`[Onboarding] OpenAI profile extraction failed (${response.status}): ${body.error?.message ?? "unknown"}`);
+      return null;
+    }
+
+    const content = body.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      return null;
+    }
+
+    const jsonText = extractJsonObject(content) ?? content;
+    const parsed = JSON.parse(jsonText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    console.warn("[Onboarding] OpenAI profile extraction error:", error);
+    return null;
+  }
+};
+
+const buildFallbackReviewMarkdown = (params: {
+  org: OrganizationContext;
+  crawlResult: Record<string, unknown>;
+  interviewAnswers: ReturnType<typeof defaultInterviewAnswers>;
+  profile: SynthesizedProfile;
+  dataCoverageNotice: string;
+  knownDataGaps: string[];
+}): string => {
+  const websiteSource = getCrawlSource(params.crawlResult, "website");
+  const naverSource = getCrawlSource(params.crawlResult, "naver_blog");
+  const websiteData = toRecord(websiteSource.data);
+  const naverData = toRecord(naverSource.data);
+  const websiteHeadings = parseStringArray(websiteData.headings, 6);
+  const websiteParagraphs = parseStringArray(websiteData.paragraphs, 4);
+  const naverPosts = parseStringArray(
+    Array.isArray(naverData.recent_posts)
+      ? naverData.recent_posts.map((entry) =>
+          entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).title === "string"
+            ? ((entry as Record<string, unknown>).title as string)
+            : ""
+        )
+      : [],
+    6
+  );
+
+  const websiteStatus = getCrawlSourceStatus(params.crawlResult, "website");
+  const naverStatus = getCrawlSourceStatus(params.crawlResult, "naver_blog");
+
+  const websiteIssues: ReviewIssue[] = [];
+  if (websiteStatus !== "done") {
+    websiteIssues.push({
+      issue: "웹사이트 데이터 수집이 제한되어 핵심 UX 진단 정확도가 낮습니다.",
+      location: "전체 사이트",
+      severity: "높음",
+      suggestion: "사이트 접근 권한/차단 정책을 확인하고 핵심 페이지를 다시 수집하세요."
+    });
+  } else {
+    if (websiteHeadings.length < 3) {
+      websiteIssues.push({
+        issue: "핵심 섹션 헤딩 수가 적어 정보 구조가 약하게 보입니다.",
+        location: "메인/상위 섹션",
+        severity: "중간",
+        suggestion: "미션, 사업, 참여 안내 중심으로 명확한 섹션 헤딩을 추가하세요."
+      });
+    }
+    if (!parseOptionalString(websiteData.meta_description)) {
+      websiteIssues.push({
+        issue: "메타 설명이 비어 있거나 약해 검색 노출 메시지가 불명확합니다.",
+        location: "meta description",
+        severity: "중간",
+        suggestion: "조직 미션과 핵심 행동 유도를 포함한 110-140자 설명을 작성하세요."
+      });
+    }
+    if (websiteParagraphs.length < 3) {
+      websiteIssues.push({
+        issue: "핵심 설명 문단이 부족하여 전문성 전달이 약합니다.",
+        location: "메인 콘텐츠 영역",
+        severity: "중간",
+        suggestion: "성과 지표와 프로그램 사례 중심으로 핵심 설명 문단을 보강하세요."
+      });
+    }
+  }
+
+  const instagramIssues: ReviewIssue[] = [
+    {
+      issue: "1-7a 단계에서는 인스타그램 본문 데이터를 직접 수집하지 않아 정밀 감사가 제한됩니다.",
+      location: "인스타그램 채널",
+      severity: "높음",
+      suggestion: "프로필/최근 게시물 수준 공개 데이터 접근 또는 1-7b 확장 수집을 적용하세요."
+    }
+  ];
+
+  const naverIssues: ReviewIssue[] = [];
+  if (naverStatus !== "done") {
+    naverIssues.push({
+      issue: "네이버 블로그 데이터 수집이 제한되어 최신 콘텐츠 전략 분석 정확도가 낮습니다.",
+      location: "블로그 전체",
+      severity: "높음",
+      suggestion: "블로그 공개 범위와 접근 경로를 점검하고 재수집하세요."
+    });
+  } else {
+    if (naverPosts.length < 3) {
+      naverIssues.push({
+        issue: "최근 노출된 게시물 표본이 적어 카테고리 전략 파악이 어렵습니다.",
+        location: "최근 글 목록",
+        severity: "중간",
+        suggestion: "핵심 카테고리별 대표 글을 상단 고정 또는 요약 페이지로 연결하세요."
+      });
+    }
+    if (!parseOptionalString(naverData.description)) {
+      naverIssues.push({
+        issue: "블로그 설명 문구가 약해 검색 유입 문맥이 부족합니다.",
+        location: "블로그 소개/메타 설명",
+        severity: "중간",
+        suggestion: "기관 미션과 대상 독자를 포함한 설명 문구를 보강하세요."
+      });
+    }
+  }
+
+  const strengths = [
+    params.profile.key_themes.length
+      ? `웹/블로그 수집 데이터에서 ${params.profile.key_themes.slice(0, 3).join(", ")} 주제가 반복적으로 확인됩니다.`
+      : "기관 활동 주제가 URL 입력과 인터뷰에서 비교적 일관되게 표현됩니다.",
+    "온보딩 인터뷰를 통해 타깃, 금지어, 시즌성 정보가 구조화되어 초기 캠페인 가이드로 활용 가능합니다."
+  ];
+
+  const priorities = [
+    "웹사이트 핵심 랜딩 메시지와 CTA를 미션 중심으로 재정렬",
+    "네이버 블로그의 카테고리/SEO 설명을 강화해 검색 유입 개선",
+    "인스타그램 채널은 1-7b 확장 전까지 공개 프로필 수준 운영 원칙을 명확화"
+  ];
+
+  const websiteSummary = websiteHeadings.length
+    ? `확인된 주요 헤딩은 ${websiteHeadings.slice(0, 4).join(", ")} 입니다.`
+    : "웹사이트 헤딩 데이터가 제한적이어서 정보 구조 판단에 제약이 있습니다.";
+  const naverSummary = naverPosts.length
+    ? `최근 노출 게시물 예시는 ${naverPosts.slice(0, 3).join(", ")} 입니다.`
+    : "네이버 블로그 최근 게시물 데이터가 제한적입니다.";
+
+  return [
+    `# 브랜드 리뷰: ${params.org.name}`,
+    "",
+    `**작성일:** ${new Date().toLocaleDateString("ko-KR")}`,
+    "**검토 채널:** 웹사이트, 인스타그램(제한), 네이버 블로그",
+    "**리뷰 유형:** 종합 브랜드 감사 (Phase 1-7a)",
+    `**데이터 수집 범위:** ${params.dataCoverageNotice}`,
+    "",
+    "---",
+    "",
+    "## 종합 요약",
+    "",
+    `**전체 평가:** ${params.profile.organization_summary}`,
+    "",
+    "**강점:**",
+    ...strengths.map((row) => `- ${row}`),
+    "",
+    "**핵심 개선사항:**",
+    ...priorities.map((row) => `- ${row}`),
+    "",
+    "---",
+    "",
+    "## 채널별 상세 분석",
+    "",
+    "### 1. 웹사이트",
+    "",
+    "#### 1-1. 구조 및 탐색성",
+    toIssueTable(websiteIssues),
+    "",
+    "#### 1-2. 미션/비전 명확성",
+    websiteSummary,
+    `인터뷰 기준 톤 요구사항은 "${toInlineText(params.interviewAnswers.q1, "미입력")}"이며, 홈페이지 문구와 일치 여부를 중심으로 점검이 필요합니다.`,
+    "",
+    "#### 1-3. 콘텐츠 전문성",
+    websiteParagraphs.length
+      ? `수집된 본문 샘플: ${websiteParagraphs.slice(0, 2).join(" / ")}`
+      : "본문 샘플이 제한되어 전문성 전달의 깊이를 정량 평가하기 어렵습니다.",
+    "성과 수치, 사업 범위, 수혜자 증거를 포함한 정량형 문장을 핵심 페이지에 추가하는 것이 우선입니다.",
+    "",
+    "### 2. 인스타그램",
+    "",
+    "#### 2-1. 프로필 및 바이오",
+    toIssueTable(instagramIssues),
+    "",
+    "#### 2-2. 명확성",
+    "1-7a 단계에서는 인스타그램 게시물 단위 분석 없이 입력 URL과 인터뷰 맥락 중심으로만 평가했습니다.",
+    "",
+    "#### 2-3. 일관성",
+    "웹사이트/블로그의 핵심 메시지 축을 인스타그램 바이오 문구와 일치시키는 운영 가이드가 필요합니다.",
+    "",
+    "#### 2-4. 전문성",
+    "공개 데이터 접근이 제한된 상태이므로 게시 빈도/반응률 기반 정밀 진단은 1-7b에서 확장합니다.",
+    "",
+    "### 3. 네이버 블로그",
+    "",
+    "#### 3-1. 프로필 및 구성",
+    toIssueTable(naverIssues),
+    "",
+    "#### 3-2. 콘텐츠 전략",
+    naverSummary,
+    "정보성 글과 활동 후기 글의 역할을 분리해 카테고리별 기대효과를 명확히 설정하는 것이 필요합니다.",
+    "",
+    "#### 3-3. SEO 및 검색 최적화",
+    "기관명 + 핵심 활동 키워드 조합으로 제목 템플릿을 표준화하고, 글 도입부에 미션 문장을 반복 배치하세요.",
+    "",
+    "---",
+    "",
+    "## 채널 간 브랜드 일관성 분석",
+    "",
+    "### 브랜드 톤 일관성",
+    `현재 추정 톤은 **${params.profile.detected_tone}** 입니다. 웹/블로그 문구에서 동일 톤 유지 여부를 우선 점검해야 합니다.`,
+    "",
+    "### 핵심 메시지 일관성",
+    params.profile.key_themes.length
+      ? `핵심 테마(${params.profile.key_themes.slice(0, 4).join(", ")})를 채널별 핵심 문장으로 통일하면 메시지 편차를 줄일 수 있습니다.`
+      : "핵심 테마 식별 데이터가 제한적이므로 채널별 핵심 메시지를 먼저 명시해야 합니다.",
+    "",
+    "### 채널별 역할 정의 현황",
+    "- 웹사이트: 미션/신뢰 확보와 전환 CTA",
+    "- 네이버 블로그: 검색 유입과 상세 스토리 축적",
+    "- 인스타그램: 인지/참여 중심 요약 콘텐츠",
+    "",
+    "---",
+    "",
+    "## 법적 / 컴플라이언스 플래그",
+    "",
+    "| 플래그 | 상세 내용 | 권장 조치 |",
+    "|--------|-----------|-----------|",
+    "| 기관 책임 주체 표기 점검 필요 | NGO/소셜벤처 채널에서 운영 주체/문의 창구가 누락될 수 있습니다. | 웹/블로그/프로필에 운영 주체, 연락처, 개인정보 처리 안내 링크를 명시하세요. |",
+    "| 공익 캠페인 표현 검증 필요 | 과장 표현 또는 검증되지 않은 수치 사용 시 신뢰도 저하 리스크가 있습니다. | 성과 수치 출처와 기준 시점을 문서화하고 동일하게 표기하세요. |",
+    "| 제3자 초상/사례 활용 동의 관리 필요 | 현장 사진/사례 콘텐츠에서 동의 범위 불명확 시 분쟁 가능성이 있습니다. | 사례/이미지별 이용 동의 상태를 내부 체크리스트로 관리하세요. |",
+    "",
+    "---",
+    "",
+    "## 수정 제안 (주요 항목)",
+    "",
+    "### 웹사이트 — 메인 히어로 문구 현재:",
+    "```",
+    "우리 기관의 다양한 활동을 소개합니다.",
+    "```",
+    "",
+    "### 웹사이트 — 메인 히어로 문구 수정안:",
+    "```",
+    `${params.org.name}는 [핵심 미션]을 위해 [주요 대상]과 함께 [핵심 성과]를 만드는 기관입니다. 지금 [행동 유도]에 참여하세요.`,
+    "```",
+    "",
+    "**변경 사항:**",
+    "- 미션, 대상, 성과, CTA를 한 문장에 통합",
+    "- 방문자 첫 화면에서 기관 정체성과 행동 경로를 동시에 제시",
+    "",
+    "### 네이버 블로그 — 게시물 제목 현재:",
+    "```",
+    "활동 후기",
+    "```",
+    "",
+    "### 네이버 블로그 — 게시물 제목 수정안:",
+    "```",
+    "[프로그램명] 참여 후기 | [지역/주제]에서 확인한 변화 3가지",
+    "```",
+    "",
+    "**변경 사항:**",
+    "- 검색 키워드와 구체 맥락(프로그램/지역/주제)을 결합",
+    "- 제목만으로도 클릭 이유가 보이도록 구조화",
+    "",
+    "### 인스타그램 — 바이오 현재:",
+    "```",
+    "기관 소개 문구",
+    "```",
+    "",
+    "### 인스타그램 — 바이오 수정안:",
+    "```",
+    `${params.org.name} | ${params.org.org_type}\n핵심 미션 한 줄 요약\n👇 자세한 활동 보기`,
+    "```",
+    "",
+    "**변경 사항:**",
+    "- 채널 역할(인지/유입)에 맞춰 짧은 메시지와 CTA 중심으로 재구성",
+    "",
+    "---",
+    "",
+    "## 2026년 통합 전략 제안",
+    "",
+    "1. 🟢쉬움: 웹사이트 상단 CTA 문구를 인터뷰 타깃 기준으로 A/B 테스트",
+    "2. 🟡보통: 네이버 블로그 카테고리별 월간 편집 캘린더 운영",
+    "3. 🟡보통: 채널 공통 해시태그/키워드 사전 구축 및 재사용",
+    "4. 🔴어려움: 사례 콘텐츠의 성과 지표 표준 정의(채널 공통)",
+    "5. 🟢쉬움: 금지어/금지주제 체크리스트를 발행 전 검수 단계에 적용",
+    "",
+    `*본 리뷰는 ${params.dataCoverageNotice}.`,
+    `추가 한계: ${params.knownDataGaps.join(" ")}*`
+  ].join("\n");
+};
+
+const buildBrandReviewPrompt = (params: {
+  org: OrganizationContext;
+  crawlResult: Record<string, unknown>;
+  interviewAnswers: ReturnType<typeof defaultInterviewAnswers>;
+  dataCoverageNotice: string;
+  knownDataGaps: string[];
+}): { systemPrompt: string; userPrompt: string } => {
+  const systemPrompt = [
+    "당신은 한국 NGO/소셜벤처 전문 디지털 마케팅 컨설턴트입니다.",
+    "실행 가능한 제안과 근거 중심으로 한국어 마크다운 보고서를 작성하세요.",
+    "표/섹션 구조를 엄격히 지키고, 크롤링 실패 채널은 데이터 한계를 명확히 고지하세요."
+  ].join("\n");
+
+  const websiteSource = getCrawlSource(params.crawlResult, "website");
+  const naverSource = getCrawlSource(params.crawlResult, "naver_blog");
+
+  const userPrompt = [
+    "다음 데이터를 바탕으로 브랜드 리뷰 마크다운을 작성하세요.",
+    "",
+    "## 기관 정보",
+    `- 기관명: ${params.org.name}`,
+    `- 기관 유형: ${params.org.org_type}`,
+    `- 웹사이트: ${params.org.website ?? "미입력"}`,
+    "",
+    "## 크롤링 데이터",
+    "### 웹사이트",
+    toPromptJson(websiteSource),
+    "",
+    "### 네이버 블로그",
+    toPromptJson(naverSource),
+    "",
+    "## 인터뷰 답변",
+    `- 톤: ${params.interviewAnswers.q1 || "미입력"}`,
+    `- 타깃 오디언스: ${params.interviewAnswers.q2 || "미입력"}`,
+    `- 금지 단어/주제: ${params.interviewAnswers.q3 || "미입력"}`,
+    `- 캠페인 시즌: ${params.interviewAnswers.q4 || "미입력"}`,
+    "",
+    "## 데이터 범위/한계",
+    `- ${params.dataCoverageNotice}`,
+    ...params.knownDataGaps.map((gap) => `- ${gap}`),
+    "",
+    "## 출력 규칙",
+    "- 반드시 한국어 마크다운으로 작성",
+    "- 아래 섹션 순서를 정확히 유지",
+    "- 각 채널 이슈 표에 심각도(높음/중간/낮음) 포함",
+    "- 수정 제안은 Before/After 코드블록으로 제시",
+    "- 2026년 전략 제안은 5개 이상 작성",
+    "",
+    "## 필수 섹션 순서",
+    "1) # 브랜드 리뷰: [기관명]",
+    "2) ## 종합 요약",
+    "3) ## 채널별 상세 분석",
+    "4) ## 채널 간 브랜드 일관성 분석",
+    "5) ## 법적 / 컴플라이언스 플래그",
+    "6) ## 수정 제안 (주요 항목)",
+    "7) ## 2026년 통합 전략 제안",
+    "",
+    "인스타그램은 1-7a에서 직접 크롤링하지 않으므로, 데이터 제한을 명시하고 가능한 범위에서 분석하세요."
+  ].join("\n");
+
+  return {
+    systemPrompt,
+    userPrompt
+  };
+};
+
+const normalizeGeneratedReviewMarkdown = (value: string): string => {
+  const trimmed = String(value ?? "").replace(/\r\n/g, "\n").trim();
+  if (!trimmed) {
+    return "";
+  }
+  const titleIndex = trimmed.indexOf("# 브랜드 리뷰:");
+  if (titleIndex >= 0) {
+    return trimmed.slice(titleIndex).trim();
+  }
+  return trimmed;
+};
+
+const validateReviewMarkdown = (value: string): { ok: boolean; reasons: string[]; normalized: string } => {
+  const normalized = normalizeGeneratedReviewMarkdown(value);
+  const reasons: string[] = [];
+
+  if (!normalized) {
+    reasons.push("empty_markdown");
+    return {
+      ok: false,
+      reasons,
+      normalized
+    };
+  }
+
+  if (normalized.length < 900) {
+    reasons.push("too_short");
+  }
+
+  let previousIndex = -1;
+  for (const heading of REQUIRED_REVIEW_HEADINGS) {
+    const index = normalized.indexOf(heading);
+    if (index < 0) {
+      reasons.push(`missing_heading:${heading}`);
+      continue;
+    }
+    if (index < previousIndex) {
+      reasons.push(`out_of_order:${heading}`);
+    }
+    previousIndex = Math.max(previousIndex, index);
+  }
+
+  const fenceCount = (normalized.match(/```/g) ?? []).length;
+  if (fenceCount % 2 !== 0) {
+    reasons.push("unbalanced_code_fence");
+  }
+
+  const minSectionCount = (normalized.match(/^##\s+/gm) ?? []).length;
+  if (minSectionCount < 6) {
+    reasons.push("insufficient_sections");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    normalized
+  };
+};
+
+const buildReviewRegenerationPrompt = (params: {
+  baseUserPrompt: string;
+  validationReasons: string[];
+  previousDraft: string;
+}): string => {
+  const previousDraft = truncateText(params.previousDraft, 6000);
+  const reasonText = params.validationReasons.length ? params.validationReasons.join(", ") : "unknown";
+  return [
+    params.baseUserPrompt,
+    "",
+    "## 중요: 이전 초안은 무효입니다. 처음부터 끝까지 전체 문서를 재작성하세요.",
+    `- 무효 사유: ${reasonText}`,
+    "- 필수 섹션 7개를 모두 포함하세요.",
+    "- 코드블록(```)은 반드시 짝수 개로 닫으세요.",
+    "- 문서 중간에서 끊기지 않도록 마지막 문장까지 완성하세요.",
+    "- 길이는 과도하게 길지 않게 유지하되, 각 섹션 핵심 내용은 반드시 포함하세요.",
+    "",
+    "## 이전 실패 초안(참고용, 그대로 복사 금지)",
+    previousDraft
+  ].join("\n");
+};
+
+const generateReviewMarkdown = async (params: {
+  org: OrganizationContext;
+  crawlResult: Record<string, unknown>;
+  interviewAnswers: ReturnType<typeof defaultInterviewAnswers>;
+  fallbackProfile: SynthesizedProfile;
+  dataCoverageNotice: string;
+  knownDataGaps: string[];
+}): Promise<string> => {
+  const prompt = buildBrandReviewPrompt({
+    org: params.org,
+    crawlResult: params.crawlResult,
+    interviewAnswers: params.interviewAnswers,
+    dataCoverageNotice: params.dataCoverageNotice,
+    knownDataGaps: params.knownDataGaps
+  });
+
+  const firstDraft = await callAnthropicText({
+    systemPrompt: prompt.systemPrompt,
+    userPrompt: prompt.userPrompt,
+    maxTokens: 3200
+  });
+  const firstValidation = validateReviewMarkdown(firstDraft ?? "");
+  if (firstValidation.ok) {
+    return firstValidation.normalized;
+  }
+
+  const regenerationPrompt = buildReviewRegenerationPrompt({
+    baseUserPrompt: prompt.userPrompt,
+    validationReasons: firstValidation.reasons,
+    previousDraft: firstValidation.normalized
+  });
+  const secondDraft = await callAnthropicText({
+    systemPrompt: prompt.systemPrompt,
+    userPrompt: regenerationPrompt,
+    maxTokens: 4200
+  });
+  const secondValidation = validateReviewMarkdown(secondDraft ?? "");
+  if (secondValidation.ok) {
+    return secondValidation.normalized;
+  }
+
+  console.warn(
+    `[Onboarding] Review markdown validation failed; using fallback. first=[${
+      firstValidation.reasons.join(", ") || "unknown"
+    }], second=[${secondValidation.reasons.join(", ") || "unknown"}]`
+  );
+
+  return buildFallbackReviewMarkdown({
+    org: params.org,
+    crawlResult: params.crawlResult,
+    interviewAnswers: params.interviewAnswers,
+    profile: params.fallbackProfile,
+    dataCoverageNotice: params.dataCoverageNotice,
+    knownDataGaps: params.knownDataGaps
+  });
+};
+
+const extractProfileFromReview = async (params: {
+  reviewMarkdown: string;
+  fallbackProfile: SynthesizedProfile;
+  knownDataGaps: string[];
+}): Promise<SynthesizedProfile> => {
+  const systemPrompt = [
+    "Extract a strict JSON object for onboarding brand profile.",
+    "Return JSON only and keep values concise.",
+    "Never include markdown fences."
+  ].join("\n");
+  const userPrompt = [
+    "Extract profile fields from this Korean review markdown.",
+    "Required keys:",
+    "{",
+    '  "organization_summary": string,',
+    '  "detected_tone": string,',
+    '  "tone_guardrails": string[],',
+    '  "key_themes": string[],',
+    '  "target_audience": string[],',
+    '  "forbidden_words": string[],',
+    '  "forbidden_topics": string[],',
+    '  "campaign_seasons": string[],',
+    '  "content_directions": string[],',
+    '  "confidence_notes": string[]',
+    "}",
+    "",
+    truncateText(params.reviewMarkdown, 24_000)
+  ].join("\n");
+
+  const extracted = await callOpenAiJson({
+    systemPrompt,
+    userPrompt
+  });
+  if (!extracted) {
+    return {
+      ...params.fallbackProfile,
+      confidence_notes: [...params.fallbackProfile.confidence_notes, "Used fallback profile extraction."]
+    };
+  }
+
+  const normalized = normalizeBrandProfile(extracted, params.fallbackProfile);
+  const confidence = [...normalized.confidence_notes];
+  if (!confidence.length) {
+    confidence.push("Structured profile extracted from generated markdown.");
+  }
+  if (params.knownDataGaps.length) {
+    confidence.push("Profile includes constraints from partial crawl coverage.");
+  }
+  return {
+    ...normalized,
+    confidence_notes: confidence.slice(0, 12)
+  };
+};
+
 export const onboardingRouter: Router = Router();
 
 onboardingRouter.post("/onboarding/bootstrap-org", async (req, res) => {
@@ -478,11 +1353,44 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       body.url_metadata && typeof body.url_metadata === "object" && !Array.isArray(body.url_metadata)
         ? (body.url_metadata as Record<string, unknown>)
         : {};
+    const synthesisMode = parseOptionalString(body.synthesis_mode) ?? PHASE_1_7_REPORT_VERSION;
 
-    const { profile, document } = synthesizeProfile({
+    const fallbackSynthesis = synthesizeProfile({
       crawlResult,
       interviewAnswers,
       orgId
+    });
+    const orgContext =
+      (await getOrganizationContext(orgId)) ??
+      ({
+        id: orgId,
+        name: "Organization",
+        org_type: "nonprofit",
+        website: parseOptionalString(urlMetadata.website_url ?? body.website_url)
+      } as OrganizationContext);
+    const dataCoverageNotice = buildDataCoverageNotice(crawlResult);
+    const knownDataGaps = collectKnownDataGaps(crawlResult, interviewAnswers);
+
+    const reviewMarkdown = await generateReviewMarkdown({
+      org: orgContext,
+      crawlResult,
+      interviewAnswers,
+      fallbackProfile: fallbackSynthesis.profile,
+      dataCoverageNotice,
+      knownDataGaps
+    });
+
+    const profile = await extractProfileFromReview({
+      reviewMarkdown,
+      fallbackProfile: fallbackSynthesis.profile,
+      knownDataGaps
+    });
+
+    const document = buildOnboardingDocument({
+      profile,
+      knownDataGaps,
+      reviewMarkdown,
+      dataCoverageNotice
     });
 
     const crawlSources = parseObject(crawlResult.sources ?? {}, "crawl_result.sources");
@@ -522,7 +1430,10 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       forbidden_topics: profile.forbidden_topics,
       campaign_seasons: profile.campaign_seasons,
       brand_summary: profile.organization_summary,
-      result_document: document
+      result_document: {
+        ...document,
+        synthesis_mode: synthesisMode
+      }
     };
     parseJsonSize(payloadForStore, "synthesis_store_payload", MAX_JSON_LENGTH);
 
@@ -537,7 +1448,11 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       ok: true,
       org_id: orgId,
       brand_profile: profile,
-      onboarding_result_document: document
+      onboarding_result_document: {
+        ...document,
+        synthesis_mode: synthesisMode
+      },
+      review_markdown: reviewMarkdown
     });
   } catch (error) {
     const httpError = toHttpError(error);

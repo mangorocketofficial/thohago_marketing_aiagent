@@ -1,6 +1,7 @@
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
 import type {
   Campaign,
   ChatMessage,
@@ -285,6 +286,26 @@ const App = () => {
   const supabase = useMemo<SupabaseClient | null>(() => getSupabaseClientForConfig(chatConfig), [chatConfig]);
   const authSupabase = useMemo<SupabaseClient | null>(() => getAuthSupabaseClient(chatConfig), [chatConfig]);
   const crawlDone = useMemo(() => isCrawlFullyComplete(crawlStatus), [crawlStatus]);
+  const reviewMarkdown = useMemo(() => {
+    if (!synthesisResult?.ok) {
+      return "";
+    }
+    const direct = typeof synthesisResult.review_markdown === "string" ? synthesisResult.review_markdown.trim() : "";
+    if (direct) {
+      return direct;
+    }
+    const nested =
+      typeof synthesisResult.onboarding_result_document?.review_markdown === "string"
+        ? synthesisResult.onboarding_result_document.review_markdown.trim()
+        : "";
+    return nested;
+  }, [synthesisResult]);
+  const reviewExportPath = useMemo(() => {
+    if (!synthesisResult?.ok) {
+      return "";
+    }
+    return typeof synthesisResult.review_export_path === "string" ? synthesisResult.review_export_path.trim() : "";
+  }, [synthesisResult]);
 
   const refreshActiveSession = useCallback(async (): Promise<OrchestratorSession | null> => {
     if (!runtime) {
@@ -807,6 +828,7 @@ const App = () => {
       const response = await runtime.onboarding.synthesize({
         accessToken,
         orgId,
+        synthesisMode: "phase_1_7a",
         interviewAnswers,
         urlMetadata: {
           website_url: onboardingDraft.websiteUrl,
@@ -822,7 +844,11 @@ const App = () => {
       }
 
       setSynthesisResult(response);
-      setNotice("Result document generated.");
+      setNotice(
+        response.review_export_path
+          ? `Result document generated. Exported to: ${response.review_export_path}`
+          : "Result document generated."
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to generate result document.");
     } finally {
@@ -1095,6 +1121,8 @@ const App = () => {
     if (!saved) {
       return;
     }
+    setHasSynthesisAttempted(false);
+    setSynthesisResult(null);
     moveToStep(5);
   };
 
@@ -1559,28 +1587,41 @@ const App = () => {
               {!crawlDone ? <p className="meta">Waiting for background crawl to finish before synthesis.</p> : null}
               {isSynthesisPending ? <p className="meta">Generating result document...</p> : null}
               {synthesisResult?.ok ? (
-                <div className="meta-grid">
-                  <p>
-                    Tone: <strong>{synthesisResult.brand_profile.detected_tone || "-"}</strong>
-                  </p>
-                  <p>
-                    Themes: <strong>{synthesisResult.brand_profile.key_themes.join(", ") || "-"}</strong>
-                  </p>
-                  <p>
-                    Audience: <strong>{synthesisResult.brand_profile.target_audience.join(", ") || "-"}</strong>
-                  </p>
-                  <p>
-                    Campaign Seasons: <strong>{synthesisResult.brand_profile.campaign_seasons.join(", ") || "-"}</strong>
-                  </p>
-                </div>
+                <>
+                  <div className="meta-grid">
+                    <p>
+                      Tone: <strong>{synthesisResult.brand_profile.detected_tone || "-"}</strong>
+                    </p>
+                    <p>
+                      Themes: <strong>{synthesisResult.brand_profile.key_themes.join(", ") || "-"}</strong>
+                    </p>
+                    <p>
+                      Audience: <strong>{synthesisResult.brand_profile.target_audience.join(", ") || "-"}</strong>
+                    </p>
+                    <p>
+                      Campaign Seasons: <strong>{synthesisResult.brand_profile.campaign_seasons.join(", ") || "-"}</strong>
+                    </p>
+                  </div>
+                  {reviewExportPath ? (
+                    <p className="meta">
+                      Exported Markdown: <strong>{reviewExportPath}</strong>
+                    </p>
+                  ) : null}
+                  {reviewMarkdown ? (
+                    <article className="markdown-card">
+                      <div className="markdown-viewer">
+                        <ReactMarkdown>{reviewMarkdown}</ReactMarkdown>
+                      </div>
+                    </article>
+                  ) : (
+                    <p className="meta">Markdown content is not available. Showing structured profile only.</p>
+                  )}
+                </>
               ) : (
-                <p className="empty">Synthesis has not been generated yet.</p>
+                <p className="empty">Result generation is automatic at this step.</p>
               )}
               <div className="button-row">
                 <button onClick={() => moveToStep(4)}>{t("onboarding.back")}</button>
-                <button disabled={!crawlDone || isSynthesisPending} onClick={() => void synthesizeOnboardingResult()}>
-                  {synthesisResult ? "Regenerate Result" : "Generate Result"}
-                </button>
                 <button className="primary" disabled={!synthesisResult || isSynthesisPending} onClick={() => moveToStep(6)}>
                   {t("onboarding.result.next")}
                 </button>

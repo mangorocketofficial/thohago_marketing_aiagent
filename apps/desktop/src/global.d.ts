@@ -100,6 +100,8 @@ type OnboardingSynthesisResponse = {
   org_id: string;
   brand_profile: BrandProfile;
   onboarding_result_document: OnboardingResultDocument;
+  review_markdown?: string;
+  review_export_path?: string | null;
 };
 
 declare global {
@@ -171,6 +173,7 @@ declare global {
           accessToken?: string;
           orgId?: string;
           interviewAnswers: InterviewAnswers;
+          synthesisMode?: "phase_1_7a" | "phase_1_7b";
           urlMetadata?: {
             website_url?: string;
             naver_blog_url?: string;
