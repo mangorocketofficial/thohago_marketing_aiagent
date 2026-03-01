@@ -101,6 +101,11 @@ const truncateText = (value: string, maxLength = 12_000): string => {
   return `${value.slice(0, maxLength)}\n... [truncated]`;
 };
 
+const toPreviewJson = (value: unknown, maxLength = 2000): string => {
+  const serialized = JSON.stringify(value ?? null);
+  return truncateText(serialized, maxLength);
+};
+
 const resolveOrgName = (value: unknown, fallbackEmail: string | null): string => {
   const direct = parseOptionalString(value);
   if (direct) {
@@ -436,24 +441,40 @@ type ReviewIssue = {
   suggestion: string;
 };
 
-type AnthropicTextBlock = {
+type AnthropicContentBlock = {
   type?: string;
   text?: string;
+  [key: string]: unknown;
 };
 
 type AnthropicResponse = {
-  content?: AnthropicTextBlock[];
+  id?: string;
+  model?: string;
+  stop_reason?: string | null;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+  content?: AnthropicContentBlock[];
   error?: {
     message?: string;
   };
 };
 
 type OpenAiChatCompletionResponse = {
+  id?: string;
+  model?: string;
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
   error?: {
     message?: string;
   };
@@ -631,12 +652,14 @@ const buildOnboardingDocument = (params: {
   reviewMarkdown: string;
   dataCoverageNotice: string;
   reportVersion: "phase_1_7a" | "phase_1_7b";
+  synthesisDebug: Record<string, unknown> | null;
 }): SynthesizedDocument & {
   review_markdown: string;
   report_version: string;
   version: string;
   template_ref: string;
   data_coverage_notice: string;
+  synthesis_debug?: Record<string, unknown>;
 } => ({
   generated_at: new Date().toISOString(),
   organization_summary: params.profile.organization_summary,
@@ -654,16 +677,26 @@ const buildOnboardingDocument = (params: {
   version: params.reportVersion,
   report_version: params.reportVersion,
   template_ref: REVIEW_TEMPLATE_REF,
-  data_coverage_notice: params.dataCoverageNotice
+  data_coverage_notice: params.dataCoverageNotice,
+  synthesis_debug: params.synthesisDebug ?? undefined
 });
 
 const callAnthropicText = async (params: {
   systemPrompt: string;
   userPrompt: string;
   maxTokens: number;
-}): Promise<string | null> => {
+}): Promise<{ text: string | null; trace: Record<string, unknown> }> => {
   if (!env.anthropicApiKey) {
-    return null;
+    return {
+      text: null,
+      trace: {
+        provider: "anthropic",
+        model: env.anthropicModel,
+        ok: false,
+        skipped: true,
+        reason: "missing_anthropic_api_key"
+      }
+    };
   }
 
   try {
@@ -691,30 +724,94 @@ const callAnthropicText = async (params: {
     });
 
     const body = (await response.json().catch(() => ({}))) as AnthropicResponse;
-    if (!response.ok) {
-      console.warn(`[Onboarding] Anthropic review generation failed (${response.status}): ${body.error?.message ?? "unknown"}`);
-      return null;
+    const contentBlocks = Array.isArray(body.content) ? body.content : [];
+    const blockTypes: Record<string, number> = {};
+    let nonTextBlockCount = 0;
+    for (const block of contentBlocks) {
+      const type = typeof block?.type === "string" && block.type.trim() ? block.type.trim() : "unknown";
+      blockTypes[type] = (blockTypes[type] ?? 0) + 1;
+      if (type !== "text") {
+        nonTextBlockCount += 1;
+      }
     }
 
     const text =
-      body.content
-        ?.filter((entry) => entry.type === "text" && !!entry.text?.trim())
+      contentBlocks
+        .filter((entry) => entry.type === "text" && !!entry.text?.trim())
         .map((entry) => entry.text?.trim() ?? "")
         .filter(Boolean)
         .join("\n\n") ?? "";
-    return text.trim() || null;
+    const normalizedText = text.trim() || null;
+
+    const trace = {
+      provider: "anthropic",
+      model: env.anthropicModel,
+      request: {
+        max_tokens: params.maxTokens,
+        temperature: 0.2,
+        tool_names: ["web_search"],
+        user_prompt_preview: truncateText(params.userPrompt, 1200)
+      },
+      response: {
+        ok: response.ok,
+        status: response.status,
+        id: body.id ?? null,
+        model: body.model ?? env.anthropicModel,
+        stop_reason: body.stop_reason ?? null,
+        usage: {
+          input_tokens: body.usage?.input_tokens ?? null,
+          output_tokens: body.usage?.output_tokens ?? null
+        },
+        block_types: blockTypes,
+        non_text_block_count: nonTextBlockCount,
+        used_web_search_tool: nonTextBlockCount > 0,
+        text_length: normalizedText?.length ?? 0,
+        text_preview: normalizedText ? truncateText(normalizedText, 1200) : null,
+        error: body.error?.message ?? null
+      }
+    };
+
+    if (!response.ok) {
+      console.warn(`[Onboarding] Anthropic review generation failed (${response.status}): ${body.error?.message ?? "unknown"}`);
+      return {
+        text: null,
+        trace
+      };
+    }
+
+    return {
+      text: normalizedText,
+      trace
+    };
   } catch (error) {
     console.warn("[Onboarding] Anthropic review generation error:", error);
-    return null;
+    return {
+      text: null,
+      trace: {
+        provider: "anthropic",
+        model: env.anthropicModel,
+        ok: false,
+        error: error instanceof Error ? error.message : "unknown_error"
+      }
+    };
   }
 };
 
 const callOpenAiJson = async (params: {
   systemPrompt: string;
   userPrompt: string;
-}): Promise<Record<string, unknown> | null> => {
+}): Promise<{ parsed: Record<string, unknown> | null; trace: Record<string, unknown> }> => {
   if (!env.openAiApiKey) {
-    return null;
+    return {
+      parsed: null,
+      trace: {
+        provider: "openai",
+        model: env.openAiProfileModel,
+        ok: false,
+        skipped: true,
+        reason: "missing_openai_api_key"
+      }
+    };
   }
 
   try {
@@ -738,25 +835,90 @@ const callOpenAiJson = async (params: {
     });
 
     const body = (await response.json().catch(() => ({}))) as OpenAiChatCompletionResponse;
+    const content = body.choices?.[0]?.message?.content;
+    const finishReason = body.choices?.[0]?.finish_reason ?? null;
+    const traceBase = {
+      provider: "openai",
+      model: env.openAiProfileModel,
+      request: {
+        response_format: "json_object",
+        temperature: 0,
+        user_prompt_preview: truncateText(params.userPrompt, 1200)
+      },
+      response: {
+        ok: response.ok,
+        status: response.status,
+        id: body.id ?? null,
+        model: body.model ?? env.openAiProfileModel,
+        finish_reason: finishReason,
+        usage: {
+          prompt_tokens: body.usage?.prompt_tokens ?? null,
+          completion_tokens: body.usage?.completion_tokens ?? null,
+          total_tokens: body.usage?.total_tokens ?? null
+        },
+        content_length: typeof content === "string" ? content.length : 0,
+        content_preview: typeof content === "string" && content.trim() ? truncateText(content, 1200) : null,
+        error: body.error?.message ?? null
+      }
+    } as Record<string, unknown>;
+
     if (!response.ok) {
       console.warn(`[Onboarding] OpenAI profile extraction failed (${response.status}): ${body.error?.message ?? "unknown"}`);
-      return null;
+      return {
+        parsed: null,
+        trace: traceBase
+      };
     }
 
-    const content = body.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
-      return null;
+      return {
+        parsed: null,
+        trace: {
+          ...traceBase,
+          response: {
+            ...toRecord(traceBase.response),
+            parse_error: "empty_response_content"
+          }
+        }
+      };
     }
 
     const jsonText = extractJsonObject(content) ?? content;
     const parsed = JSON.parse(jsonText);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
+      return {
+        parsed: null,
+        trace: {
+          ...traceBase,
+          response: {
+            ...toRecord(traceBase.response),
+            parse_error: "non_object_json"
+          }
+        }
+      };
     }
-    return parsed as Record<string, unknown>;
+    return {
+      parsed: parsed as Record<string, unknown>,
+      trace: {
+        ...traceBase,
+        response: {
+          ...toRecord(traceBase.response),
+          parse_ok: true,
+          parsed_preview: toPreviewJson(parsed, 2000)
+        }
+      }
+    };
   } catch (error) {
     console.warn("[Onboarding] OpenAI profile extraction error:", error);
-    return null;
+    return {
+      parsed: null,
+      trace: {
+        provider: "openai",
+        model: env.openAiProfileModel,
+        ok: false,
+        error: error instanceof Error ? error.message : "unknown_error"
+      }
+    };
   }
 };
 
@@ -1106,12 +1268,10 @@ const buildBrandReviewPrompt = (params: {
     "10년 이상의 경험을 바탕으로 온라인 채널 감사, 브랜드 전략 수립, 콘텐츠 마케팅을 전문으로 합니다.",
     "",
     "작성 원칙:",
-    "- 구체적인 수치와 예시를 반드시 포함",
+    "- 구체적인 수치와 예시를 가능한 한 포함",
     "- 모호한 표현 대신 실행 가능한 제안",
     "- 한국 NGO/소셜벤처 특수성 반영 (제한된 예산, 소규모 팀, 공익적 미션)",
-    "- 이슈 심각도: 높음/중간/낮음 분류",
-    "- 수정 제안: Before(현재:)/After(수정안:) 형식",
-    "- 2026년 SNS 트렌드 반영",
+    "- 수정 제안 포함",
     "",
     "웹서치 활용 원칙:",
     "- 크롤링 데이터가 부족한 채널은 웹서치를 활용해 공개된 정보를 보충하세요",
@@ -1153,23 +1313,20 @@ const buildBrandReviewPrompt = (params: {
     "",
     "## 출력 규칙",
     "- 반드시 한국어 마크다운으로 작성",
-    "- 아래 섹션 순서를 정확히 유지",
-    "- 각 채널 이슈 표에 심각도(높음/중간/낮음) 포함",
-    "- 수정 제안은 채널별 최소 1개 이상 Before/After 코드블록으로 제시",
-    "- 2026년 전략 제안은 5개 이상 작성",
-    "- 전략 제안의 각 항목에 난이도(쉬움/보통/어려움)를 표시",
-    "- 본문 마지막에 데이터 범위/한계 요약 문장을 반드시 포함",
-    "- 문서가 끊기지 않도록 마지막 문장까지 반드시 완성",
+    "- 아래 섹션 순서를 참고하되 자유롭게 작성",
+    "- 채널별 수정 제안을 최소 1개 이상 포함",
+    "- 2026년 핵심 전략 제안 포함",
+    "- 가장 시급한 항목은 난이도(높음) 표시",
+    "- 문서가 끊기지 않도록 마지막 문장까지 완성",
     "- 크롤링 데이터가 부족한 부분은 웹서치를 통해 추가 정보를 확인한 뒤 분석에 반영",
     "",
-    "## 필수 섹션 순서",
+    "## 권장 섹션 순서",
     "1) # 브랜드 리뷰: [기관명]",
     "2) ## 종합 요약",
     "3) ## 채널별 상세 분석",
     "4) ## 채널 간 브랜드 일관성 분석",
-    "5) ## 법적 / 컴플라이언스 플래그",
-    "6) ## 수정 제안 (주요 항목)",
-    "7) ## 2026년 통합 전략 제안",
+    "5) ## 수정 제안",
+    "6) ## 2026년 전략 제안",
     "",
     "인스타그램은 best-effort 수집 결과(done/partial/failed/skipped)를 그대로 반영하고, partial/failed/skipped일 때는 한계와 대체 근거를 명시하세요."
   ].join("\n");
@@ -1198,72 +1355,15 @@ const validateReviewMarkdown = (value: string): { ok: boolean; reasons: string[]
 
   if (!normalized) {
     reasons.push("empty_markdown");
-    return {
-      ok: false,
-      reasons,
-      normalized
-    };
+    return { ok: false, reasons, normalized };
   }
 
-  if (normalized.length < 900) {
+  if (normalized.length < 300) {
     reasons.push("too_short");
+    return { ok: false, reasons, normalized };
   }
 
-  let previousIndex = -1;
-  for (const heading of REQUIRED_REVIEW_HEADINGS) {
-    const index = normalized.indexOf(heading);
-    if (index < 0) {
-      reasons.push(`missing_heading:${heading}`);
-      continue;
-    }
-    if (index < previousIndex) {
-      reasons.push(`out_of_order:${heading}`);
-    }
-    previousIndex = Math.max(previousIndex, index);
-  }
-
-  const fenceCount = (normalized.match(/```/g) ?? []).length;
-  if (fenceCount % 2 !== 0) {
-    reasons.push("unbalanced_code_fence");
-  }
-
-  const minSectionCount = (normalized.match(/^##\s+/gm) ?? []).length;
-  if (minSectionCount < 5) {
-    reasons.push("insufficient_sections");
-  }
-
-  const strategyCount = (normalized.match(/^\d+\.\s+/gm) ?? []).length;
-  if (strategyCount < 5) {
-    reasons.push("insufficient_strategy_items");
-  }
-
-  const difficultyLabelCount = (normalized.match(/(쉬움|보통|어려움)/g) ?? []).length;
-  if (difficultyLabelCount < 3) {
-    reasons.push("missing_difficulty_labels");
-  }
-
-  const channelNames = ["웹사이트", "인스타그램", "네이버 블로그"];
-  for (const channelName of channelNames) {
-    if (!normalized.includes(channelName)) {
-      reasons.push(`missing_channel_marker:${channelName}`);
-    }
-  }
-
-  const beforeCount = (normalized.match(/현재:/g) ?? []).length;
-  const afterCount = (normalized.match(/수정안:/g) ?? []).length;
-  if (beforeCount < 1 || afterCount < 1) {
-    reasons.push("insufficient_before_after_examples");
-  }
-
-  if (!/(데이터 수집 범위|데이터 범위\/한계|데이터 범위)/.test(normalized)) {
-    reasons.push("missing_data_coverage_notice");
-  }
-
-  return {
-    ok: reasons.length === 0,
-    reasons,
-    normalized
-  };
+  return { ok: true, reasons, normalized };
 };
 
 const buildReviewRegenerationPrompt = (params: {
@@ -1295,7 +1395,7 @@ const generateReviewMarkdown = async (params: {
   fallbackProfile: SynthesizedProfile;
   dataCoverageNotice: string;
   knownDataGaps: string[];
-}): Promise<string> => {
+}): Promise<{ markdown: string; trace: Record<string, unknown> }> => {
   const prompt = buildBrandReviewPrompt({
     org: params.org,
     crawlResult: params.crawlResult,
@@ -1304,29 +1404,71 @@ const generateReviewMarkdown = async (params: {
     knownDataGaps: params.knownDataGaps
   });
 
-  const firstDraft = await callAnthropicText({
+  const firstCall = await callAnthropicText({
     systemPrompt: prompt.systemPrompt,
     userPrompt: prompt.userPrompt,
     maxTokens: 10000
   });
-  const firstValidation = validateReviewMarkdown(firstDraft ?? "");
+  const firstValidation = validateReviewMarkdown(firstCall.text ?? "");
   if (firstValidation.ok) {
-    return firstValidation.normalized;
+    return {
+      markdown: firstValidation.normalized,
+      trace: {
+        selected_attempt: "first",
+        fallback_used: false,
+        attempts: [
+          {
+            attempt: "first",
+            call: firstCall.trace,
+            validation: {
+              ok: firstValidation.ok,
+              reasons: firstValidation.reasons
+            }
+          }
+        ]
+      }
+    };
   }
+
+  await new Promise((resolve) => setTimeout(resolve, 15_000));
 
   const regenerationPrompt = buildReviewRegenerationPrompt({
     baseUserPrompt: prompt.userPrompt,
     validationReasons: firstValidation.reasons,
     previousDraft: firstValidation.normalized
   });
-  const secondDraft = await callAnthropicText({
+  const secondCall = await callAnthropicText({
     systemPrompt: prompt.systemPrompt,
     userPrompt: regenerationPrompt,
     maxTokens: 12000
   });
-  const secondValidation = validateReviewMarkdown(secondDraft ?? "");
+  const secondValidation = validateReviewMarkdown(secondCall.text ?? "");
   if (secondValidation.ok) {
-    return secondValidation.normalized;
+    return {
+      markdown: secondValidation.normalized,
+      trace: {
+        selected_attempt: "second",
+        fallback_used: false,
+        attempts: [
+          {
+            attempt: "first",
+            call: firstCall.trace,
+            validation: {
+              ok: firstValidation.ok,
+              reasons: firstValidation.reasons
+            }
+          },
+          {
+            attempt: "second",
+            call: secondCall.trace,
+            validation: {
+              ok: secondValidation.ok,
+              reasons: secondValidation.reasons
+            }
+          }
+        ]
+      }
+    };
   }
 
   console.warn(
@@ -1335,7 +1477,7 @@ const generateReviewMarkdown = async (params: {
     }], second=[${secondValidation.reasons.join(", ") || "unknown"}]`
   );
 
-  return buildFallbackReviewMarkdown({
+  const fallbackMarkdown = buildFallbackReviewMarkdown({
     org: params.org,
     crawlResult: params.crawlResult,
     interviewAnswers: params.interviewAnswers,
@@ -1343,13 +1485,39 @@ const generateReviewMarkdown = async (params: {
     dataCoverageNotice: params.dataCoverageNotice,
     knownDataGaps: params.knownDataGaps
   });
+  return {
+    markdown: fallbackMarkdown,
+    trace: {
+      selected_attempt: "fallback_template",
+      fallback_used: true,
+      fallback_reason: "review_markdown_validation_failed",
+      attempts: [
+        {
+          attempt: "first",
+          call: firstCall.trace,
+          validation: {
+            ok: firstValidation.ok,
+            reasons: firstValidation.reasons
+          }
+        },
+        {
+          attempt: "second",
+          call: secondCall.trace,
+          validation: {
+            ok: secondValidation.ok,
+            reasons: secondValidation.reasons
+          }
+        }
+      ]
+    }
+  };
 };
 
 const extractProfileFromReview = async (params: {
   reviewMarkdown: string;
   fallbackProfile: SynthesizedProfile;
   knownDataGaps: string[];
-}): Promise<SynthesizedProfile> => {
+}): Promise<{ profile: SynthesizedProfile; trace: Record<string, unknown> }> => {
   const systemPrompt = [
     "Extract a strict JSON object for onboarding brand profile.",
     "Return JSON only and keep values concise.",
@@ -1378,14 +1546,21 @@ const extractProfileFromReview = async (params: {
     systemPrompt,
     userPrompt
   });
-  if (!extracted) {
+  if (!extracted.parsed) {
     return {
-      ...params.fallbackProfile,
-      confidence_notes: [...params.fallbackProfile.confidence_notes, "Used fallback profile extraction."]
+      profile: {
+        ...params.fallbackProfile,
+        confidence_notes: [...params.fallbackProfile.confidence_notes, "Used fallback profile extraction."]
+      },
+      trace: {
+        source: "fallback_profile",
+        used_fallback: true,
+        extraction_call: extracted.trace
+      }
     };
   }
 
-  const normalized = normalizeBrandProfile(extracted, params.fallbackProfile);
+  const normalized = normalizeBrandProfile(extracted.parsed, params.fallbackProfile);
   const confidence = [...normalized.confidence_notes];
   if (!confidence.length) {
     confidence.push("Structured profile extracted from generated markdown.");
@@ -1393,9 +1568,24 @@ const extractProfileFromReview = async (params: {
   if (params.knownDataGaps.length) {
     confidence.push("Profile includes constraints from partial crawl coverage.");
   }
-  return {
+  const finalProfile = {
     ...normalized,
     confidence_notes: confidence.slice(0, 12)
+  };
+  return {
+    profile: finalProfile,
+    trace: {
+      source: "openai_extraction",
+      used_fallback: false,
+      extraction_call: extracted.trace,
+      extracted_profile_preview: {
+        organization_summary: finalProfile.organization_summary,
+        detected_tone: finalProfile.detected_tone,
+        key_themes: finalProfile.key_themes,
+        target_audience: finalProfile.target_audience,
+        confidence_notes: finalProfile.confidence_notes
+      }
+    }
   };
 };
 
@@ -1541,7 +1731,7 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
     const dataCoverageNotice = buildDataCoverageNotice(crawlResult);
     const knownDataGaps = collectKnownDataGaps(crawlResult, interviewAnswers);
 
-    const reviewMarkdown = await generateReviewMarkdown({
+    const reviewGeneration = await generateReviewMarkdown({
       org: orgContext,
       crawlResult,
       interviewAnswers,
@@ -1549,19 +1739,26 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       dataCoverageNotice,
       knownDataGaps
     });
+    const reviewMarkdown = reviewGeneration.markdown;
 
-    const profile = await extractProfileFromReview({
+    const profileExtraction = await extractProfileFromReview({
       reviewMarkdown,
       fallbackProfile: fallbackSynthesis.profile,
       knownDataGaps
     });
+    const profile = profileExtraction.profile;
+    const synthesisDebug = {
+      review_generation: reviewGeneration.trace,
+      profile_extraction: profileExtraction.trace
+    };
 
     const document = buildOnboardingDocument({
       profile,
       knownDataGaps,
       reviewMarkdown,
       dataCoverageNotice,
-      reportVersion: synthesisMode
+      reportVersion: synthesisMode,
+      synthesisDebug
     });
 
     const crawlSources = parseObject(crawlResult.sources ?? {}, "crawl_result.sources");
@@ -1627,7 +1824,8 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
         ...document,
         synthesis_mode: synthesisMode
       },
-      review_markdown: reviewMarkdown
+      review_markdown: reviewMarkdown,
+      synthesis_debug: synthesisDebug
     });
   } catch (error) {
     const httpError = toHttpError(error);
