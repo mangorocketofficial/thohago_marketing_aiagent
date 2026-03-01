@@ -20,3 +20,6 @@
 - [ ] `git commit -m "<phase 요약 메시지>"`
 - [ ] `git push`
 
+## Latest Completion
+
+- 1-7d: `docs/progress/phase-1-7d-completion.md` (Instagram Graph Business Discovery Crawler Replacement)

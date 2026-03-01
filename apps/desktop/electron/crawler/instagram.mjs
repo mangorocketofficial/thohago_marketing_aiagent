@@ -110,6 +110,288 @@ const parseInstagramUsername = (input) => {
   return /^[A-Za-z0-9._]{1,30}$/.test(normalized) ? normalized : "";
 };
 
+const readEnv = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+};
+
+const normalizeNumericId = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  return /^[0-9]+$/.test(raw) ? raw : "";
+};
+
+const resolveGraphConfig = () => {
+  const accessToken = readEnv(
+    "Graph_META_ACCESS_TOKEN",
+    "GRAPH_META_ACCESS_TOKEN",
+    "INSTAGRAM_ACCESS_TOKEN",
+    "Graph_INSTAGRAM_ACCESS_TOKEN",
+    "GRAPH_INSTAGRAM_ACCESS_TOKEN"
+  );
+  const graphVersion = readEnv("INSTAGRAM_GRAPH_VERSION", "GRAPH_INSTAGRAM_API_VERSION", "GRAPH_API_VERSION") || "v23.0";
+  const businessAccountId = normalizeNumericId(
+    readEnv(
+      "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+      "GRAPH_INSTAGRAM_BUSINESS_ACCOUNT_ID",
+      "INSTAGRAM_IG_USER_ID",
+      "GRAPH_INSTAGRAM_IG_USER_ID",
+      "IG_BUSINESS_ACCOUNT_ID"
+    )
+  );
+  const pageId = normalizeNumericId(readEnv("FACEBOOK_PAGE_ID", "INSTAGRAM_FACEBOOK_PAGE_ID", "GRAPH_FACEBOOK_PAGE_ID"));
+
+  return {
+    accessToken,
+    graphVersion,
+    businessAccountId,
+    pageId
+  };
+};
+
+const buildGraphBaseUrl = (version) => {
+  const trimmed = String(version ?? "").trim();
+  if (!trimmed) {
+    return "https://graph.facebook.com";
+  }
+  return `https://graph.facebook.com/${trimmed}`;
+};
+
+const graphGetJson = async (params) => {
+  const { baseUrl, path, query, accessToken } = params;
+  const endpoint = new URL(`${baseUrl}${path}`);
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    endpoint.searchParams.set(key, String(value));
+  }
+  endpoint.searchParams.set("access_token", accessToken);
+
+  const response = await fetchWithRetry(endpoint.toString(), {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      "user-agent": USER_AGENT
+    }
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      isPlainObject(body) && isPlainObject(body.error) && typeof body.error.message === "string"
+        ? body.error.message
+        : `Graph API request failed with status ${response.status}.`;
+    throw new Error(`Graph API ${path} failed (${response.status}): ${message}`);
+  }
+  if (!isPlainObject(body)) {
+    throw new Error(`Graph API ${path} returned non-JSON response.`);
+  }
+  return body;
+};
+
+const resolveGraphBusinessAccountId = async (params) => {
+  const { baseUrl, accessToken, explicitBusinessAccountId, pageId, targetUsername } = params;
+
+  if (explicitBusinessAccountId) {
+    return explicitBusinessAccountId;
+  }
+
+  if (pageId) {
+    try {
+      const pagePayload = await graphGetJson({
+        baseUrl,
+        path: `/${pageId}`,
+        query: {
+          fields: "instagram_business_account{id,username}"
+        },
+        accessToken
+      });
+      const account = isPlainObject(pagePayload.instagram_business_account) ? pagePayload.instagram_business_account : null;
+      const pageAccountId = normalizeNumericId(account?.id);
+      if (pageAccountId) {
+        return pageAccountId;
+      }
+    } catch {
+      // ignore and continue with /me/accounts fallback
+    }
+  }
+
+  try {
+    const mePayload = await graphGetJson({
+      baseUrl,
+      path: "/me",
+      query: {
+        fields: "instagram_business_account{id,username}"
+      },
+      accessToken
+    });
+    const meAccount = isPlainObject(mePayload.instagram_business_account) ? mePayload.instagram_business_account : null;
+    const meAccountId = normalizeNumericId(meAccount?.id);
+    if (meAccountId) {
+      return meAccountId;
+    }
+  } catch {
+    // ignore and continue with /me/accounts fallback
+  }
+
+  try {
+    const accountsPayload = await graphGetJson({
+      baseUrl,
+      path: "/me/accounts",
+      query: {
+        fields: "id,name,instagram_business_account{id,username}",
+        limit: 100
+      },
+      accessToken
+    });
+
+    const pages = Array.isArray(accountsPayload.data) ? accountsPayload.data : [];
+    const linkedAccounts = pages
+      .map((entry) => (isPlainObject(entry) ? entry : null))
+      .filter(Boolean)
+      .map((entry) => (isPlainObject(entry.instagram_business_account) ? entry.instagram_business_account : null))
+      .filter(Boolean)
+      .map((entry) => ({
+        id: normalizeNumericId(entry.id),
+        username: clampText(entry.username, 40)
+      }))
+      .filter((entry) => entry.id);
+
+    if (!linkedAccounts.length) {
+      return "";
+    }
+
+    const byUsername = linkedAccounts.find(
+      (entry) => entry.username && entry.username.toLowerCase() === targetUsername.toLowerCase()
+    );
+    if (byUsername?.id) {
+      return byUsername.id;
+    }
+
+    return linkedAccounts[0]?.id ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const extractShortcodeFromPermalink = (permalink) => {
+  const raw = String(permalink ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  const matched = raw.match(/\/(?:p|reel)\/([^/?#]+)/i);
+  return matched?.[1] ? clampText(matched[1], 48) : "";
+};
+
+const mapGraphRecentPosts = (mediaRows) => {
+  const rows = Array.isArray(mediaRows) ? mediaRows : [];
+  return rows.slice(0, MAX_POSTS).map((entry) => {
+    const row = isPlainObject(entry) ? entry : {};
+    const permalink = clampText(row.permalink, 360);
+    const shortcode = extractShortcodeFromPermalink(permalink);
+    const caption = clampText(row.caption, 220);
+    return {
+      id: clampText(row.id, 80) || null,
+      shortcode: shortcode || null,
+      url: permalink || null,
+      permalink: permalink || null,
+      caption: caption || null,
+      like_count: toSafeNumber(row.like_count),
+      comment_count: toSafeNumber(row.comments_count),
+      timestamp: typeof row.timestamp === "string" ? clampText(row.timestamp, 64) : null,
+      media_type: clampText(row.media_type, 40) || null,
+      media_url: clampText(row.media_url, 360) || null
+    };
+  });
+};
+
+const buildGraphProfileResult = (payload, fallbackUsername, businessAccountId) => {
+  const discovery = isPlainObject(payload.business_discovery) ? payload.business_discovery : null;
+  if (!discovery) {
+    throw new Error("Graph API payload did not include business_discovery data.");
+  }
+
+  const username = clampText(typeof discovery.username === "string" ? discovery.username : fallbackUsername, 40) || fallbackUsername;
+  const fullName = clampText(discovery.name, 120);
+  const biography = clampText(discovery.biography, 500);
+  const website = clampText(discovery.website, 320);
+  const profilePictureUrl = clampText(discovery.profile_picture_url, 360);
+  const followersCount = toSafeNumber(discovery.followers_count);
+  const followingCount = toSafeNumber(discovery.follows_count);
+  const postsCount = toSafeNumber(discovery.media_count);
+  const recentPosts = mapGraphRecentPosts(isPlainObject(discovery.media) ? discovery.media.data : []);
+
+  const hasCoreCounts = followersCount !== null && followingCount !== null && postsCount !== null;
+  const hasSignal = Boolean(fullName || biography || website || profilePictureUrl || recentPosts.length > 0);
+  const status = hasCoreCounts && hasSignal ? "done" : "partial";
+
+  return {
+    status,
+    data: {
+      source: "graph_api_business_discovery",
+      profile_url: `https://www.instagram.com/${username}/`,
+      username,
+      full_name: fullName || null,
+      biography: biography || null,
+      meta_description: biography || null,
+      external_url: website || null,
+      followers_count: followersCount,
+      following_count: followingCount,
+      posts_count: postsCount,
+      profile_picture_url: profilePictureUrl || null,
+      business_account_id: businessAccountId,
+      recent_posts: recentPosts
+    },
+    error: status === "partial" ? "Graph API returned partial Instagram profile data." : null
+  };
+};
+
+const crawlViaGraphApi = async (username) => {
+  const config = resolveGraphConfig();
+  if (!config.accessToken) {
+    return null;
+  }
+
+  const baseUrl = buildGraphBaseUrl(config.graphVersion);
+  const businessAccountId = await resolveGraphBusinessAccountId({
+    baseUrl,
+    accessToken: config.accessToken,
+    explicitBusinessAccountId: config.businessAccountId,
+    pageId: config.pageId,
+    targetUsername: username
+  });
+  if (!businessAccountId) {
+    throw new Error(
+      "Graph API token is available but Instagram business account id could not be resolved. Set INSTAGRAM_BUSINESS_ACCOUNT_ID or FACEBOOK_PAGE_ID."
+    );
+  }
+
+  const fields = [
+    `business_discovery.username(${username}){`,
+    "username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url,",
+    "media.limit(5){id,caption,like_count,comments_count,timestamp,media_type,media_url,permalink}",
+    "}"
+  ].join("");
+
+  const payload = await graphGetJson({
+    baseUrl,
+    path: `/${businessAccountId}`,
+    query: {
+      fields
+    },
+    accessToken: config.accessToken
+  });
+
+  return buildGraphProfileResult(payload, username, businessAccountId);
+};
+
 const extractUserFromJson = (payload) => {
   if (!isPlainObject(payload)) {
     return null;
@@ -292,24 +574,38 @@ export const crawlInstagram = async (url) => {
     return toFailedResult("", "Invalid Instagram URL or username.");
   }
 
+  let graphErrorMessage = "";
+  try {
+    const graphResult = await crawlViaGraphApi(username);
+    if (graphResult) {
+      return graphResult;
+    }
+  } catch (graphError) {
+    graphErrorMessage = graphError instanceof Error ? graphError.message : "unknown graph api error";
+  }
+
   try {
     return await crawlViaJsonEndpoint(username);
   } catch (jsonError) {
     try {
       const htmlResult = await crawlViaHtmlFallback(username);
+      const notices = [];
+      if (graphErrorMessage) {
+        notices.push(`Graph API unavailable (${graphErrorMessage}).`);
+      }
+      notices.push(`JSON endpoint unavailable (${jsonError instanceof Error ? jsonError.message : "unknown"}). Used HTML fallback.`);
       return {
         ...htmlResult,
-        error: clampText(
-          `JSON endpoint unavailable (${jsonError instanceof Error ? jsonError.message : "unknown"}). Used HTML fallback.`,
-          260
-        )
+        error: clampText(notices.join(" "), 260)
       };
     } catch (htmlError) {
-      const reason = [
-        `JSON endpoint: ${jsonError instanceof Error ? jsonError.message : "unknown error"}`,
-        `HTML fallback: ${htmlError instanceof Error ? htmlError.message : "unknown error"}`
-      ].join(" | ");
-      return toFailedResult(username, reason);
+      const reason = [];
+      if (graphErrorMessage) {
+        reason.push(`Graph API: ${graphErrorMessage}`);
+      }
+      reason.push(`JSON endpoint: ${jsonError instanceof Error ? jsonError.message : "unknown error"}`);
+      reason.push(`HTML fallback: ${htmlError instanceof Error ? htmlError.message : "unknown error"}`);
+      return toFailedResult(username, reason.join(" | "));
     }
   }
 };

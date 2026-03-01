@@ -12,3 +12,4 @@
 | 1-6b | Brand Review + Interview + Synthesis MVP | Done | 2026-03-01 | [phase-1-6b-completion.md](./phase-1-6b-completion.md) |
 | 1-7a | Brand Review Markdown Foundation (Contract-Safe) | Done | 2026-03-01 | [phase-1-7a-completion.md](./phase-1-7a-completion.md) |
 | 1-7c | Brand Review Synthesis Quality Upgrade (Deep Crawl + Mandatory Web Search) | Done | 2026-03-01 | [phase-1-7c-completion.md](./phase-1-7c-completion.md) |
+| 1-7d | Instagram Graph Business Discovery Crawler Replacement | Done | 2026-03-01 | [phase-1-7d-completion.md](./phase-1-7d-completion.md) |
