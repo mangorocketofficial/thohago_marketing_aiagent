@@ -9,6 +9,7 @@ import type {
   InterviewAnswers,
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
+  OrgEntitlement,
   OrchestratorSession
 } from "@repo/types";
 
@@ -22,8 +23,16 @@ type OnboardingDraft = DesktopAppConfig["onboardingDraft"];
 type OnboardingStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type AuthMode = "sign_in" | "sign_up";
 type OnboardingSynthesisResult = Awaited<ReturnType<Runtime["onboarding"]["synthesize"]>>;
+type EntitlementResponse = Awaited<ReturnType<Runtime["billing"]["getEntitlement"]>>;
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 const ONBOARDING_STEPS: OnboardingStep[] = [0, 1, 2, 3, 4, 5, 6, 7];
+const FALLBACK_ENTITLEMENT: OrgEntitlement = {
+  org_id: "",
+  status: "past_due",
+  is_entitled: false,
+  trial_ends_at: null,
+  current_period_end: null
+};
 
 const defaultOnboardingDraft = (): OnboardingDraft => ({
   websiteUrl: "",
@@ -275,6 +284,8 @@ const App = () => {
   const [isSynthesisPending, setIsSynthesisPending] = useState(false);
   const [synthesisResult, setSynthesisResult] = useState<OnboardingSynthesisResult | null>(null);
   const [hasSynthesisAttempted, setHasSynthesisAttempted] = useState(false);
+  const [entitlement, setEntitlement] = useState<EntitlementResponse | null>(null);
+  const [isEntitlementPending, setIsEntitlementPending] = useState(false);
 
   const [chatConfig, setChatConfig] = useState<ChatConfig | null>(null);
   const [activeSession, setActiveSession] = useState<OrchestratorSession | null>(null);
@@ -320,6 +331,8 @@ const App = () => {
     }
     return typeof synthesisResult.review_export_path === "string" ? synthesisResult.review_export_path.trim() : "";
   }, [synthesisResult]);
+  const isEntitled = entitlement?.is_entitled === true;
+  const entitlementStatus = entitlement?.status ?? FALLBACK_ENTITLEMENT.status;
 
   const refreshActiveSession = useCallback(async (): Promise<OrchestratorSession | null> => {
     if (!runtime) {
@@ -738,6 +751,14 @@ const App = () => {
 
       const nextConfig = await runtime.onboarding.setOrgId(orgId);
       setDesktopConfig(nextConfig);
+
+      if (body.entitlement) {
+        setEntitlement({
+          ok: true,
+          ...body.entitlement
+        });
+      }
+
       return orgId;
     },
     [authForm.name, runtime]
@@ -752,9 +773,87 @@ const App = () => {
     return stored?.accessToken?.trim() ?? "";
   }, [authSession?.access_token, runtime.auth]);
 
+  const refreshEntitlement = useCallback(
+    async (options?: {
+      accessToken?: string;
+      orgId?: string;
+      silent?: boolean;
+      useRefreshApi?: boolean;
+    }): Promise<EntitlementResponse | null> => {
+      if (!runtime) {
+        return null;
+      }
+
+      const orgId = (options?.orgId ?? desktopConfig?.orgId ?? "").trim();
+      if (!orgId) {
+        if (!options?.silent) {
+          setNotice("Organization context is missing.");
+        }
+        return null;
+      }
+
+      const accessToken = (options?.accessToken ?? "").trim() || (await resolveOnboardingAccessToken());
+      if (!accessToken) {
+        if (!options?.silent) {
+          setNotice("Sign in session is missing. Please sign in again.");
+        }
+        return null;
+      }
+
+      setIsEntitlementPending(true);
+      try {
+        const response = options?.useRefreshApi
+          ? await runtime.billing.refreshEntitlement({
+              accessToken,
+              orgId
+            })
+          : await runtime.billing.getEntitlement({
+              accessToken,
+              orgId
+            });
+        setEntitlement(response);
+        return response;
+      } catch (error) {
+        if (!options?.silent) {
+          setNotice(error instanceof Error ? error.message : "Failed to load subscription status.");
+        }
+        return null;
+      } finally {
+        setIsEntitlementPending(false);
+      }
+    },
+    [desktopConfig?.orgId, resolveOnboardingAccessToken, runtime]
+  );
+
+  const ensureActiveEntitlement = useCallback(
+    async (options?: { silent?: boolean }): Promise<boolean> => {
+      if (entitlement?.is_entitled) {
+        return true;
+      }
+
+      const refreshed = await refreshEntitlement({
+        silent: options?.silent ?? false,
+        useRefreshApi: true
+      });
+      if (refreshed?.is_entitled) {
+        return true;
+      }
+
+      if (!options?.silent) {
+        setNotice("Active subscription is required. Please complete checkout and refresh entitlement.");
+      }
+      return false;
+    },
+    [entitlement?.is_entitled, refreshEntitlement]
+  );
+
   const startOnboardingCrawl = useCallback(
     async (forceRestart = false) => {
       if (!runtime) {
+        return;
+      }
+      const entitled = await ensureActiveEntitlement();
+      if (!entitled) {
         return;
       }
       if (!forceRestart && (crawlStatus.state === "running" || crawlStatus.started_at)) {
@@ -786,6 +885,7 @@ const App = () => {
       onboardingDraft.instagramUrl,
       onboardingDraft.naverBlogUrl,
       onboardingDraft.websiteUrl,
+      ensureActiveEntitlement,
       runtime
     ]
   );
@@ -810,6 +910,12 @@ const App = () => {
         }
         return false;
       }
+      const entitled = await ensureActiveEntitlement({
+        silent: options?.silent ?? false
+      });
+      if (!entitled) {
+        return false;
+      }
 
       setIsInterviewSaving(true);
       try {
@@ -831,7 +937,7 @@ const App = () => {
         setIsInterviewSaving(false);
       }
     },
-    [desktopConfig?.orgId, resolveOnboardingAccessToken, runtime]
+    [desktopConfig?.orgId, ensureActiveEntitlement, resolveOnboardingAccessToken, runtime]
   );
 
   const synthesizeOnboardingResult = useCallback(async () => {
@@ -847,6 +953,10 @@ const App = () => {
     const accessToken = await resolveOnboardingAccessToken();
     if (!accessToken) {
       setNotice("Sign in session is missing. Please sign in again.");
+      return;
+    }
+    const entitled = await ensureActiveEntitlement();
+    if (!entitled) {
       return;
     }
 
@@ -892,6 +1002,7 @@ const App = () => {
     onboardingDraft.threadsUrl,
     onboardingDraft.websiteUrl,
     onboardingDraft.youtubeUrl,
+    ensureActiveEntitlement,
     resolveOnboardingAccessToken,
     runtime
   ]);
@@ -927,7 +1038,12 @@ const App = () => {
         const { data: sessionData } = await authSupabase.auth.getSession();
         const session = sessionData.session;
         if (session) {
-          await bootstrapOrgContext(session.access_token);
+          const orgId = await bootstrapOrgContext(session.access_token);
+          await refreshEntitlement({
+            accessToken: session.access_token,
+            orgId,
+            silent: true
+          });
           setOnboardingStep(2);
         } else {
           setAuthNotice("Signup completed. Please verify email if confirmation is enabled, then sign in.");
@@ -943,7 +1059,12 @@ const App = () => {
         throw error ?? new Error("Sign in failed.");
       }
 
-      await bootstrapOrgContext(data.session.access_token);
+      const orgId = await bootstrapOrgContext(data.session.access_token);
+      await refreshEntitlement({
+        accessToken: data.session.access_token,
+        orgId,
+        silent: true
+      });
       setOnboardingStep(2);
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Authentication failed.");
@@ -972,7 +1093,12 @@ const App = () => {
 
       let bootstrapFailedMessage = "";
       try {
-        await bootstrapOrgContext(secureSession.accessToken);
+        const orgId = await bootstrapOrgContext(secureSession.accessToken);
+        await refreshEntitlement({
+          accessToken: secureSession.accessToken,
+          orgId,
+          silent: true
+        });
       } catch (bootstrapError) {
         const message =
           bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
@@ -1007,7 +1133,12 @@ const App = () => {
       }
 
       try {
-        await bootstrapOrgContext(accessToken);
+        const orgId = await bootstrapOrgContext(accessToken);
+        await refreshEntitlement({
+          accessToken,
+          orgId,
+          silent: true
+        });
       } catch (bootstrapError) {
         const message =
           bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
@@ -1033,6 +1164,7 @@ const App = () => {
       await authSupabase.auth.signOut();
       await runtime.auth.clearSession();
       setAuthSession(null);
+      setEntitlement(null);
       setAuthNotice("Signed out.");
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Sign-out failed.");
@@ -1049,9 +1181,10 @@ const App = () => {
     let cancelled = false;
     const run = async () => {
       try {
+        let resolvedOrgId = (desktopConfig?.orgId ?? "").trim();
         if (!desktopConfig?.orgId || desktopConfig.orgId === "") {
           try {
-            await bootstrapOrgContext(authSession.access_token);
+            resolvedOrgId = await bootstrapOrgContext(authSession.access_token);
           } catch (bootstrapError) {
             const message =
               bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
@@ -1062,6 +1195,13 @@ const App = () => {
               );
             }
           }
+        }
+        if (!cancelled && resolvedOrgId) {
+          await refreshEntitlement({
+            accessToken: authSession.access_token,
+            orgId: resolvedOrgId,
+            silent: true
+          });
         }
         if (!cancelled) {
           setOnboardingStep(2);
@@ -1077,7 +1217,28 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [authSession, bootstrapOrgContext, desktopConfig?.orgId, mode, onboardingStep]);
+  }, [authSession, bootstrapOrgContext, desktopConfig?.orgId, mode, onboardingStep, refreshEntitlement]);
+
+  useEffect(() => {
+    if (mode !== "onboarding" || onboardingStep < 2) {
+      return;
+    }
+    if (isEntitlementPending) {
+      return;
+    }
+    const orgId = (desktopConfig?.orgId ?? "").trim();
+    if (!orgId) {
+      return;
+    }
+    if (entitlement?.org_id === orgId) {
+      return;
+    }
+
+    void refreshEntitlement({
+      orgId,
+      silent: true
+    });
+  }, [desktopConfig?.orgId, entitlement?.org_id, isEntitlementPending, mode, onboardingStep, refreshEntitlement]);
 
   useEffect(() => {
     if (mode !== "onboarding") {
@@ -1111,11 +1272,21 @@ const App = () => {
   ]);
 
   const moveToStep = (step: OnboardingStep) => {
+    if (step >= 3 && !isEntitled) {
+      setOnboardingStep(2);
+      setNotice("Active subscription is required before continuing onboarding.");
+      return;
+    }
     setOnboardingStep(step);
     setNotice("");
   };
 
   const handleUrlsNext = async () => {
+    const entitled = await ensureActiveEntitlement();
+    if (!entitled) {
+      return;
+    }
+
     const urlFields: Array<keyof OnboardingDraft> = [
       "websiteUrl",
       "naverBlogUrl",
@@ -1141,6 +1312,11 @@ const App = () => {
   };
 
   const handleInterviewNext = async () => {
+    const entitled = await ensureActiveEntitlement();
+    if (!entitled) {
+      return;
+    }
+
     if (!interviewAnswers.q1.trim() || !interviewAnswers.q2.trim() || !interviewAnswers.q3.trim() || !interviewAnswers.q4.trim()) {
       setNotice("Please answer all 4 questions.");
       return;
@@ -1166,6 +1342,39 @@ const App = () => {
 
   const handleInterviewBlur = async () => {
     await persistInterviewAnswers(interviewAnswers, { silent: true });
+  };
+
+  const refreshEntitlementStatus = async () => {
+    const refreshed = await refreshEntitlement({
+      useRefreshApi: true,
+      silent: false
+    });
+    if (!refreshed) {
+      return;
+    }
+    if (refreshed.is_entitled) {
+      setNotice("Subscription is active. You can continue onboarding.");
+      return;
+    }
+    setNotice(`Subscription status is "${refreshed.status}". Active access is still required.`);
+  };
+
+  const openCheckout = async () => {
+    if (!runtime) {
+      return;
+    }
+    try {
+      const result = await runtime.billing.openCheckout({
+        orgId: desktopConfig?.orgId
+      });
+      if (!result.ok) {
+        setNotice(result.message ?? "Checkout URL is not configured.");
+        return;
+      }
+      setNotice(result.url ? `Opened checkout: ${result.url}` : "Checkout opened in your browser.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to open checkout.");
+    }
   };
 
   const chooseFolder = async () => {
@@ -1484,45 +1693,77 @@ const App = () => {
 
           {onboardingStep === 2 ? (
             <>
-              <p className="description">{t("onboarding.urls.description")}</p>
-              <div className="auth-form">
-                <input
-                  value={onboardingDraft.websiteUrl}
-                  placeholder={t("onboarding.urls.website")}
-                  onChange={(event) => void setDraftValue("websiteUrl", event.target.value)}
-                />
-                <input
-                  value={onboardingDraft.naverBlogUrl}
-                  placeholder={t("onboarding.urls.naverBlog")}
-                  onChange={(event) => void setDraftValue("naverBlogUrl", event.target.value)}
-                />
-                <input
-                  value={onboardingDraft.instagramUrl}
-                  placeholder={t("onboarding.urls.instagram")}
-                  onChange={(event) => void setDraftValue("instagramUrl", event.target.value)}
-                />
-                <input
-                  value={onboardingDraft.facebookUrl}
-                  placeholder={t("onboarding.urls.facebook")}
-                  onChange={(event) => void setDraftValue("facebookUrl", event.target.value)}
-                />
-                <input
-                  value={onboardingDraft.youtubeUrl}
-                  placeholder={t("onboarding.urls.youtube")}
-                  onChange={(event) => void setDraftValue("youtubeUrl", event.target.value)}
-                />
-                <input
-                  value={onboardingDraft.threadsUrl}
-                  placeholder={t("onboarding.urls.threads")}
-                  onChange={(event) => void setDraftValue("threadsUrl", event.target.value)}
-                />
-              </div>
-              <div className="button-row">
-                <button onClick={() => moveToStep(1)}>{t("onboarding.back")}</button>
-                <button className="primary" onClick={() => void handleUrlsNext()}>
-                  {t("onboarding.urls.next")}
-                </button>
-              </div>
+              {!isEntitled ? (
+                <>
+                  <p className="description">
+                    Active subscription is required before brand URL setup and synthesis.
+                  </p>
+                  <div className="meta-grid">
+                    <p>
+                      Subscription status: <strong>{entitlementStatus}</strong>
+                    </p>
+                    <p>
+                      Trial ends: <strong>{formatDateTime(entitlement?.trial_ends_at)}</strong>
+                    </p>
+                    <p>
+                      Period end: <strong>{formatDateTime(entitlement?.current_period_end)}</strong>
+                    </p>
+                    <p>
+                      Org: <strong>{entitlement?.org_id || desktopConfig?.orgId || "-"}</strong>
+                    </p>
+                  </div>
+                  {isEntitlementPending ? <p className="meta">Refreshing subscription status...</p> : null}
+                  <div className="button-row">
+                    <button onClick={() => moveToStep(1)}>{t("onboarding.back")}</button>
+                    <button onClick={() => void openCheckout()}>Open Checkout</button>
+                    <button className="primary" disabled={isEntitlementPending} onClick={() => void refreshEntitlementStatus()}>
+                      Refresh Subscription
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="description">{t("onboarding.urls.description")}</p>
+                  <div className="auth-form">
+                    <input
+                      value={onboardingDraft.websiteUrl}
+                      placeholder={t("onboarding.urls.website")}
+                      onChange={(event) => void setDraftValue("websiteUrl", event.target.value)}
+                    />
+                    <input
+                      value={onboardingDraft.naverBlogUrl}
+                      placeholder={t("onboarding.urls.naverBlog")}
+                      onChange={(event) => void setDraftValue("naverBlogUrl", event.target.value)}
+                    />
+                    <input
+                      value={onboardingDraft.instagramUrl}
+                      placeholder={t("onboarding.urls.instagram")}
+                      onChange={(event) => void setDraftValue("instagramUrl", event.target.value)}
+                    />
+                    <input
+                      value={onboardingDraft.facebookUrl}
+                      placeholder={t("onboarding.urls.facebook")}
+                      onChange={(event) => void setDraftValue("facebookUrl", event.target.value)}
+                    />
+                    <input
+                      value={onboardingDraft.youtubeUrl}
+                      placeholder={t("onboarding.urls.youtube")}
+                      onChange={(event) => void setDraftValue("youtubeUrl", event.target.value)}
+                    />
+                    <input
+                      value={onboardingDraft.threadsUrl}
+                      placeholder={t("onboarding.urls.threads")}
+                      onChange={(event) => void setDraftValue("threadsUrl", event.target.value)}
+                    />
+                  </div>
+                  <div className="button-row">
+                    <button onClick={() => moveToStep(1)}>{t("onboarding.back")}</button>
+                    <button className="primary" onClick={() => void handleUrlsNext()}>
+                      {t("onboarding.urls.next")}
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           ) : null}
 

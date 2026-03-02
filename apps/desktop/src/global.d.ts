@@ -5,6 +5,7 @@ import type {
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
   OnboardingResultDocument,
+  OrgEntitlement,
   OrchestratorSession
 } from "@repo/types";
 
@@ -95,6 +96,16 @@ type SecureAuthSession = {
   expiresAt: number | null;
 };
 
+type EntitlementResponse = {
+  ok: boolean;
+} & OrgEntitlement;
+
+type BillingCheckoutResult = {
+  ok: boolean;
+  message: string | null;
+  url: string | null;
+};
+
 type OnboardingSynthesisResponse = {
   ok: boolean;
   org_id: string;
@@ -117,6 +128,17 @@ declare global {
         saveSession: (payload: SecureAuthSession) => Promise<SecureAuthSession>;
         clearSession: () => Promise<{ ok: boolean }>;
         startGoogleOAuth: () => Promise<SecureAuthSession>;
+      };
+      billing: {
+        getEntitlement: (payload: {
+          accessToken?: string;
+          orgId?: string;
+        }) => Promise<EntitlementResponse>;
+        refreshEntitlement: (payload: {
+          accessToken?: string;
+          orgId?: string;
+        }) => Promise<EntitlementResponse>;
+        openCheckout: (payload?: { orgId?: string }) => Promise<BillingCheckoutResult>;
       };
       watcher: {
         onFileIndexed: (cb: (entry: RendererFileEntry) => void) => () => void;
@@ -152,6 +174,7 @@ declare global {
           membership: {
             role: "owner" | "admin" | "member";
           };
+          entitlement: OrgEntitlement;
         }>;
         getCrawlState: () => Promise<OnboardingCrawlStatus>;
         startCrawl: (payload: {

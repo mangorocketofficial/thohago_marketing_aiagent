@@ -141,6 +141,16 @@ const parseBoolean = (value: string, fallback: boolean): boolean => {
   return fallback;
 };
 
+type SubscriptionStatus = "trial" | "active" | "past_due" | "canceled";
+
+const parseSubscriptionStatus = (value: string, fallback: SubscriptionStatus): SubscriptionStatus => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "trial" || normalized === "active" || normalized === "past_due" || normalized === "canceled") {
+    return normalized;
+  }
+  return fallback;
+};
+
 const ragEmbeddingProvider = parseEmbeddingProvider(readEnv("RAG_EMBEDDING_PROVIDER", "openai"));
 const ragEmbeddingModel = parseEmbeddingModel(readEnv("RAG_EMBEDDING_MODEL", "text-embedding-3-small"));
 const ragEmbeddingDimensions = parseEmbeddingDim(readEnv("RAG_EMBEDDING_DIMENSIONS", "1536"), 1536);
@@ -163,6 +173,9 @@ const ragTier2LocalDocBudget = parsePositiveInt(readEnv("RAG_TIER2_LOCAL_DOC_BUD
 const ragTier2ChatPatternBudget = parsePositiveInt(readEnv("RAG_TIER2_CHAT_PATTERN_BUDGET", "500"), 500);
 const ragForbiddenCheckEnabled = parseBoolean(readEnv("RAG_FORBIDDEN_CHECK_ENABLED", "true"), true);
 const ragForbiddenMaxRetries = parseNonNegativeInt(readEnv("RAG_FORBIDDEN_MAX_RETRIES", "1"), 1);
+const subscriptionBypass = parseBoolean(readEnv("SUBSCRIPTION_BYPASS", "false"), false);
+const subscriptionDefaultStatus = parseSubscriptionStatus(readEnv("SUBSCRIPTION_DEFAULT_STATUS", "active"), "active");
+const subscriptionTrialDays = parseNonNegativeInt(readEnv("SUBSCRIPTION_TRIAL_DAYS", "14"), 14);
 
 export const env = {
   apiPort,
@@ -186,5 +199,8 @@ export const env = {
   ragTier2LocalDocBudget,
   ragTier2ChatPatternBudget,
   ragForbiddenCheckEnabled,
-  ragForbiddenMaxRetries
+  ragForbiddenMaxRetries,
+  subscriptionBypass,
+  subscriptionDefaultStatus,
+  subscriptionTrialDays
 };

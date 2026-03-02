@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { hasValidApiSecret, requireUserJwt } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { getMemoryMdForOrg } from "../rag/memory-service";
 
@@ -40,6 +41,9 @@ memoryRouter.get("/orgs/:orgId/memory", async (req, res) => {
         return;
       }
       await requireOrgMembership(user.userId, orgId);
+    }
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
     }
 
     const memory = await getMemoryMdForOrg(orgId);

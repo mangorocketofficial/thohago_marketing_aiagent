@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { requireApiSecret } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { enqueueTrigger, getActiveSessionForOrg } from "../orchestrator/service";
 import type { PipelineTriggerRow, TriggerFileType } from "../orchestrator/types";
@@ -64,6 +65,10 @@ triggerRouter.post("/trigger", async (req, res) => {
 
   try {
     const orgId = parseRequiredString(req.body?.org_id, "org_id");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
     const relativePath = parseRequiredString(req.body?.relative_path, "relative_path");
     const fileName = parseRequiredString(req.body?.file_name, "file_name");
     const activityFolder = parseRequiredString(req.body?.activity_folder, "activity_folder");

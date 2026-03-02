@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     clearSession: () => ipcRenderer.invoke("auth:clear-session"),
     startGoogleOAuth: () => ipcRenderer.invoke("auth:start-google-oauth")
   },
+  billing: {
+    getEntitlement: (payload) => ipcRenderer.invoke("billing:get-entitlement", payload),
+    refreshEntitlement: (payload) => ipcRenderer.invoke("billing:refresh-entitlement", payload),
+    openCheckout: (payload) => ipcRenderer.invoke("billing:open-checkout", payload)
+  },
   watcher: {
     onFileIndexed: (cb) => subscribe("file:indexed", cb),
     onFileDeleted: (cb) => subscribe("file:deleted", cb),

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireApiSecret } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { requireActiveSubscription } from "../lib/subscription";
 import { getActiveSessionForOrg, getSessionById, resumeSession } from "../orchestrator/service";
 import type { ResumeEventRequest, ResumeEventType } from "../orchestrator/types";
 
@@ -50,6 +51,14 @@ sessionsRouter.post("/sessions/:sessionId/resume", async (req, res) => {
 
   try {
     const sessionId = parseRequiredString(req.params.sessionId, "sessionId");
+    const session = await getSessionById(sessionId);
+    if (!session) {
+      throw new HttpError(404, "not_found", "Session not found.");
+    }
+    if (!(await requireActiveSubscription(res, session.org_id))) {
+      return;
+    }
+
     const event = parseResumeEvent(req.body);
     const result = await resumeSession(sessionId, event);
 

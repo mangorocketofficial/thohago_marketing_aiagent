@@ -27,10 +27,35 @@ export type OrganizationMember = {
   created_at: string;
 };
 
+export type SubscriptionStatus = "trial" | "active" | "past_due" | "canceled";
+export type SubscriptionProvider = "manual" | "stripe" | "paddle";
+
+export type OrgSubscription = {
+  id: string;
+  org_id: string;
+  provider: SubscriptionProvider;
+  provider_customer_id: string | null;
+  provider_subscription_id: string | null;
+  status: SubscriptionStatus;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  canceled_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrgEntitlement = {
+  org_id: string;
+  status: SubscriptionStatus;
+  is_entitled: boolean;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+};
+
 export type Channel = "instagram" | "threads" | "naver_blog" | "facebook" | "youtube";
 export type ContentType = "text" | "image" | "video";
-export type ContentStatus = "draft" | "pending_approval" | "approved" | "published" | "rejected";
-export type ContentCreatedBy = "ai" | "user";
+export type ContentStatus = "draft" | "pending_approval" | "approved" | "published" | "rejected" | "historical";
+export type ContentCreatedBy = "ai" | "user" | "onboarding_crawl";
 
 export type Content = {
   id: string;

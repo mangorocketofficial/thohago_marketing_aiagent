@@ -1,6 +1,7 @@
 import express from "express";
 import { env } from "./lib/env";
 import { supabaseAdmin } from "./lib/supabase-admin";
+import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
 import { memoryRouter } from "./routes/memory";
 import { onboardingRouter } from "./routes/onboarding";
@@ -21,6 +22,7 @@ app.use(triggerRouter);
 app.use(sessionsRouter);
 app.use(onboardingRouter);
 app.use(memoryRouter);
+app.use(entitlementRouter);
 
 app.use((_req, res) => {
   res.status(404).json({
@@ -30,7 +32,13 @@ app.use((_req, res) => {
   });
 });
 
-const requiredTables = ["pipeline_triggers", "campaigns", "orchestrator_sessions", "org_brand_settings"] as const;
+const requiredTables = [
+  "pipeline_triggers",
+  "campaigns",
+  "orchestrator_sessions",
+  "org_brand_settings",
+  "org_subscriptions"
+] as const;
 
 const verifyRequiredTables = async () => {
   for (const table of requiredTables) {
@@ -41,7 +49,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260228110000_phase_1_5a_orchestration.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260302200000_phase_2_3_subscription_entitlement.sql on the connected project.`
       );
       continue;
     }

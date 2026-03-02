@@ -22,7 +22,7 @@ const toSchemaNotReadyError = (message: string): HttpError | null => {
   return new HttpError(
     503,
     "schema_not_ready",
-    `Required table ${table} is not available in Supabase schema cache. Apply Supabase migrations in order through 20260228150000_phase_1_6b_brand_settings.sql on the connected project and retry.`
+    `Required table ${table} is not available in Supabase schema cache. Apply Supabase migrations in order through 20260302200000_phase_2_3_subscription_entitlement.sql on the connected project and retry.`
   );
 };
 

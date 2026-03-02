@@ -40,6 +40,7 @@ const fallbackRlsToken = (process.env.RLS_TEST_USER_TOKEN ?? "").trim();
 const oauthCallbackPort = Number.parseInt((process.env.DESKTOP_OAUTH_CALLBACK_PORT ?? "48721").trim(), 10);
 const oauthCallbackHost = (process.env.DESKTOP_OAUTH_CALLBACK_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
 const oauthCallbackTimeoutMs = Number.parseInt((process.env.DESKTOP_OAUTH_TIMEOUT_MS ?? "90000").trim(), 10);
+const billingCheckoutUrl = (process.env.BILLING_CHECKOUT_URL ?? "").trim();
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -399,6 +400,33 @@ const resolveOnboardingAccessToken = (rawToken) => {
   const runtimeToken = String(runtimeState.authSession?.accessToken ?? "").trim();
   return runtimeToken;
 };
+
+const resolveOrgIdForBilling = (rawOrgId) => {
+  const direct = String(rawOrgId ?? "").trim();
+  if (direct) {
+    return direct;
+  }
+  return String(runtimeState.orgId ?? "").trim();
+};
+
+const normalizeSubscriptionStatus = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "trial" || normalized === "active" || normalized === "past_due" || normalized === "canceled") {
+    return normalized;
+  }
+  return "past_due";
+};
+
+const normalizeEntitlementResponse = (row, orgId) => ({
+  ok: true,
+  org_id: String(row?.org_id ?? orgId ?? "").trim(),
+  status: normalizeSubscriptionStatus(row?.status),
+  is_entitled: row?.is_entitled === true,
+  trial_ends_at: typeof row?.trial_ends_at === "string" ? row.trial_ends_at : null,
+  current_period_end: typeof row?.current_period_end === "string" ? row.current_period_end : null
+});
 
 const normalizeInterviewAnswers = (input) => {
   const fallback = {
@@ -934,6 +962,53 @@ const registerIpcHandlers = () => {
       runtimeState.authSession = sessionPayload;
       return sessionPayload;
     }
+  });
+
+  const fetchEntitlement = async (payload) => {
+    const accessToken = resolveOnboardingAccessToken(payload?.accessToken);
+    if (!accessToken) {
+      throw new Error("A valid user access token is required.");
+    }
+
+    const orgId = resolveOrgIdForBilling(payload?.orgId);
+    if (!orgId) {
+      throw new Error("orgId is required.");
+    }
+
+    const body = await callOrchestratorApi(`/orgs/${orgId}/entitlement`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+
+    return normalizeEntitlementResponse(body, orgId);
+  };
+
+  ipcMain.handle("billing:get-entitlement", async (_, payload) => fetchEntitlement(payload));
+  ipcMain.handle("billing:refresh-entitlement", async (_, payload) => fetchEntitlement(payload));
+
+  ipcMain.handle("billing:open-checkout", async (_, payload) => {
+    const orgId = resolveOrgIdForBilling(payload?.orgId);
+    if (!billingCheckoutUrl) {
+      return {
+        ok: false,
+        message: "BILLING_CHECKOUT_URL is not configured.",
+        url: null
+      };
+    }
+
+    const checkoutUrl = new URL(billingCheckoutUrl);
+    if (orgId && !checkoutUrl.searchParams.get("org_id")) {
+      checkoutUrl.searchParams.set("org_id", orgId);
+    }
+
+    await shell.openExternal(checkoutUrl.toString());
+    return {
+      ok: true,
+      message: null,
+      url: checkoutUrl.toString()
+    };
   });
 
   ipcMain.handle("watcher:get-status", () => getWatcherStatus());

@@ -15,6 +15,17 @@ set
   description = excluded.description,
   website = excluded.website;
 
+insert into public.org_subscriptions (org_id, provider, status)
+values (
+  'a1b2c3d4-0000-0000-0000-000000000001',
+  'manual',
+  'active'
+)
+on conflict (org_id) do update
+set
+  provider = excluded.provider,
+  status = excluded.status;
+
 do $$
 begin
   if exists (

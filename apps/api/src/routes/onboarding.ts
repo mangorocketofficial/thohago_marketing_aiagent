@@ -4,6 +4,7 @@ import { Router } from "express";
 import { requireUserJwt } from "../lib/auth";
 import { env } from "../lib/env";
 import { HttpError, toHttpError } from "../lib/errors";
+import { ensureOrgSubscription, getOrgEntitlement, requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { enqueueRagIngestion } from "../rag/ingest-brand-profile";
 
@@ -263,6 +264,7 @@ const createInitialOrg = async (params: {
   if (memberError) {
     throw new HttpError(500, "db_error", `Failed to create organization membership: ${memberError.message}`);
   }
+  await ensureOrgSubscription(org.id);
 
   return {
     orgId: org.id,
@@ -1653,6 +1655,7 @@ onboardingRouter.post("/onboarding/bootstrap-org", async (req, res) => {
 
     const existing = await getExistingMembership(user.userId);
     if (existing?.org_id) {
+      const entitlement = await getOrgEntitlement(existing.org_id);
       res.json({
         ok: true,
         created: false,
@@ -1663,7 +1666,8 @@ onboardingRouter.post("/onboarding/bootstrap-org", async (req, res) => {
         },
         membership: {
           role: existing.role
-        }
+        },
+        entitlement
       });
       return;
     }
@@ -1672,6 +1676,7 @@ onboardingRouter.post("/onboarding/bootstrap-org", async (req, res) => {
       userId: user.userId,
       orgName: resolveOrgName(body.org_name, user.email)
     });
+    const entitlement = await getOrgEntitlement(created.orgId);
 
     res.json({
       ok: true,
@@ -1683,7 +1688,8 @@ onboardingRouter.post("/onboarding/bootstrap-org", async (req, res) => {
       },
       membership: {
         role: "owner"
-      }
+      },
+      entitlement
     });
   } catch (error) {
     const httpError = toHttpError(error);
@@ -1707,6 +1713,9 @@ onboardingRouter.post("/onboarding/interview", async (req, res) => {
 
     const orgId = parseRequiredString(body.org_id, "org_id", 120);
     await requireOrgMembership(user.userId, orgId);
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
     const interviewAnswers = parseInterviewAnswers(body.interview_answers);
 
     const { error } = await supabaseAdmin.from("org_brand_settings").upsert(
@@ -1752,6 +1761,9 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
 
     const orgId = parseRequiredString(body.org_id, "org_id", 120);
     await requireOrgMembership(user.userId, orgId);
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
 
     const crawlResult = parseObject(body.crawl_result, "crawl_result");
     parseJsonSize(crawlResult, "crawl_result", MAX_JSON_LENGTH);
