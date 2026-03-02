@@ -219,7 +219,7 @@ declare global {
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         sendMessage: (payload: { sessionId: string; content: string }) => Promise<ChatResumeResult>;
         approveCampaign: (payload: { sessionId: string; campaignId: string }) => Promise<ChatResumeResult>;
-        approveContent: (payload: { sessionId: string; contentId: string }) => Promise<ChatResumeResult>;
+        approveContent: (payload: { sessionId: string; contentId: string; editedBody?: string }) => Promise<ChatResumeResult>;
         reject: (payload: {
           sessionId: string;
           type: "campaign" | "content";

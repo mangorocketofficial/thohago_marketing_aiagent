@@ -7,6 +7,7 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { ensureOrgSubscription, getOrgEntitlement, requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { enqueueRagIngestion } from "../rag/ingest-brand-profile";
+import { embedAllPendingContent } from "../rag/ingest-content";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_JSON_LENGTH = 120_000;
@@ -1896,13 +1897,46 @@ async function persistHistoricalContent(
   orgId: string,
   crawlResult: Record<string, unknown>
 ): Promise<{ inserted: number; deleted: number }> {
-  // Clear previous crawl-imported content for this org (re-onboarding safety)
+  const { data: existingRows, error: existingError } = await supabaseAdmin
+    .from("contents")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("status", "historical")
+    .eq("created_by", "onboarding_crawl")
+    .limit(5000);
+
+  if (existingError) {
+    console.warn(`[HISTORICAL_CONTENT] Failed to query existing rows for org ${orgId}: ${existingError.message}`);
+  }
+
+  const existingIds = (Array.isArray(existingRows) ? existingRows : [])
+    .map((row) => (typeof row.id === "string" ? row.id.trim() : ""))
+    .filter(Boolean);
+
+  // Clear previous crawl-imported content for this org (re-onboarding safety).
   const { count: deleted } = await supabaseAdmin
     .from("contents")
     .delete({ count: "exact" })
     .eq("org_id", orgId)
     .eq("status", "historical")
     .eq("created_by", "onboarding_crawl");
+
+  if (existingIds.length) {
+    for (let index = 0; index < existingIds.length; index += 200) {
+      const batch = existingIds.slice(index, index + 200);
+      const { error: embeddingDeleteError } = await supabaseAdmin
+        .from("org_rag_embeddings")
+        .delete()
+        .eq("org_id", orgId)
+        .eq("source_type", "content")
+        .in("source_id", batch);
+      if (embeddingDeleteError) {
+        console.warn(
+          `[HISTORICAL_CONTENT] Failed to delete stale content embeddings for org ${orgId}: ${embeddingDeleteError.message}`
+        );
+      }
+    }
+  }
 
   const posts = extractHistoricalPosts(orgId, crawlResult);
   if (posts.length === 0) {
@@ -2082,10 +2116,24 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       synthesis_debug: synthesisDebug
     });
 
-    // Persist crawled posts as historical content (fire-and-forget)
-    void persistHistoricalContent(orgId, crawlResult).catch((err) => {
+    // Persist and backfill historical content embeddings (fire-and-forget).
+    void (async () => {
+      const persisted = await persistHistoricalContent(orgId, crawlResult);
+      if (persisted.inserted <= 0) {
+        return;
+      }
+
+      const backfill = await embedAllPendingContent(orgId, {
+        batchLimit: 100,
+        maxBatches: 50
+      });
+
+      console.log(
+        `[CONTENT_BACKFILL] org=${orgId}, inserted=${persisted.inserted}, embedded=${backfill.embedded_count}, failed=${backfill.failed_count}, remaining=${backfill.remaining}`
+      );
+    })().catch((err) => {
       console.warn(
-        `[Onboarding] Historical content persistence failed for org ${orgId}: ${
+        `[Onboarding] Historical content persistence/backfill failed for org ${orgId}: ${
           err instanceof Error ? err.message : "unknown"
         }`
       );

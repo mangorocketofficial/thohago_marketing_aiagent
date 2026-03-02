@@ -21,4 +21,5 @@
 | 2-3b | Subscription Entitlement Foundation | Done | 2026-03-02 | [phase-2-3b-subscription-entitlement-completion.md](./phase-2-3b-subscription-entitlement-completion.md) |
 | 2-3c | Channel-Aware Tier-2 Content Retrieval Patch | Done | 2026-03-02 | [phase-2-3c-channel-aware-retrieval-completion.md](./phase-2-3c-channel-aware-retrieval-completion.md) |
 | 2-4 | Local File Indexing Pipeline | Done | 2026-03-02 | [phase-2-4-completion.md](./phase-2-4-completion.md) |
+| 2-5a | Content Feedback Loop (Core) | Done | 2026-03-02 | [phase-2-5a-completion.md](./phase-2-5a-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |

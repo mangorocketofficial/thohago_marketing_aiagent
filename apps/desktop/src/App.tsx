@@ -295,6 +295,7 @@ const App = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
   const [pendingContents, setPendingContents] = useState<Content[]>([]);
+  const [contentEdits, setContentEdits] = useState<Record<string, string>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatNotice, setChatNotice] = useState("");
   const [isActionPending, setIsActionPending] = useState(false);
@@ -440,6 +441,17 @@ const App = () => {
 
     setPendingContents((data ?? []) as Content[]);
   }, [chatConfig, supabase]);
+
+  useEffect(() => {
+    setContentEdits((prev) => {
+      const next: Record<string, string> = {};
+      for (const content of pendingContents) {
+        const existing = prev[content.id];
+        next[content.id] = typeof existing === "string" ? existing : content.body ?? "";
+      }
+      return next;
+    });
+  }, [pendingContents]);
 
   useEffect(() => {
     if (!runtime) {
@@ -1497,16 +1509,30 @@ const App = () => {
     });
   };
 
-  const approveContent = async (contentId: string) => {
+  const updateContentEdit = (contentId: string, nextBody: string) => {
+    setContentEdits((prev) => ({
+      ...prev,
+      [contentId]: nextBody
+    }));
+  };
+
+  const approveContent = async (contentId: string, editedBody?: string) => {
     const sessionId = await ensureActiveSessionId();
     if (!sessionId) {
       return;
     }
 
+    const normalizedEditedBody = typeof editedBody === "string" ? editedBody.trim() : "";
     await runChatAction(async () => {
       await window.desktopRuntime.chat.approveContent({
         sessionId,
-        contentId
+        contentId,
+        ...(normalizedEditedBody ? { editedBody: normalizedEditedBody } : {})
+      });
+      setContentEdits((prev) => {
+        const next = { ...prev };
+        delete next[contentId];
+        return next;
       });
     });
   };
@@ -2116,12 +2142,20 @@ const App = () => {
                     <p>Campaign: {content.campaign_id ?? "-"}</p>
                     <p>Created: {formatDateTime(content.created_at)}</p>
                   </div>
-                  <p className="queue-body">{content.body ?? "(empty content)"}</p>
+                  <textarea
+                    className="queue-editor"
+                    value={contentEdits[content.id] ?? content.body ?? ""}
+                    onChange={(event) => updateContentEdit(content.id, event.target.value)}
+                    placeholder="Edit draft before approval..."
+                    disabled={isActionPending}
+                  />
                   <div className="button-row">
                     <button
                       className="primary"
                       disabled={isActionPending}
-                      onClick={() => void approveContent(content.id)}
+                      onClick={() =>
+                        void approveContent(content.id, contentEdits[content.id] ?? content.body ?? "")
+                      }
                     >
                       Approve
                     </button>

@@ -68,6 +68,7 @@ export type Content = {
   metadata: Record<string, unknown>;
   scheduled_at: string | null;
   published_at: string | null;
+  embedded_at: string | null;
   created_by: ContentCreatedBy;
   approved_by: string | null;
   created_at: string;

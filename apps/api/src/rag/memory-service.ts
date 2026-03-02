@@ -33,6 +33,17 @@ const persistMemoryMdCache = async (
   }
 };
 
+export const invalidateMemoryCache = async (orgId: string): Promise<void> => {
+  const { error } = await supabaseAdmin
+    .from("org_brand_settings")
+    .update({ memory_freshness_key: null })
+    .eq("org_id", orgId);
+
+  if (error) {
+    throw new Error(`Failed to invalidate memory cache: ${error.message}`);
+  }
+};
+
 export const getMemoryMdForOrg = async (orgId: string): Promise<MemoryMdResponse> => {
   const brandSettings = await loadOrgBrandSettings(orgId);
   if (!brandSettings) {

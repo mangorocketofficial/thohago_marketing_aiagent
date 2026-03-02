@@ -1,6 +1,9 @@
 ﻿import { env } from "../lib/env";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { onContentEdited } from "../rag/ingest-edit-pattern";
+import { onContentPublished } from "../rag/ingest-content";
+import { invalidateMemoryCache } from "../rag/memory-service";
 import { generateCampaignPlan, generateContentDraft, generateDetectMessage } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
 import type {
@@ -610,11 +613,19 @@ const applyContentApprovedStep = async (
   }
 
   const contentId = resolveContentId(state, payload);
+  const editedBody = asString(payload?.edited_body, "").trim();
   const publishedAt = new Date().toISOString();
+  const shouldCaptureEditPattern =
+    !!editedBody && !!state.content_draft?.trim() && editedBody !== state.content_draft.trim();
+  const editPatternChannel = normalizeChannel(state.campaign_plan?.suggested_schedule?.[0]?.channel);
 
   const { error: contentError } = await supabaseAdmin
     .from("contents")
-    .update({ status: "published", published_at: publishedAt })
+    .update({
+      status: "published",
+      published_at: publishedAt,
+      ...(editedBody ? { body: editedBody } : {})
+    })
     .eq("id", contentId)
     .eq("org_id", session.org_id);
 
@@ -635,6 +646,33 @@ const applyContentApprovedStep = async (
   }
 
   await insertChatMessage(session.org_id, "assistant", "콘텐츠 게시가 완료되었습니다(시뮬레이션).");
+
+  void onContentPublished(session.org_id, contentId).catch((error) => {
+    console.warn(
+      `[CONTENT_EMBED] Background embed failed. org=${session.org_id}, content=${contentId}, reason=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  });
+
+  if (shouldCaptureEditPattern) {
+    void onContentEdited(session.org_id, state.content_draft as string, editedBody, editPatternChannel).catch((error) => {
+      console.warn(
+        `[EDIT_PATTERN] Background extraction failed. org=${session.org_id}, content=${contentId}, reason=${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    });
+  }
+
+  void invalidateMemoryCache(session.org_id).catch((error) => {
+    console.warn(
+      `[MEMORY] Cache invalidation failed. org=${session.org_id}, reason=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  });
+
   await updateTrigger(state.trigger_id, { status: "done" });
 
   return {

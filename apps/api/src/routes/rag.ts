@@ -5,6 +5,7 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { getRagEmbedder, ragConfig, ragStore } from "../lib/rag";
 import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { embedPendingContentBatch } from "../rag/ingest-content";
 
 const MIN_TEXT_LENGTH = 50;
 const VALID_FILE_TYPES = new Set(["document", "image", "video"]);
@@ -282,6 +283,30 @@ ragRouter.post("/rag/index-document", async (req, res) => {
       indexed: true,
       chunk_count: chunks.length
     });
+  } catch (error) {
+    const httpError = toHttpError(error);
+    res.status(httpError.status).json({
+      ok: false,
+      error: httpError.code,
+      message: httpError.message
+    });
+  }
+});
+
+ragRouter.post("/rag/embed-pending-content", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.body?.org_id, "org_id");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const batchLimit = parseOptionalNonNegativeInt(req.body?.batch_limit) ?? 100;
+    const result = await embedPendingContentBatch(orgId, Math.max(1, batchLimit));
+    res.json(result);
   } catch (error) {
     const httpError = toHttpError(error);
     res.status(httpError.status).json({

@@ -1603,6 +1603,7 @@ const registerIpcHandlers = () => {
   ipcMain.handle("chat:approve-content", async (_, payload) => {
     const sessionId = (payload?.sessionId ?? "").trim();
     const contentId = (payload?.contentId ?? "").trim();
+    const editedBody = typeof payload?.editedBody === "string" ? payload.editedBody.trim() : "";
     if (!sessionId || !contentId) {
       throw new Error("sessionId and contentId are required.");
     }
@@ -1612,8 +1613,11 @@ const registerIpcHandlers = () => {
         method: "POST",
         body: JSON.stringify({
           event_type: "content_approved",
-          payload: { content_id: contentId },
-          idempotency_key: buildIdempotencyKey("content_approved", [sessionId, contentId])
+          payload: {
+            content_id: contentId,
+            ...(editedBody ? { edited_body: editedBody } : {})
+          },
+          idempotency_key: buildIdempotencyKey("content_approved", [sessionId, contentId, editedBody])
         })
       });
 
