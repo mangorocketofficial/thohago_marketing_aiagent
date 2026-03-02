@@ -24,3 +24,4 @@
 
 - 1-7d: `docs/progress/phase-1-7d-completion.md` (Instagram Graph Business Discovery Crawler Replacement)
 - 1-7e: `docs/progress/phase-1-7e-completion.md` (Naver Blog Hybrid Collection via Search API + RSS Fallback)
+- 1-7f: `docs/progress/phase-1-7f-completion.md` (Desktop Auth Session Persistence + Dashboard Resume Routing)

@@ -14,3 +14,4 @@
 | 1-7c | Brand Review Synthesis Quality Upgrade (Deep Crawl + Mandatory Web Search) | Done | 2026-03-01 | [phase-1-7c-completion.md](./phase-1-7c-completion.md) |
 | 1-7d | Instagram Graph Business Discovery Crawler Replacement | Done | 2026-03-01 | [phase-1-7d-completion.md](./phase-1-7d-completion.md) |
 | 1-7e | Naver Blog Hybrid Collection (Search API + RSS Fallback) | Done | 2026-03-01 | [phase-1-7e-completion.md](./phase-1-7e-completion.md) |
+| 1-7f | Desktop Auth Session Persistence + Dashboard Resume Routing | Done | 2026-03-02 | [phase-1-7f-completion.md](./phase-1-7f-completion.md) |

@@ -641,7 +641,7 @@ const App = () => {
 
     const {
       data: { subscription }
-    } = authSupabase.auth.onAuthStateChange((_event, session) => {
+    } = authSupabase.auth.onAuthStateChange((event, session) => {
       setAuthSession(session ?? null);
       if (session?.access_token && session.refresh_token) {
         const expiresAt = session.expires_at ?? parseJwtExpiration(session.access_token) ?? null;
@@ -650,7 +650,14 @@ const App = () => {
           refreshToken: session.refresh_token,
           expiresAt
         });
-      } else {
+        return;
+      }
+
+      // Supabase may emit INITIAL_SESSION(null) before secure-store hydration.
+      if (event === "INITIAL_SESSION") {
+        return;
+      }
+      if (event === "SIGNED_OUT") {
         void runtime.auth.clearSession();
       }
     });

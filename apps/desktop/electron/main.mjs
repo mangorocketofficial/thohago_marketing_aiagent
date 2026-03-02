@@ -506,13 +506,16 @@ const getDesktopRuntimeConfig = () => {
   };
 };
 
-const getWatcherStatus = () => ({
-  watchPath: runtimeState.watchPath || null,
-  orgId: runtimeState.orgId,
-  fileCount: getActiveFiles().length,
-  isRunning: runtimeState.isRunning,
-  requiresOnboarding: !runtimeState.onboardingCompleted || !runtimeState.watchPath
-});
+const getWatcherStatus = () => {
+  const hasValidAuthSession = !!(runtimeState.authSession && !isSessionExpired(runtimeState.authSession));
+  return {
+    watchPath: runtimeState.watchPath || null,
+    orgId: runtimeState.orgId,
+    fileCount: getActiveFiles().length,
+    isRunning: runtimeState.isRunning,
+    requiresOnboarding: !runtimeState.onboardingCompleted || !hasValidAuthSession
+  };
+};
 
 const emitWatcherStatus = () => {
   if (!mainWindow) {
@@ -1156,6 +1159,10 @@ const registerIpcHandlers = () => {
         : body;
 
     runtimeState.onboardingLastSynthesis = responseWithExport ?? null;
+    if (responseWithExport?.ok) {
+      saveOnboardingCompleted(true);
+      runtimeState.onboardingCompleted = true;
+    }
     return responseWithExport;
   });
 
@@ -1417,10 +1424,6 @@ const registerIpcHandlers = () => {
 };
 
 app.whenReady().then(async () => {
-  mainWindow = await createWindow();
-  registerIpcHandlers();
-  await waitForWindowReady(mainWindow);
-
   const config = getDesktopRuntimeConfig();
   runtimeState.orgId = config.orgId;
   runtimeState.watchPath = config.watchPath;
@@ -1435,12 +1438,19 @@ app.whenReady().then(async () => {
   const storedAuth = loadAuthSession();
   runtimeState.authSession = storedAuth && !isSessionExpired(storedAuth) ? storedAuth : null;
 
-  if (!config.onboardingCompleted || !config.watchPath) {
+  mainWindow = await createWindow();
+  registerIpcHandlers();
+  await waitForWindowReady(mainWindow);
+
+  const hasValidAuthSession = !!runtimeState.authSession;
+  if (!config.onboardingCompleted || !hasValidAuthSession) {
     emitWatcherStatus();
     mainWindow.webContents.send("app:show-onboarding");
   } else {
     emitWatcherStatus();
-    await enqueueRuntimeStart(config.watchPath, runtimeState.orgId);
+    if (config.watchPath) {
+      await enqueueRuntimeStart(config.watchPath, runtimeState.orgId);
+    }
   }
 
   app.on("activate", async () => {
