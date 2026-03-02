@@ -46,6 +46,14 @@ const buildInsertRows = (
   });
 };
 
+const normalizeSourceChunks = (sourceType: RagSourceType, sourceId: string, chunks: RagChunk[]): RagChunk[] =>
+  chunks.map((chunk, index) => ({
+    ...chunk,
+    source_type: sourceType,
+    source_id: sourceId,
+    chunk_index: index
+  }));
+
 export class RagStore {
   private readonly supabase: SupabaseClient;
 
@@ -84,12 +92,7 @@ export class RagStore {
       throw new Error("sourceId is required for upsertBySource.");
     }
 
-    const normalizedChunks = chunks.map((chunk, index) => ({
-      ...chunk,
-      source_type: sourceType,
-      source_id: sourceId,
-      chunk_index: index
-    }));
+    const normalizedChunks = normalizeSourceChunks(sourceType, sourceId, chunks);
 
     if (!normalizedChunks.length) {
       await this.deleteBySource(orgId, sourceType, sourceId, profile);
@@ -104,6 +107,33 @@ export class RagStore {
 
     if (error) {
       throw new Error(`Failed to upsert RAG embeddings: ${error.message}`);
+    }
+  }
+
+  async replaceBySource(
+    orgId: string,
+    sourceType: RagSourceType,
+    sourceId: string,
+    chunks: RagChunk[],
+    embeddings: number[][],
+    profile: RagEmbeddingProfile = DEFAULT_EMBEDDING_PROFILE
+  ): Promise<void> {
+    if (!sourceId.trim()) {
+      throw new Error("sourceId is required for replaceBySource.");
+    }
+
+    const resolvedProfile = resolveEmbeddingProfile(profile, DEFAULT_EMBEDDING_PROFILE);
+    const normalizedChunks = normalizeSourceChunks(sourceType, sourceId, chunks);
+
+    await this.deleteBySource(orgId, sourceType, sourceId, resolvedProfile);
+    if (!normalizedChunks.length) {
+      return;
+    }
+
+    const rows = buildInsertRows(orgId, normalizedChunks, embeddings, resolvedProfile);
+    const { error } = await this.supabase.from(TABLE_NAME).insert(rows);
+    if (error) {
+      throw new Error(`Failed to replace RAG embeddings: ${error.message}`);
     }
   }
 
@@ -126,6 +156,20 @@ export class RagStore {
     const { error } = await request;
     if (error) {
       throw new Error(`Failed to delete RAG embeddings by source: ${error.message}`);
+    }
+  }
+
+  async deleteBySourceType(orgId: string, sourceType: RagSourceType, profile?: RagEmbeddingProfile): Promise<void> {
+    let request = this.supabase.from(TABLE_NAME).delete().eq("org_id", orgId).eq("source_type", sourceType);
+
+    if (profile) {
+      const resolvedProfile = resolveEmbeddingProfile(profile, DEFAULT_EMBEDDING_PROFILE);
+      request = request.eq("embedding_model", resolvedProfile.model).eq("embedding_dim", resolvedProfile.dimensions);
+    }
+
+    const { error } = await request;
+    if (error) {
+      throw new Error(`Failed to delete RAG embeddings by source type: ${error.message}`);
     }
   }
 

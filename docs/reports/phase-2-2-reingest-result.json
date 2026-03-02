@@ -1,0 +1,28 @@
+{
+  "started_at": "2026-03-02T08:00:20.179Z",
+  "org_id": "a1b2c3d4-0000-0000-0000-000000000001",
+  "org_name": "World Friends Korea (WFK)",
+  "review_path": "C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\docs\\브랜드리뷰_2026-03-01-05.md",
+  "review_length": 8480,
+  "status_timeline": [
+    {
+      "at": "2026-03-02T08:00:17.656Z",
+      "status": "pending",
+      "error": null
+    },
+    {
+      "at": "2026-03-02T08:00:20.169Z",
+      "status": "done",
+      "error": null
+    }
+  ],
+  "final_status": "done",
+  "final_error": null,
+  "embedding_counts": {
+    "total_brand_profile_chunks": 29,
+    "by_source": {
+      "review": 29
+    }
+  },
+  "success": true
+}

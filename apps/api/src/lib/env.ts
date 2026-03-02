@@ -128,6 +128,7 @@ export const env = {
   anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-opus-4-5"),
   openAiApiKey: readEnv("OPENAI_API_KEY"),
   openAiProfileModel: readEnv("OPENAI_PROFILE_MODEL", "gpt-4o-mini"),
+  onboardingPinnedReviewPath: readEnv("ONBOARDING_PINNED_REVIEW_PATH"),
   ragEmbeddingProvider,
   ragEmbeddingModel,
   ragEmbeddingDimensions,

@@ -259,8 +259,29 @@ export type OrgBrandSettings = {
   campaign_seasons: string[];
   brand_summary: string | null;
   result_document: OnboardingResultDocument | Record<string, unknown> | null;
+  memory_md: string | null;
+  memory_md_generated_at: string | null;
+  memory_freshness_key: string | null;
+  rag_indexed_at: string | null;
+  rag_source_hash: string | null;
+  accumulated_insights: AccumulatedInsights | Record<string, unknown>;
+  rag_ingestion_status: RagIngestionStatus;
+  rag_ingestion_started_at: string | null;
+  rag_ingestion_error: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type RagIngestionStatus = "pending" | "processing" | "done" | "failed";
+
+export type AccumulatedInsights = {
+  best_publish_times: Record<string, string>;
+  top_cta_phrases: string[];
+  content_pattern_summary: string;
+  channel_recommendations: Record<string, string>;
+  user_edit_preference_summary: string;
+  generated_at: string;
+  content_count_at_generation: number;
 };
 
 export type RagEmbeddingModel = "text-embedding-3-small" | "text-embedding-3-large";
@@ -320,6 +341,7 @@ export type RagSearchOptions = {
 
 export type MemoryMd = {
   markdown: string;
-  token_estimate: number;
+  token_count: number;
   generated_at: string;
+  freshness_key: string;
 };

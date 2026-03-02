@@ -9,7 +9,7 @@ export const STRATEGY_MAP: Record<RagSourceType, ChunkStrategy> = {
   chat_pattern: "structured"
 };
 
-type ChunkContext = {
+export type ChunkContext = {
   sourceType: RagSourceType;
   sourceId: string;
   metadata?: Record<string, unknown>;
@@ -20,10 +20,48 @@ type SlidingWindowOptions = {
   overlap?: number;
 };
 
+type HeadingSplitSection = {
+  heading: string;
+  content: string;
+};
+
+type ChunkEntry = {
+  content: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type HeadingChunkOptions = {
+  tagChannelSections?: boolean;
+};
+
+const CHANNEL_HEADING_MAP: Array<{ pattern: string; channel: string }> = [
+  { pattern: "웹사이트", channel: "website" },
+  { pattern: "인스타그램", channel: "instagram" },
+  { pattern: "네이버 블로그", channel: "naver_blog" },
+  { pattern: "채널 간", channel: "cross_channel" },
+  { pattern: "일관성", channel: "cross_channel" },
+  { pattern: "통합 전략", channel: "strategy" },
+  { pattern: "수정 제안", channel: "recommendations" },
+  { pattern: "컴플라이언스", channel: "compliance" },
+  { pattern: "종합 요약", channel: "summary" }
+];
+
 const DEFAULT_WINDOW_SIZE = 700;
 const DEFAULT_WINDOW_OVERLAP = 100;
 
 const normalizeText = (value: string): string => value.replace(/\r\n/g, "\n").trim();
+
+const normalizeHeading = (value: string): string => value.replace(/^#+\s*/, "").trim();
+
+const resolveSectionChannel = (heading: string): string | null => {
+  const normalized = normalizeHeading(heading);
+  for (const mapping of CHANNEL_HEADING_MAP) {
+    if (normalized.includes(mapping.pattern)) {
+      return mapping.channel;
+    }
+  }
+  return null;
+};
 
 const clampWindowSize = (value?: number): number => {
   if (!value || !Number.isFinite(value)) {
@@ -40,23 +78,26 @@ const clampWindowOverlap = (value: number | undefined, windowSize: number): numb
   return Math.min(next, Math.max(0, windowSize - 1));
 };
 
-const toChunks = (parts: string[], context: ChunkContext): RagChunk[] =>
-  parts.map((content, chunkIndex) => ({
+const toChunks = (entries: ChunkEntry[], context: ChunkContext): RagChunk[] =>
+  entries.map((entry, chunkIndex) => ({
     source_type: context.sourceType,
     source_id: context.sourceId,
     chunk_index: chunkIndex,
-    content,
-    metadata: context.metadata ?? {}
+    content: entry.content,
+    metadata: {
+      ...(context.metadata ?? {}),
+      ...(entry.metadata ?? {})
+    }
   }));
 
-const headingSplit = (text: string): string[] => {
+const parseHeadingSections = (text: string): HeadingSplitSection[] => {
   const normalized = normalizeText(text);
   if (!normalized) {
     return [];
   }
 
   const lines = normalized.split("\n");
-  const sections: string[] = [];
+  const sections: HeadingSplitSection[] = [];
   let currentHeading = "";
   let currentBody: string[] = [];
 
@@ -67,9 +108,12 @@ const headingSplit = (text: string): string[] => {
       return;
     }
 
-    const section = [currentHeading, body].filter((entry) => !!entry).join("\n\n").trim();
-    if (section) {
-      sections.push(section);
+    const content = [currentHeading, body].filter((entry) => !!entry).join("\n\n").trim();
+    if (content) {
+      sections.push({
+        heading: currentHeading,
+        content
+      });
     }
     currentBody = [];
   };
@@ -85,8 +129,18 @@ const headingSplit = (text: string): string[] => {
   }
 
   flush();
-  return sections.length ? sections : [normalized];
+  if (sections.length) {
+    return sections;
+  }
+  return [
+    {
+      heading: "",
+      content: normalized
+    }
+  ];
 };
+
+const headingSplit = (text: string): string[] => parseHeadingSections(text).map((section) => section.content);
 
 const singleDoc = (text: string): string[] => {
   const normalized = normalizeText(text);
@@ -136,6 +190,34 @@ const slidingWindow = (text: string, options?: SlidingWindowOptions): string[] =
   return chunks;
 };
 
+export const chunkByHeading = (
+  content: string,
+  context: ChunkContext,
+  options: HeadingChunkOptions = {}
+): RagChunk[] => {
+  const sections = parseHeadingSections(content);
+  const entries = sections.map((section) => {
+    const metadata: Record<string, unknown> = {};
+    if (section.heading) {
+      metadata.section_heading = normalizeHeading(section.heading);
+    }
+    if (options.tagChannelSections && section.heading) {
+      const channel = resolveSectionChannel(section.heading);
+      if (channel) {
+        metadata.section_channel = channel;
+      }
+    }
+    return {
+      content: section.content,
+      metadata
+    };
+  });
+  return toChunks(entries, context);
+};
+
+export const chunkStructuredText = (content: string, context: ChunkContext): RagChunk[] =>
+  toChunks(structuredSplit(content).map((entry) => ({ content: entry })), context);
+
 export const chunkWithStrategy = (
   content: string,
   strategy: ChunkStrategy,
@@ -151,7 +233,7 @@ export const chunkWithStrategy = (
           ? slidingWindow(content, options)
           : structuredSplit(content);
 
-  return toChunks(parts, context);
+  return toChunks(parts.map((entry) => ({ content: entry })), context);
 };
 
 export const chunkBySourceType = (

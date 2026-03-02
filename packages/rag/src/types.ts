@@ -1,22 +1,37 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  AccumulatedInsights,
+  Campaign,
+  CampaignPlan,
+  CampaignPlanSchedule,
+  CampaignStatus,
+  MemoryMd,
+  OrgBrandSettings,
   RagChunk,
   RagEmbedding,
   RagEmbeddingDim,
   RagEmbeddingModel,
   RagEmbeddingProfile,
+  RagIngestionStatus,
   RagSearchOptions,
   RagSearchResult,
   RagSourceType
 } from "@repo/types";
 
 export type {
+  AccumulatedInsights,
+  Campaign,
+  CampaignPlan,
+  CampaignPlanSchedule,
+  CampaignStatus,
   MemoryMd,
+  OrgBrandSettings,
   RagChunk,
   RagEmbedding,
   RagEmbeddingDim,
   RagEmbeddingModel,
   RagEmbeddingProfile,
+  RagIngestionStatus,
   RagSearchOptions,
   RagSearchResult,
   RagSourceType
@@ -68,6 +83,15 @@ export type RagStoreApi = {
     sourceId: string,
     profile?: RagEmbeddingProfile
   ) => Promise<void>;
+  replaceBySource: (
+    orgId: string,
+    sourceType: RagSourceType,
+    sourceId: string,
+    chunks: RagChunk[],
+    embeddings: number[][],
+    profile?: RagEmbeddingProfile
+  ) => Promise<void>;
+  deleteBySourceType: (orgId: string, sourceType: RagSourceType, profile?: RagEmbeddingProfile) => Promise<void>;
 };
 
 export type RagRetrieverApi = {

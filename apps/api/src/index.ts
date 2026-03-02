@@ -2,9 +2,11 @@ import express from "express";
 import { env } from "./lib/env";
 import { supabaseAdmin } from "./lib/supabase-admin";
 import { healthRouter } from "./routes/health";
+import { memoryRouter } from "./routes/memory";
 import { onboardingRouter } from "./routes/onboarding";
 import { sessionsRouter } from "./routes/sessions";
 import { triggerRouter } from "./routes/trigger";
+import { startRagIngestionWorker } from "./rag/ingest-brand-profile";
 
 const app = express();
 
@@ -18,6 +20,7 @@ app.use(healthRouter);
 app.use(triggerRouter);
 app.use(sessionsRouter);
 app.use(onboardingRouter);
+app.use(memoryRouter);
 
 app.use((_req, res) => {
   res.status(404).json({
@@ -59,4 +62,5 @@ app.listen(env.apiPort, () => {
   console.log(`[API] Listening on http://localhost:${env.apiPort}`);
   console.log(`[API] Supabase host: ${supabaseHost}`);
   void verifyRequiredTables();
+  startRagIngestionWorker();
 });

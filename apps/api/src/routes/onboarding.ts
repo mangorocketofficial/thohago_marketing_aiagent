@@ -1,16 +1,20 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Router } from "express";
 import { requireUserJwt } from "../lib/auth";
 import { env } from "../lib/env";
 import { HttpError, toHttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { enqueueRagIngestion } from "../rag/ingest-brand-profile";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_JSON_LENGTH = 120_000;
 const MAX_URL_LENGTH = 1024;
-const REVIEW_TEMPLATE_REF = "월드프렌즈코리아_브랜드리뷰.md";
+const REVIEW_TEMPLATE_REF = "docs/브랜드리뷰_2026-03-01-05.md";
 const PHASE_1_7_REPORT_VERSION = "phase_1_7b";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const PINNED_REVIEW_PATH = "docs/브랜드리뷰_2026-03-01-05.md";
 const REQUIRED_REVIEW_HEADINGS = [
   "# 브랜드 리뷰:",
   "## 종합 요약",
@@ -20,6 +24,47 @@ const REQUIRED_REVIEW_HEADINGS = [
   "## 수정 제안 (주요 항목)",
   "## 2026년 통합 전략 제안"
 ] as const;
+
+const getPinnedReviewCandidates = (): string[] => {
+  const overrides: string[] = [];
+  if (env.onboardingPinnedReviewPath) {
+    overrides.push(env.onboardingPinnedReviewPath);
+    if (!path.isAbsolute(env.onboardingPinnedReviewPath)) {
+      overrides.push(path.resolve(process.cwd(), env.onboardingPinnedReviewPath));
+      overrides.push(path.resolve(process.cwd(), "../../", env.onboardingPinnedReviewPath));
+    }
+  }
+
+  const defaults = [
+    path.resolve(process.cwd(), PINNED_REVIEW_PATH),
+    path.resolve(process.cwd(), "../../", PINNED_REVIEW_PATH)
+  ];
+
+  return [...new Set([...overrides, ...defaults])];
+};
+
+const loadPinnedReviewMarkdown = (): { markdown: string; sourcePath: string } | null => {
+  for (const candidate of getPinnedReviewCandidates()) {
+    if (!candidate) {
+      continue;
+    }
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+
+    const markdown = fs.readFileSync(candidate, "utf8").replace(/\r\n/g, "\n").trim();
+    if (!markdown) {
+      continue;
+    }
+
+    return {
+      markdown,
+      sourcePath: candidate
+    };
+  }
+
+  return null;
+};
 
 const parseOptionalString = (value: unknown): string | null => {
   if (typeof value !== "string") {
@@ -1667,7 +1712,10 @@ onboardingRouter.post("/onboarding/interview", async (req, res) => {
     const { error } = await supabaseAdmin.from("org_brand_settings").upsert(
       {
         org_id: orgId,
-        interview_answers: interviewAnswers
+        interview_answers: interviewAnswers,
+        rag_ingestion_status: "pending",
+        rag_ingestion_started_at: null,
+        rag_ingestion_error: null
       },
       {
         onConflict: "org_id"
@@ -1731,14 +1779,25 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
     const dataCoverageNotice = buildDataCoverageNotice(crawlResult);
     const knownDataGaps = collectKnownDataGaps(crawlResult, interviewAnswers);
 
-    const reviewGeneration = await generateReviewMarkdown({
-      org: orgContext,
-      crawlResult,
-      interviewAnswers,
-      fallbackProfile: fallbackSynthesis.profile,
-      dataCoverageNotice,
-      knownDataGaps
-    });
+    const pinnedReview = loadPinnedReviewMarkdown();
+    const reviewGeneration = pinnedReview
+      ? {
+          markdown: pinnedReview.markdown,
+          trace: {
+            selected_attempt: "pinned_review_file",
+            fallback_used: false,
+            source_path: pinnedReview.sourcePath,
+            template_ref: REVIEW_TEMPLATE_REF
+          }
+        }
+      : await generateReviewMarkdown({
+          org: orgContext,
+          crawlResult,
+          interviewAnswers,
+          fallbackProfile: fallbackSynthesis.profile,
+          dataCoverageNotice,
+          knownDataGaps
+        });
     const reviewMarkdown = reviewGeneration.markdown;
 
     const profileExtraction = await extractProfileFromReview({
@@ -1802,6 +1861,9 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       forbidden_topics: profile.forbidden_topics,
       campaign_seasons: profile.campaign_seasons,
       brand_summary: profile.organization_summary,
+      rag_ingestion_status: "pending",
+      rag_ingestion_started_at: null,
+      rag_ingestion_error: null,
       result_document: {
         ...document,
         synthesis_mode: synthesisMode
@@ -1826,6 +1888,14 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       },
       review_markdown: reviewMarkdown,
       synthesis_debug: synthesisDebug
+    });
+
+    void enqueueRagIngestion(orgId).catch((queueError) => {
+      console.warn(
+        `[Onboarding] Failed to enqueue RAG ingestion for org ${orgId}: ${
+          queueError instanceof Error ? queueError.message : String(queueError)
+        }`
+      );
     });
   } catch (error) {
     const httpError = toHttpError(error);

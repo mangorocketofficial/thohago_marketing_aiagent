@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@repo/types": "workspace:*",
-    "@supabase/supabase-js": "^2.57.4"
+    "@supabase/supabase-js": "^2.57.4",
+    "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

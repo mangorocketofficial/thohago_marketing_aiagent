@@ -5,6 +5,11 @@ import { supabaseAdmin } from "./supabase-admin";
 const getToken = (req: Request): string =>
   (req.header("x-api-token") ?? req.header("x-trigger-token") ?? "").trim();
 
+export const hasValidApiSecret = (req: Request): boolean => {
+  const token = getToken(req);
+  return !!token && token === env.apiSecret;
+};
+
 const getBearerToken = (req: Request): string => {
   const value = (req.header("authorization") ?? "").trim();
   if (!value) {
@@ -26,8 +31,7 @@ export type AuthenticatedUserContext = {
 };
 
 export const requireApiSecret = (req: Request, res: Response): boolean => {
-  const token = getToken(req);
-  if (!token || token !== env.apiSecret) {
+  if (!hasValidApiSecret(req)) {
     res.status(401).json({
       ok: false,
       error: "unauthorized",

@@ -1,0 +1,173 @@
+{
+  "run_id": "1772438539002-f83613fd",
+  "started_at": "2026-03-02T08:02:19.003Z",
+  "finished_at": "2026-03-02T08:02:35.362Z",
+  "success": true,
+  "checks": [
+    {
+      "name": "supabase_status_env",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:19.742Z",
+      "duration_ms": 735,
+      "details": {
+        "api_url": "http://127.0.0.1:54321",
+        "anon_key_present": true,
+        "service_role_key_present": true
+      }
+    },
+    {
+      "name": "required_env",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:20.490Z",
+      "duration_ms": 0,
+      "details": {
+        "api_secret_present": true,
+        "openai_key_present": true,
+        "anthropic_key_present": true
+      }
+    },
+    {
+      "name": "api_startup",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:22.575Z",
+      "duration_ms": 2084,
+      "details": {
+        "api_base_url": "http://127.0.0.1:39673"
+      }
+    },
+    {
+      "name": "seed_users_and_orgs",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:23.079Z",
+      "duration_ms": 496,
+      "details": {
+        "org_id": "f0590410-6850-4abb-869e-cb2726c4b6d4",
+        "outsider_org_id": "ff1700ce-865e-4794-9a6f-c5036200ce37",
+        "owner_user_id": "92971723-7869-474c-be9d-10e39be2398a",
+        "outsider_user_id": "d7c3e797-457a-4e18-9326-34c7bc56e02e"
+      }
+    },
+    {
+      "name": "onboarding_synthesize",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:30.219Z",
+      "duration_ms": 7140,
+      "details": {
+        "http_status": 200,
+        "elapsed_ms": 7140,
+        "review_markdown_length": 8480,
+        "detected_tone": "친근하고 밝음"
+      }
+    },
+    {
+      "name": "rag_ingestion_done",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:32.789Z",
+      "duration_ms": 2570,
+      "details": {
+        "wait_ms": 2569,
+        "final_status": "done",
+        "rag_indexed_at": "2026-03-02T08:02:31.821+00:00"
+      }
+    },
+    {
+      "name": "brand_profile_embeddings",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:32.804Z",
+      "duration_ms": 15,
+      "details": {
+        "total_brand_profile_chunks": 30,
+        "review_chunk_count": 29,
+        "interview_chunk_count": 1,
+        "duplicate_interview_chunk_count": 0
+      }
+    },
+    {
+      "name": "memory_first_request",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:33.098Z",
+      "duration_ms": 294,
+      "details": {
+        "cache_hit": false,
+        "token_count": 319,
+        "freshness_key": "505e8ccd98153869b862559e62f0ddafd2e5c71366f6c7269ae6b7641700fb49"
+      }
+    },
+    {
+      "name": "memory_cache_hit",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:33.880Z",
+      "duration_ms": 782,
+      "details": {
+        "cache_hit": true,
+        "freshness_key": "505e8ccd98153869b862559e62f0ddafd2e5c71366f6c7269ae6b7641700fb49"
+      }
+    },
+    {
+      "name": "memory_internal_token",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:33.901Z",
+      "duration_ms": 21,
+      "details": {
+        "cache_hit": true
+      }
+    },
+    {
+      "name": "memory_forbidden_outsider",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:33.966Z",
+      "duration_ms": 65,
+      "details": {
+        "http_status": 403,
+        "error": "forbidden"
+      }
+    },
+    {
+      "name": "memory_freshness_invalidation",
+      "pass": true,
+      "checked_at": "2026-03-02T08:02:34.831Z",
+      "duration_ms": 865,
+      "details": {
+        "first_cache_hit": false,
+        "second_cache_hit": true,
+        "new_freshness_key": "219b24dfa90d60958c7bff24619a0d2837ae7ec5fcc002ceb5ecfddff7219c6e"
+      }
+    }
+  ],
+  "metrics": {
+    "synthesize_response_ms": 7140,
+    "ingestion_wait_ms": 2569,
+    "embedding_counts": {
+      "total_brand_profile_chunks": 30,
+      "review_chunk_count": 29,
+      "interview_chunk_count": 1,
+      "duplicate_interview_chunk_count": 0
+    },
+    "memory_after_update": {
+      "first_cache_hit": false,
+      "second_cache_hit": true,
+      "new_freshness_key": "219b24dfa90d60958c7bff24619a0d2837ae7ec5fcc002ceb5ecfddff7219c6e"
+    }
+  },
+  "environment": {
+    "api_base_url": "http://127.0.0.1:39673",
+    "supabase_url": "http://127.0.0.1:54321"
+  },
+  "artifacts": {
+    "ingestion_status_timeline": [
+      {
+        "at": "2026-03-02T08:02:30.259Z",
+        "status": "processing",
+        "error": null
+      },
+      {
+        "at": "2026-03-02T08:02:32.789Z",
+        "status": "done",
+        "error": null
+      }
+    ],
+    "api_log_tail": "\n> @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n> tsx src/index.ts\n\n[API] Listening on http://localhost:39673\n[API] Supabase host: 127.0.0.1:54321\n",
+    "cleanup_errors": []
+  },
+  "error": null
+}

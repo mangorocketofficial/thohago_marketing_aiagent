@@ -6,3 +6,4 @@ export * from "./chunker";
 export * from "./store";
 export * from "./retriever";
 export * from "./memory-builder";
+export * from "./token-counter";
