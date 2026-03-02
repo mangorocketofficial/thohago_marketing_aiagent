@@ -1749,6 +1749,186 @@ onboardingRouter.post("/onboarding/interview", async (req, res) => {
   }
 });
 
+// ── Historical Content Persistence (Phase 1-7 Patch) ──────────────────────
+
+function normalizeToTimestamptz(raw: string): string | null {
+  if (!raw) return null;
+
+  // Unix timestamp (number or numeric string)
+  const asNum = Number(raw);
+  if (!isNaN(asNum) && asNum > 1_000_000_000 && asNum < 2_000_000_000) {
+    return new Date(asNum * 1000).toISOString();
+  }
+
+  // ISO string or other parseable date
+  const date = new Date(raw);
+  if (!isNaN(date.getTime())) {
+    return date.toISOString();
+  }
+
+  // Korean date format "2025.12.03." or "2025-12-03"
+  const korean = raw.replace(/\./g, "-").replace(/-$/, "");
+  const koreanDate = new Date(korean);
+  if (!isNaN(koreanDate.getTime())) {
+    return koreanDate.toISOString();
+  }
+
+  return null;
+}
+
+type HistoricalPost = {
+  org_id: string;
+  channel: string;
+  content_type: string;
+  status: "historical";
+  body: string;
+  metadata: Record<string, unknown>;
+  published_at: string | null;
+  created_by: "onboarding_crawl";
+};
+
+function extractHistoricalPosts(
+  orgId: string,
+  crawlResult: Record<string, unknown>
+): HistoricalPost[] {
+  const posts: HistoricalPost[] = [];
+  const sources = toRecord(crawlResult.sources);
+
+  // ── Naver Blog Posts ──
+  const naverSource = toRecord(sources.naver_blog);
+  const naverStatus = parseOptionalString(naverSource.status);
+  const naverData = toRecord(naverSource.data);
+
+  if (
+    (naverStatus === "done" || naverStatus === "partial") &&
+    Array.isArray(naverData.recent_posts)
+  ) {
+    for (const post of naverData.recent_posts) {
+      if (!post || typeof post !== "object") continue;
+      const row = post as Record<string, unknown>;
+
+      const title = parseOptionalString(row.title) ?? "";
+      const snippet =
+        parseOptionalString(row.content_snippet) ??
+        parseOptionalString(row.summary) ??
+        "";
+      const body = [title, snippet].filter(Boolean).join("\n\n").trim();
+      if (body.length < 20) continue;
+
+      const url =
+        parseOptionalString(row.url) ?? parseOptionalString(row.link) ?? null;
+      const publishedAt =
+        parseOptionalString(row.publish_date) ??
+        parseOptionalString(row.date) ??
+        null;
+
+      posts.push({
+        org_id: orgId,
+        channel: "naver_blog",
+        content_type: "text",
+        status: "historical",
+        body,
+        metadata: {
+          origin: "onboarding_crawl",
+          original_url: url,
+          original_title: title,
+          crawl_source: "naver_blog",
+          has_engagement: row.comment_count
+            ? Number(row.comment_count) > 0
+            : null,
+        },
+        published_at: publishedAt ? normalizeToTimestamptz(publishedAt) : null,
+        created_by: "onboarding_crawl",
+      });
+    }
+  }
+
+  // ── Instagram Posts ──
+  const igSource = toRecord(sources.instagram);
+  const igStatus = parseOptionalString(igSource.status);
+  const igData = toRecord(igSource.data);
+
+  if (
+    (igStatus === "done" || igStatus === "partial") &&
+    Array.isArray(igData.recent_posts)
+  ) {
+    for (const post of igData.recent_posts) {
+      if (!post || typeof post !== "object") continue;
+      const row = post as Record<string, unknown>;
+
+      const caption = parseOptionalString(row.caption) ?? "";
+      if (caption.length < 10) continue;
+
+      const permalink =
+        parseOptionalString(row.permalink) ??
+        parseOptionalString(row.url) ??
+        null;
+      const timestamp = parseOptionalString(row.timestamp) ?? null;
+      const mediaType = parseOptionalString(row.media_type) ?? null;
+
+      posts.push({
+        org_id: orgId,
+        channel: "instagram",
+        content_type: mediaType === "VIDEO" ? "video" : "text",
+        status: "historical",
+        body: caption,
+        metadata: {
+          origin: "onboarding_crawl",
+          original_url: permalink,
+          crawl_source: "instagram",
+          like_count:
+            typeof row.like_count === "number" ? row.like_count : null,
+          comment_count:
+            typeof row.comment_count === "number" ? row.comment_count : null,
+          media_type: mediaType,
+          shortcode: parseOptionalString(row.shortcode) ?? null,
+        },
+        published_at: timestamp ? normalizeToTimestamptz(timestamp) : null,
+        created_by: "onboarding_crawl",
+      });
+    }
+  }
+
+  return posts;
+}
+
+async function persistHistoricalContent(
+  orgId: string,
+  crawlResult: Record<string, unknown>
+): Promise<{ inserted: number; deleted: number }> {
+  // Clear previous crawl-imported content for this org (re-onboarding safety)
+  const { count: deleted } = await supabaseAdmin
+    .from("contents")
+    .delete({ count: "exact" })
+    .eq("org_id", orgId)
+    .eq("status", "historical")
+    .eq("created_by", "onboarding_crawl");
+
+  const posts = extractHistoricalPosts(orgId, crawlResult);
+  if (posts.length === 0) {
+    console.log(
+      `[HISTORICAL_CONTENT] No posts extracted for org ${orgId} (deleted ${deleted ?? 0} old)`
+    );
+    return { inserted: 0, deleted: deleted ?? 0 };
+  }
+
+  const { error } = await supabaseAdmin.from("contents").insert(posts);
+
+  if (error) {
+    console.error(
+      `[HISTORICAL_CONTENT] Insert failed for org ${orgId}: ${error.message}`
+    );
+    return { inserted: 0, deleted: deleted ?? 0 };
+  }
+
+  console.log(
+    `[HISTORICAL_CONTENT] Inserted ${posts.length} posts for org ${orgId} (deleted ${deleted ?? 0} old)`
+  );
+  return { inserted: posts.length, deleted: deleted ?? 0 };
+}
+
+// ── End Historical Content Persistence ────────────────────────────────────
+
 onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
   const user = await requireUserJwt(req, res);
   if (!user) {
@@ -1900,6 +2080,15 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
       },
       review_markdown: reviewMarkdown,
       synthesis_debug: synthesisDebug
+    });
+
+    // Persist crawled posts as historical content (fire-and-forget)
+    void persistHistoricalContent(orgId, crawlResult).catch((err) => {
+      console.warn(
+        `[Onboarding] Historical content persistence failed for org ${orgId}: ${
+          err instanceof Error ? err.message : "unknown"
+        }`
+      );
     });
 
     void enqueueRagIngestion(orgId).catch((queueError) => {
