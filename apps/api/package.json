@@ -10,6 +10,7 @@
     "lint": "echo \"No lint rules for @repo/api\""
   },
   "dependencies": {
+    "@repo/rag": "workspace:*",
     "@supabase/supabase-js": "^2.57.4",
     "express": "^4.21.2"
   },

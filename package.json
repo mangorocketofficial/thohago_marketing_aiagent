@@ -10,6 +10,7 @@
     "type-check": "turbo run type-check",
     "check": "pnpm lint && pnpm type-check",
     "smoke:1-5a": "node scripts/smoke-phase-1-5a.mjs",
+    "smoke:2-1": "node scripts/smoke-phase-2-1.mjs",
     "schema:check:1-5a": "node scripts/check-phase-1-5a-schema.mjs",
     "token:refresh": "node scripts/refresh-desktop-token.mjs",
     "verify:rls": "node scripts/verify-rls.mjs",

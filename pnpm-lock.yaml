@@ -27,6 +27,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@repo/rag':
+        specifier: workspace:*
+        version: link:../../packages/rag
       '@supabase/supabase-js':
         specifier: ^2.57.4
         version: 2.98.0
@@ -136,6 +139,19 @@ importers:
   packages/config: {}
 
   packages/db:
+    dependencies:
+      '@repo/types':
+        specifier: workspace:*
+        version: link:../types
+      '@supabase/supabase-js':
+        specifier: ^2.57.4
+        version: 2.98.0
+    devDependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+
+  packages/rag:
     dependencies:
       '@repo/types':
         specifier: workspace:*

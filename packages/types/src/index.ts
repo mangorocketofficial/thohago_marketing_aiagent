@@ -236,6 +236,7 @@ export type OnboardingResultDocument = {
   template_ref?: string;
   data_coverage_notice?: string;
   synthesis_mode?: string;
+  synthesis_debug?: Record<string, unknown>;
 };
 
 export type OrgBrandSettings = {
@@ -260,4 +261,65 @@ export type OrgBrandSettings = {
   result_document: OnboardingResultDocument | Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+};
+
+export type RagEmbeddingModel = "text-embedding-3-small" | "text-embedding-3-large";
+export type RagEmbeddingDim = 512 | 768 | 1536;
+
+export type RagEmbeddingProfile = {
+  model: RagEmbeddingModel;
+  dimensions: RagEmbeddingDim;
+};
+
+export type RagSourceType = "brand_profile" | "content" | "local_doc" | "chat_pattern";
+
+export type RagChunk = {
+  content: string;
+  source_type: RagSourceType;
+  source_id: string;
+  chunk_index: number;
+  metadata: Record<string, unknown>;
+};
+
+export type RagEmbedding = {
+  id: string;
+  org_id: string;
+  source_type: RagSourceType;
+  source_id: string;
+  chunk_index: number;
+  content: string;
+  metadata: Record<string, unknown>;
+  embedding_model: RagEmbeddingModel;
+  embedding_dim: RagEmbeddingDim;
+  embedding: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RagSearchResult = {
+  id: string;
+  content: string;
+  source_type: RagSourceType;
+  source_id: string;
+  metadata: Record<string, unknown>;
+  similarity: number;
+  weighted_score: number;
+};
+
+export type RagSearchOptions = {
+  embedding_profile?: RagEmbeddingProfile;
+  source_types?: RagSourceType[];
+  top_k?: number;
+  min_similarity?: number;
+  metadata_filter?: Record<string, unknown>;
+  boost?: {
+    field: string;
+    weight: number;
+  };
+};
+
+export type MemoryMd = {
+  markdown: string;
+  token_estimate: number;
+  generated_at: string;
 };
