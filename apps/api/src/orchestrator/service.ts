@@ -1,12 +1,16 @@
+﻿import { env } from "../lib/env";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { generateCampaignPlan, generateContentDraft, generateDetectMessage } from "./ai";
+import { checkForbiddenWords } from "./forbidden-check";
 import type {
   CampaignPlan,
   EnqueueTriggerResult,
+  ForbiddenCheckMeta,
   OrchestratorSessionRow,
   OrchestratorStep,
   PipelineTriggerRow,
+  RagContextMeta,
   ResumeEventRequest,
   ResumeSessionResult,
   SessionState,
@@ -115,6 +119,72 @@ const parseCampaignPlan = (value: unknown): CampaignPlan | null => {
   };
 };
 
+const parseContextLevel = (value: unknown): RagContextMeta["context_level"] => {
+  const level = asString(value, "");
+  if (level === "full" || level === "tier1_only" || level === "no_context") {
+    return level;
+  }
+  return "no_context";
+};
+
+const parseRagContextMeta = (value: unknown): RagContextMeta | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  const memoryGeneratedAt =
+    row.memory_md_generated_at === null
+      ? null
+      : typeof row.memory_md_generated_at === "string" && row.memory_md_generated_at.trim()
+        ? row.memory_md_generated_at.trim()
+        : null;
+  const tier2Sources = Array.isArray(row.tier2_sources)
+    ? row.tier2_sources
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const source = entry as Record<string, unknown>;
+          return {
+            id: asString(source.id, ""),
+            source_type: asString(source.source_type, ""),
+            source_id: asString(source.source_id, ""),
+            similarity:
+              typeof source.similarity === "number" && Number.isFinite(source.similarity) ? source.similarity : 0
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => !!entry && !!entry.id)
+    : [];
+
+  return {
+    context_level: parseContextLevel(row.context_level),
+    memory_md_generated_at: memoryGeneratedAt,
+    tier2_sources: tier2Sources,
+    total_context_tokens:
+      typeof row.total_context_tokens === "number" && Number.isFinite(row.total_context_tokens)
+        ? Math.max(0, Math.floor(row.total_context_tokens))
+        : 0,
+    retrieval_avg_similarity:
+      typeof row.retrieval_avg_similarity === "number" && Number.isFinite(row.retrieval_avg_similarity)
+        ? row.retrieval_avg_similarity
+        : null
+  };
+};
+
+const parseForbiddenCheckMeta = (value: unknown): ForbiddenCheckMeta | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  return {
+    passed: row.passed === true,
+    violations: asStringArray(row.violations),
+    regenerated: row.regenerated === true
+  };
+};
+
 const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   trigger_id: trigger.id,
   activity_folder: trigger.activity_folder,
@@ -125,6 +195,8 @@ const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   campaign_plan: null,
   content_id: null,
   content_draft: null,
+  rag_context: null,
+  forbidden_check: null,
   processed_event_ids: [],
   last_error: null
 });
@@ -153,6 +225,8 @@ const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): SessionSt
     campaign_plan: row.campaign_plan === null ? null : parseCampaignPlan(row.campaign_plan),
     content_id: row.content_id === null ? null : asString(row.content_id, ""),
     content_draft: row.content_draft === null ? null : asString(row.content_draft, ""),
+    rag_context: row.rag_context === null ? null : parseRagContextMeta(row.rag_context),
+    forbidden_check: row.forbidden_check === null ? null : parseForbiddenCheckMeta(row.forbidden_check),
     processed_event_ids: asStringArray(row.processed_event_ids),
     last_error: row.last_error === null ? null : asString(row.last_error, "")
   };
@@ -380,7 +454,7 @@ const applyUserMessageStep = async (
 
   await insertChatMessage(session.org_id, "user", userMessage);
 
-  const plan = await generateCampaignPlan(state.activity_folder, userMessage);
+  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, userMessage);
   const { data: campaign, error: campaignError } = await supabaseAdmin
     .from("campaigns")
     .insert({
@@ -402,7 +476,7 @@ const applyUserMessageStep = async (
     `캠페인 초안이 준비되었습니다: ${state.activity_folder}`,
     `- 채널: ${plan.channels.join(", ")}`,
     `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
-    "승인하면 첫 콘텐츠 초안을 생성하겠습니다."
+    "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
   ].join("\n");
   await insertChatMessage(session.org_id, "assistant", summary);
 
@@ -412,6 +486,8 @@ const applyUserMessageStep = async (
       user_message: userMessage,
       campaign_id: campaign.id as string,
       campaign_plan: plan,
+      rag_context: ragMeta,
+      forbidden_check: null,
       last_error: null
     },
     step: "await_campaign_approval",
@@ -443,8 +519,35 @@ const applyCampaignApprovedStep = async (
     throw new HttpError(500, "db_error", `Failed to update campaign status: ${campaignStatusError.message}`);
   }
 
-  const firstChannel = normalizeChannel(state.campaign_plan?.suggested_schedule?.[0]?.channel);
-  const draft = await generateContentDraft(state.activity_folder, firstChannel);
+  const firstSchedule = state.campaign_plan?.suggested_schedule?.[0];
+  const firstChannel = normalizeChannel(firstSchedule?.channel);
+  const payloadTopic = asString(payload?.topic, "").trim();
+  const topic = payloadTopic || asString(firstSchedule?.type, "").trim() || state.activity_folder;
+
+  let { draft, ragMeta } = await generateContentDraft(session.org_id, state.activity_folder, firstChannel, topic);
+  let forbiddenResult = await checkForbiddenWords(session.org_id, draft);
+  let regenerated = false;
+
+  const maxRetries = env.ragForbiddenCheckEnabled ? env.ragForbiddenMaxRetries : 0;
+  for (let attempt = 0; !forbiddenResult.passed && attempt < maxRetries; attempt += 1) {
+    regenerated = true;
+    console.warn(
+      `[FORBIDDEN_CHECK] Violations for org ${session.org_id}: ${forbiddenResult.violations.join(", ")} (retry ${
+        attempt + 1
+      }/${maxRetries})`
+    );
+
+    const retry = await generateContentDraft(session.org_id, state.activity_folder, firstChannel, topic);
+    draft = retry.draft;
+    ragMeta = retry.ragMeta;
+    forbiddenResult = await checkForbiddenWords(session.org_id, draft);
+  }
+
+  const forbiddenCheck: ForbiddenCheckMeta = {
+    passed: forbiddenResult.passed,
+    violations: forbiddenResult.violations,
+    regenerated
+  };
 
   const { data: content, error: contentError } = await supabaseAdmin
     .from("contents")
@@ -456,8 +559,10 @@ const applyCampaignApprovedStep = async (
       status: "pending_approval",
       body: draft,
       metadata: {
-        phase: "1-5a",
-        source: "orchestrator"
+        phase: "2-3",
+        source: "orchestrator",
+        rag_context: ragMeta,
+        forbidden_check: forbiddenCheck
       },
       created_by: "ai"
     })
@@ -471,7 +576,9 @@ const applyCampaignApprovedStep = async (
   await insertChatMessage(
     session.org_id,
     "assistant",
-    `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
+    forbiddenCheck.passed
+      ? `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
+      : `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`
   );
 
   return {
@@ -480,6 +587,8 @@ const applyCampaignApprovedStep = async (
       campaign_id: campaignId,
       content_id: content.id as string,
       content_draft: draft,
+      rag_context: ragMeta,
+      forbidden_check: forbiddenCheck,
       last_error: null
     },
     step: "await_content_approval",
@@ -574,8 +683,8 @@ const applyRejectStep = async (
     session.org_id,
     "assistant",
     reason
-      ? `요청이 반영되었습니다. 세션을 종료합니다. 사유: ${reason}`
-      : "요청이 반영되었습니다. 세션을 종료합니다."
+      ? `요청을 반영했습니다. 세션을 종료합니다. 사유: ${reason}`
+      : "요청을 반영했습니다. 세션을 종료합니다."
   );
   await updateTrigger(state.trigger_id, { status: "failed" });
 
@@ -716,6 +825,11 @@ export const resumeSession = async (
         idempotent: false
       };
     } catch (error) {
+      if (error instanceof HttpError && error.status >= 400 && error.status < 500) {
+        await updateSession(currentSession.id, { status: currentSession.status });
+        throw error;
+      }
+
       const failedState = {
         ...currentState,
         last_error: messageFromError(error)
@@ -738,4 +852,3 @@ export const resumeSession = async (
 
   return result;
 };
-

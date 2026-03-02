@@ -41,6 +41,29 @@ export type CampaignPlan = {
   suggested_schedule: ScheduleItem[];
 };
 
+export type ContextLevel = "full" | "tier1_only" | "no_context";
+
+export type RagContextSource = {
+  id: string;
+  source_type: string;
+  source_id: string;
+  similarity: number;
+};
+
+export type RagContextMeta = {
+  context_level: ContextLevel;
+  memory_md_generated_at: string | null;
+  tier2_sources: RagContextSource[];
+  total_context_tokens: number;
+  retrieval_avg_similarity: number | null;
+};
+
+export type ForbiddenCheckMeta = {
+  passed: boolean;
+  violations: string[];
+  regenerated: boolean;
+};
+
 export type SessionState = {
   trigger_id: string;
   activity_folder: string;
@@ -51,6 +74,8 @@ export type SessionState = {
   campaign_plan: CampaignPlan | null;
   content_id: string | null;
   content_draft: string | null;
+  rag_context: RagContextMeta | null;
+  forbidden_check: ForbiddenCheckMeta | null;
   processed_event_ids: string[];
   last_error: string | null;
 };
@@ -90,4 +115,3 @@ export type ResumeSessionResult = {
   status: SessionStatus;
   idempotent: boolean;
 };
-

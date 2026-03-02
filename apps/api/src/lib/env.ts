@@ -111,6 +111,36 @@ const parseAllowedEmbeddingDims = (value: string, fallback: RagEmbeddingDim[]): 
   return [...new Set(dims)] as RagEmbeddingDim[];
 };
 
+const parsePositiveInt = (value: string, fallback: number): number => {
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+};
+
+const parseNonNegativeInt = (value: string, fallback: number): number => {
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+};
+
+const parseBoolean = (value: string, fallback: boolean): boolean => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+};
+
 const ragEmbeddingProvider = parseEmbeddingProvider(readEnv("RAG_EMBEDDING_PROVIDER", "openai"));
 const ragEmbeddingModel = parseEmbeddingModel(readEnv("RAG_EMBEDDING_MODEL", "text-embedding-3-small"));
 const ragEmbeddingDimensions = parseEmbeddingDim(readEnv("RAG_EMBEDDING_DIMENSIONS", "1536"), 1536);
@@ -118,6 +148,21 @@ const ragAllowedEmbeddingDimensions = parseAllowedEmbeddingDims(
   readEnv("RAG_ALLOWED_EMBEDDING_DIMENSIONS", "512,768,1536"),
   [512, 768, 1536]
 );
+const ragTier1TokenBudget = parsePositiveInt(readEnv("RAG_TIER1_TOKEN_BUDGET", "2000"), 2000);
+const ragTier2TotalBudget = parsePositiveInt(
+  readEnv("RAG_TIER2_TOTAL_BUDGET", readEnv("RAG_TIER2_TOKEN_BUDGET", "4000")),
+  4000
+);
+const ragContextTotalBudget = parsePositiveInt(
+  readEnv("RAG_CONTEXT_TOTAL_BUDGET", String(ragTier1TokenBudget + ragTier2TotalBudget)),
+  ragTier1TokenBudget + ragTier2TotalBudget
+);
+const ragTier2BrandProfileBudget = parsePositiveInt(readEnv("RAG_TIER2_BRAND_PROFILE_BUDGET", "800"), 800);
+const ragTier2ContentBudget = parsePositiveInt(readEnv("RAG_TIER2_CONTENT_BUDGET", "1500"), 1500);
+const ragTier2LocalDocBudget = parsePositiveInt(readEnv("RAG_TIER2_LOCAL_DOC_BUDGET", "1200"), 1200);
+const ragTier2ChatPatternBudget = parsePositiveInt(readEnv("RAG_TIER2_CHAT_PATTERN_BUDGET", "500"), 500);
+const ragForbiddenCheckEnabled = parseBoolean(readEnv("RAG_FORBIDDEN_CHECK_ENABLED", "true"), true);
+const ragForbiddenMaxRetries = parseNonNegativeInt(readEnv("RAG_FORBIDDEN_MAX_RETRIES", "1"), 1);
 
 export const env = {
   apiPort,
@@ -132,5 +177,14 @@ export const env = {
   ragEmbeddingProvider,
   ragEmbeddingModel,
   ragEmbeddingDimensions,
-  ragAllowedEmbeddingDimensions
+  ragAllowedEmbeddingDimensions,
+  ragTier1TokenBudget,
+  ragTier2TotalBudget,
+  ragContextTotalBudget,
+  ragTier2BrandProfileBudget,
+  ragTier2ContentBudget,
+  ragTier2LocalDocBudget,
+  ragTier2ChatPatternBudget,
+  ragForbiddenCheckEnabled,
+  ragForbiddenMaxRetries
 };
