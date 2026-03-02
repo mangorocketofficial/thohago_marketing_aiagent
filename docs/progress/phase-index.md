@@ -19,4 +19,5 @@
 | 2-2 | Brand Profile Ingestion + Self-Evolving Memory | Done | 2026-03-02 | [phase-2-2-completion.md](./phase-2-2-completion.md) |
 | 2-3 | Orchestrator RAG Integration | Done | 2026-03-02 | [phase-2-3-completion.md](./phase-2-3-completion.md) |
 | 2-3b | Subscription Entitlement Foundation | Done | 2026-03-02 | [phase-2-3b-subscription-entitlement-completion.md](./phase-2-3b-subscription-entitlement-completion.md) |
+| 2-3c | Channel-Aware Tier-2 Content Retrieval Patch | Done | 2026-03-02 | [phase-2-3c-channel-aware-retrieval-completion.md](./phase-2-3c-channel-aware-retrieval-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |

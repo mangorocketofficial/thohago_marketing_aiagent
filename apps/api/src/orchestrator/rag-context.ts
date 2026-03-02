@@ -1,25 +1,51 @@
-import { countTokens, truncateToTokenBudget, type RagSearchResult, type RagSourceType } from "@repo/rag";
+﻿import { countTokens, truncateToTokenBudget, type RagSearchResult } from "@repo/rag";
 import { env } from "../lib/env";
 import { getRagEmbedder, ragConfig, ragRetriever } from "../lib/rag";
 import { getMemoryMdForOrg } from "../rag/memory-service";
 import type { ContextLevel, RagContextMeta } from "./types";
 
-type Tier2Results = Record<RagSourceType, RagSearchResult[]>;
+type Tier2SectionType =
+  | "brand_profile"
+  | "content_same_channel"
+  | "content_cross_channel"
+  | "local_doc"
+  | "chat_pattern";
 
-const SOURCE_ORDER: RagSourceType[] = ["brand_profile", "content", "local_doc", "chat_pattern"];
+type Tier2Results = Record<Tier2SectionType, RagSearchResult[]>;
 
-const TIER2_SUB_BUDGETS: Record<RagSourceType, number> = {
+const SOURCE_ORDER: Tier2SectionType[] = [
+  "brand_profile",
+  "content_same_channel",
+  "content_cross_channel",
+  "local_doc",
+  "chat_pattern"
+];
+
+const CONTENT_CROSS_CHANNEL_BUDGET = Math.min(300, Math.max(0, env.ragTier2ContentBudget));
+const CONTENT_SAME_CHANNEL_BUDGET = Math.max(0, env.ragTier2ContentBudget - CONTENT_CROSS_CHANNEL_BUDGET);
+
+const TIER2_SUB_BUDGETS: Record<Tier2SectionType, number> = {
   brand_profile: env.ragTier2BrandProfileBudget,
-  content: env.ragTier2ContentBudget,
+  content_same_channel: CONTENT_SAME_CHANNEL_BUDGET,
+  content_cross_channel: CONTENT_CROSS_CHANNEL_BUDGET,
   local_doc: env.ragTier2LocalDocBudget,
   chat_pattern: env.ragTier2ChatPatternBudget
 };
 
-const SECTION_LABELS: Record<RagSourceType, string> = {
-  brand_profile: "채널별 브랜드 전략",
-  content: "유사 과거 콘텐츠",
-  local_doc: "관련 활동 문서",
-  chat_pattern: "사용자 수정 패턴"
+const CONTENT_RETRIEVAL = {
+  SAME_CHANNEL_TOP_K: 3,
+  SAME_CHANNEL_MIN_SIMILARITY: 0.65,
+  SAME_CHANNEL_MIN_COUNT: 2,
+  CROSS_CHANNEL_TOP_K: 2,
+  CROSS_CHANNEL_MIN_SIMILARITY: 0.75
+} as const;
+
+const SECTION_LABELS: Record<Tier2SectionType, string> = {
+  brand_profile: "Brand profile strategy",
+  content_same_channel: "Same-channel past content (format + hashtags reference)",
+  content_cross_channel: "Cross-channel related content (message only; ignore format)",
+  local_doc: "Related local documents",
+  chat_pattern: "User edit patterns"
 };
 
 const readString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
@@ -37,16 +63,19 @@ const readNumber = (value: unknown): number => {
   return 0;
 };
 
-const formatSectionRow = (sourceType: RagSourceType, result: RagSearchResult): string => {
+const normalizeChannel = (value: string): string => value.trim().toLowerCase();
+
+const formatSectionRow = (sourceType: Tier2SectionType, result: RagSearchResult): string => {
   switch (sourceType) {
     case "brand_profile":
       return result.content;
-    case "content": {
+    case "content_same_channel":
+    case "content_cross_channel": {
       const channel = readString(result.metadata.channel) || "unknown";
       const publishedAt = readString(result.metadata.published_at) || "unknown";
       const score = readNumber(result.metadata.performance_score);
       const scoreText = score > 0 ? score.toFixed(2) : "n/a";
-      return `[${channel} / ${publishedAt}] 성과: ${scoreText}\n${result.content}`;
+      return `[${channel} / ${publishedAt}] score: ${scoreText}\n${result.content}`;
     }
     case "local_doc": {
       const fileName = readString(result.metadata.file_name) || "unknown";
@@ -76,7 +105,9 @@ const fetchMemoryMd = async (orgId: string): Promise<{ markdown: string; generat
       generatedAt: memory.generated_at
     };
   } catch (error) {
-    console.warn(`[RAG_CONTEXT] Failed to load memory.md for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(
+      `[RAG_CONTEXT] Failed to load memory.md for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 };
@@ -88,22 +119,28 @@ const fetchTier2 = async (
   activityFolder: string
 ): Promise<Tier2Results | null> => {
   try {
-    const queryText = [channel, topic, activityFolder].map((entry) => entry.trim()).filter(Boolean).join(" | ");
+    const normalizedChannel = normalizeChannel(channel);
+    const queryText = [normalizedChannel, topic, activityFolder]
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .join(" | ");
+
     const embedder = getRagEmbedder();
     const queryEmbedding = await embedder.generateEmbedding(queryText, ragConfig.defaultEmbeddingProfile);
 
-    const [brandStrategies, similarContent, relatedDocs, editPatterns] = await Promise.all([
+    const [brandStrategies, sameChannelContent, relatedDocs, editPatterns] = await Promise.all([
       ragRetriever.searchSimilar(orgId, queryEmbedding, {
         source_types: ["brand_profile"],
-        metadata_filter: channel ? { section_channel: channel } : {},
+        metadata_filter: normalizedChannel ? { section_channel: normalizedChannel } : {},
         top_k: 3,
         min_similarity: 0.6,
         embedding_profile: ragConfig.defaultEmbeddingProfile
       }),
       ragRetriever.searchSimilar(orgId, queryEmbedding, {
         source_types: ["content"],
-        top_k: 3,
-        min_similarity: 0.65,
+        metadata_filter: normalizedChannel ? { channel: normalizedChannel } : {},
+        top_k: CONTENT_RETRIEVAL.SAME_CHANNEL_TOP_K,
+        min_similarity: CONTENT_RETRIEVAL.SAME_CHANNEL_MIN_SIMILARITY,
         boost: { field: "metadata.performance_score", weight: 1.5 },
         embedding_profile: ragConfig.defaultEmbeddingProfile
       }),
@@ -115,21 +152,43 @@ const fetchTier2 = async (
       }),
       ragRetriever.searchSimilar(orgId, queryEmbedding, {
         source_types: ["chat_pattern"],
-        metadata_filter: channel ? { channel } : {},
+        metadata_filter: normalizedChannel ? { channel: normalizedChannel } : {},
         top_k: 2,
         min_similarity: 0.6,
         embedding_profile: ragConfig.defaultEmbeddingProfile
       })
     ]);
 
+    let crossChannelContent: RagSearchResult[] = [];
+    if (normalizedChannel && sameChannelContent.length < CONTENT_RETRIEVAL.SAME_CHANNEL_MIN_COUNT) {
+      const broadContent = await ragRetriever.searchSimilar(orgId, queryEmbedding, {
+        source_types: ["content"],
+        top_k: CONTENT_RETRIEVAL.SAME_CHANNEL_TOP_K + CONTENT_RETRIEVAL.CROSS_CHANNEL_TOP_K,
+        min_similarity: CONTENT_RETRIEVAL.CROSS_CHANNEL_MIN_SIMILARITY,
+        boost: { field: "metadata.performance_score", weight: 1.5 },
+        embedding_profile: ragConfig.defaultEmbeddingProfile
+      });
+
+      const sameChannelIds = new Set(sameChannelContent.map((row) => row.id));
+      crossChannelContent = broadContent
+        .filter((row) => {
+          const rowChannel = normalizeChannel(readString(row.metadata.channel));
+          return rowChannel !== normalizedChannel && !sameChannelIds.has(row.id);
+        })
+        .slice(0, CONTENT_RETRIEVAL.CROSS_CHANNEL_TOP_K);
+    }
+
     return {
       brand_profile: brandStrategies,
-      content: similarContent,
+      content_same_channel: sameChannelContent,
+      content_cross_channel: crossChannelContent,
       local_doc: relatedDocs,
       chat_pattern: editPatterns
     };
   } catch (error) {
-    console.warn(`[RAG_CONTEXT] Tier2 retrieval failed for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(
+      `[RAG_CONTEXT] Tier2 retrieval failed for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 };
@@ -158,7 +217,7 @@ const assembleTier2Sections = (
       continue;
     }
 
-    sectionBlocks.push(`=== 참고: ${SECTION_LABELS[sourceType]} ===\n${sectionContent}`);
+    sectionBlocks.push(`=== Reference: ${SECTION_LABELS[sourceType]} ===\n${sectionContent}`);
 
     for (const row of rows) {
       allSources.push({
