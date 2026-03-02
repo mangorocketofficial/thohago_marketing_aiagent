@@ -32,16 +32,17 @@ const getFileType = (extension) => {
 const parseActivityFolder = (relativePath, watchRoot) => {
   const parts = relativePath.split("/").filter(Boolean);
 
+  if (parts.length === 0) {
+    return null;
+  }
+
   if (parts.length === 1) {
     // Root-level files are mapped to the watch folder name.
     return path.basename(watchRoot);
   }
 
-  if (parts.length === 2) {
-    return parts[0];
-  }
-
-  return null;
+  // Nested files inherit activity folder from the first directory under watch root.
+  return parts[0];
 };
 
 /**
@@ -62,7 +63,7 @@ export const buildFileEntry = async (filePath, watchRoot) => {
 
   const activityFolder = parseActivityFolder(relativePath, watchRoot);
   if (!activityFolder) {
-    console.warn(`[Watcher] Skipping (wrong depth): ${filePath}`);
+    console.warn(`[Watcher] Skipping (invalid relative path): ${filePath}`);
     return null;
   }
 
@@ -118,7 +119,7 @@ export const buildDeletedDescriptor = (filePath, watchRoot) => {
 
   const activityFolder = parseActivityFolder(relativePath, watchRoot);
   if (!activityFolder) {
-    console.warn(`[Watcher] Deletion skipped (wrong depth): ${filePath}`);
+    console.warn(`[Watcher] Deletion skipped (invalid relative path): ${filePath}`);
     return null;
   }
 
@@ -140,35 +141,44 @@ export const collectInitialFiles = async (watchRoot) => {
   /** @type {import("./file-index.mjs").FileEntry[]} */
   const entries = [];
 
-  const rootEntries = await fs.readdir(watchRoot, { withFileTypes: true });
-  for (const rootEntry of rootEntries) {
-    const rootPath = path.join(watchRoot, rootEntry.name);
+  /** @type {string[]} */
+  const pendingDirectories = [watchRoot];
 
-    if (rootEntry.isFile()) {
-      const fileEntry = await buildFileEntry(rootPath, watchRoot);
-      if (fileEntry) {
-        entries.push(fileEntry);
-      }
+  while (pendingDirectories.length > 0) {
+    const currentDirectory = pendingDirectories.pop();
+    if (!currentDirectory) {
       continue;
     }
 
-    if (!rootEntry.isDirectory()) {
+    let directoryEntries;
+    try {
+      directoryEntries = await fs.readdir(currentDirectory, { withFileTypes: true });
+    } catch (error) {
+      console.warn(
+        `[Scan] Failed to read directory ${currentDirectory}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
       continue;
     }
 
-    const nestedEntries = await fs.readdir(rootPath, { withFileTypes: true });
-    for (const nestedEntry of nestedEntries) {
-      const nestedPath = path.join(rootPath, nestedEntry.name);
-      if (nestedEntry.isDirectory()) {
-        console.warn(`[Scan] Skipping nested directory (depth 3+): ${nestedPath}`);
+    for (const directoryEntry of directoryEntries) {
+      if (directoryEntry.name.startsWith(".")) {
         continue;
       }
 
-      if (!nestedEntry.isFile()) {
+      const entryPath = path.join(currentDirectory, directoryEntry.name);
+
+      if (directoryEntry.isDirectory()) {
+        pendingDirectories.push(entryPath);
         continue;
       }
 
-      const fileEntry = await buildFileEntry(nestedPath, watchRoot);
+      if (!directoryEntry.isFile()) {
+        continue;
+      }
+
+      const fileEntry = await buildFileEntry(entryPath, watchRoot);
       if (fileEntry) {
         entries.push(fileEntry);
       }
@@ -196,7 +206,6 @@ export const startWatcher = ({ watchRoot, onUpsert, onDelete }) => {
     ignored: /(^|[\/\\])\../,
     persistent: true,
     ignoreInitial: true,
-    depth: 2,
     awaitWriteFinish: {
       stabilityThreshold: 1000,
       pollInterval: 100

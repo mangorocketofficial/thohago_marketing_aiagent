@@ -11,6 +11,8 @@ export const SUPPORTED_EXTENSIONS = new Set([
   ".avi",
   ".pdf",
   ".docx",
+  ".txt",
+  ".csv",
   ".hwp",
   ".pptx",
   ".xlsx"

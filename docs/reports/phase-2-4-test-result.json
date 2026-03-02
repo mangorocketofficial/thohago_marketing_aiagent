@@ -1,0 +1,148 @@
+{
+  "run_id": "1772454306757-29887b37",
+  "started_at": "2026-03-02T12:25:06.758Z",
+  "finished_at": "2026-03-02T12:25:13.405Z",
+  "success": true,
+  "checks": [
+    {
+      "name": "supabase_status_env",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:07.453Z",
+      "duration_ms": 692,
+      "details": {
+        "api_url": "http://127.0.0.1:54321",
+        "anon_key_present": true,
+        "service_role_key_present": true
+      }
+    },
+    {
+      "name": "required_env",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:08.142Z",
+      "duration_ms": 0,
+      "details": {
+        "api_secret_present": true,
+        "openai_key_present": true,
+        "rag_embedding_model": "text-embedding-3-small",
+        "rag_embedding_dimensions": 1536
+      }
+    },
+    {
+      "name": "api_startup",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:10.207Z",
+      "duration_ms": 2065,
+      "details": {
+        "api_base_url": "http://127.0.0.1:40175"
+      }
+    },
+    {
+      "name": "seed_owner_user",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:10.486Z",
+      "duration_ms": 275,
+      "details": {
+        "userId": "fbf1b065-980c-4c18-b82b-12e8636ab99a",
+        "access_token_present": true
+      }
+    },
+    {
+      "name": "seed_orgs_and_subscription",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:10.509Z",
+      "duration_ms": 23,
+      "details": {
+        "org_active_id": "81baedf4-d19b-460f-8fc9-fb5defad3271",
+        "org_blocked_id": "9fc8eb03-0cf7-464c-b089-25b9d7cfd05e"
+      }
+    },
+    {
+      "name": "auth_failure_returns_401",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:10.524Z",
+      "duration_ms": 15,
+      "details": {
+        "http_status": 401
+      }
+    },
+    {
+      "name": "subscription_gate_returns_402",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:10.534Z",
+      "duration_ms": 10,
+      "details": {
+        "http_status": 402,
+        "error": "payment_required"
+      }
+    },
+    {
+      "name": "index_text_document",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:11.194Z",
+      "duration_ms": 660,
+      "details": {
+        "chunk_count": 5,
+        "row_count": 5
+      }
+    },
+    {
+      "name": "index_metadata_only_null_text",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:12.154Z",
+      "duration_ms": 960,
+      "details": {
+        "chunk_count": 1,
+        "content_preview": "file: event-photo.jpg\ntype: image\nactivity_folder: phase24-activity-177245431021"
+      }
+    },
+    {
+      "name": "index_short_text_fallback",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:12.501Z",
+      "duration_ms": 346,
+      "details": {
+        "chunk_count": 1
+      }
+    },
+    {
+      "name": "idempotent_reindex_no_duplicates",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:12.528Z",
+      "duration_ms": 27,
+      "details": {
+        "before_count": 5,
+        "after_count": 5,
+        "skipped": true,
+        "reason": "unchanged"
+      }
+    },
+    {
+      "name": "delete_document_embeddings",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:12.546Z",
+      "duration_ms": 18,
+      "details": {
+        "deleted": true
+      }
+    },
+    {
+      "name": "retriever_local_doc_rpc",
+      "pass": true,
+      "checked_at": "2026-03-02T12:25:12.957Z",
+      "duration_ms": 411,
+      "details": {
+        "result_count": 5
+      }
+    }
+  ],
+  "metrics": {},
+  "environment": {
+    "api_base_url": "http://127.0.0.1:40175",
+    "supabase_url": "http://127.0.0.1:54321"
+  },
+  "artifacts": {
+    "api_log_tail": "\n> @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n> tsx src/index.ts\n\n[API] Listening on http://localhost:40175\n[API] Supabase host: 127.0.0.1:54321\n",
+    "cleanup_errors": []
+  },
+  "error": null
+}

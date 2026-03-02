@@ -22,6 +22,7 @@ import {
   upsertFile
 } from "./file-index.mjs";
 import { writePipelineTrigger } from "./pipeline-trigger-relay.mjs";
+import { deleteFileFromRag, indexFileForRag } from "./rag-indexer.mjs";
 import { clearAuthSession, loadAuthSession, saveAuthSession } from "./secure-auth-store.mjs";
 import { collectInitialFiles, startWatcher } from "./watcher.mjs";
 
@@ -41,6 +42,8 @@ const oauthCallbackPort = Number.parseInt((process.env.DESKTOP_OAUTH_CALLBACK_PO
 const oauthCallbackHost = (process.env.DESKTOP_OAUTH_CALLBACK_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
 const oauthCallbackTimeoutMs = Number.parseInt((process.env.DESKTOP_OAUTH_TIMEOUT_MS ?? "90000").trim(), 10);
 const billingCheckoutUrl = (process.env.BILLING_CHECKOUT_URL ?? "").trim();
+const INITIAL_SCAN_RAG_MAX_CONCURRENCY = 2;
+const AUTH_REFRESH_TIMEOUT_MS = Number.parseInt((process.env.DESKTOP_AUTH_REFRESH_TIMEOUT_MS ?? "10000").trim(), 10);
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -185,6 +188,103 @@ const isSessionExpired = (sessionPayload) => {
   }
 
   return Date.now() >= expFromPayload * 1000;
+};
+
+const persistAuthSessionWithFallback = (payload, context = "session update") => {
+  const normalized = parseAuthSessionPayload(payload);
+  if (!normalized) {
+    throw new Error("Invalid auth session payload.");
+  }
+
+  try {
+    return saveAuthSession(normalized);
+  } catch (error) {
+    if (!isStorageUnavailableError(error)) {
+      throw error;
+    }
+
+    console.warn(`[Auth] secure session persistence unavailable during ${context}; using in-memory session only.`);
+    return normalized;
+  }
+};
+
+const parseTokenResponse = (payload) => {
+  const accessToken = typeof payload?.access_token === "string" ? payload.access_token.trim() : "";
+  const refreshToken = typeof payload?.refresh_token === "string" ? payload.refresh_token.trim() : "";
+  const expiresIn =
+    typeof payload?.expires_in === "number" && Number.isFinite(payload.expires_in) ? payload.expires_in : null;
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt:
+      expiresIn !== null ? Math.floor(Date.now() / 1000) + Math.max(1, Math.floor(expiresIn)) : parseJwtExpiration(accessToken)
+  };
+};
+
+const refreshStoredAuthSession = async (sessionPayload) => {
+  const refreshToken = typeof sessionPayload?.refreshToken === "string" ? sessionPayload.refreshToken.trim() : "";
+  if (!refreshToken || !supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  const tokenUrl = new URL("/auth/v1/token?grant_type=refresh_token", supabaseUrl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1_000, AUTH_REFRESH_TIMEOUT_MS));
+
+  try {
+    const response = await fetch(tokenUrl.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: supabaseAnonKey
+      },
+      body: JSON.stringify({
+        refresh_token: refreshToken
+      }),
+      signal: controller.signal
+    });
+
+    const body = await parseJsonResponse(response);
+    if (!response.ok) {
+      const message = body?.error_description ?? body?.error ?? `HTTP ${response.status}`;
+      throw new Error(typeof message === "string" ? message : `HTTP ${response.status}`);
+    }
+
+    return parseTokenResponse(body);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const resolveStoredAuthSession = async () => {
+  const stored = loadAuthSession();
+  if (!stored) {
+    return null;
+  }
+
+  if (!isSessionExpired(stored)) {
+    return stored;
+  }
+
+  try {
+    const refreshed = await refreshStoredAuthSession(stored);
+    if (!refreshed) {
+      return null;
+    }
+
+    const persisted = persistAuthSessionWithFallback(refreshed, "startup refresh");
+    return persisted;
+  } catch (error) {
+    console.warn(
+      `[Auth] Failed to refresh stored session on startup: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return null;
+  }
 };
 
 const randomBase64Url = (bytes = 32) => {
@@ -562,6 +662,44 @@ const stopWatcher = async () => {
 };
 
 /**
+ * @param {number} maxConcurrency
+ * @returns {(task: () => Promise<void>) => Promise<void>}
+ */
+const createTaskQueue = (maxConcurrency) => {
+  const limit = Math.max(1, Math.floor(Number(maxConcurrency) || 1));
+  /** @type {Array<{ task: () => Promise<void>, resolve: () => void, reject: (error: unknown) => void }>} */
+  const pending = [];
+  let active = 0;
+
+  const runNext = () => {
+    if (active >= limit) {
+      return;
+    }
+
+    const next = pending.shift();
+    if (!next) {
+      return;
+    }
+
+    active += 1;
+    void Promise.resolve()
+      .then(() => next.task())
+      .then(() => next.resolve())
+      .catch((error) => next.reject(error))
+      .finally(() => {
+        active -= 1;
+        runNext();
+      });
+  };
+
+  return (task) =>
+    new Promise((resolve, reject) => {
+      pending.push({ task, resolve, reject });
+      runNext();
+    });
+};
+
+/**
  * @param {string} watchPath
  * @param {string} orgId
  */
@@ -584,6 +722,7 @@ const startWatcherRuntime = async (watchPath, orgId) => {
 
   // Non-blocking async scan to rebuild runtime cache.
   const initialEntries = await collectInitialFiles(resolvedPath);
+  const enqueueInitialRagIndex = createTaskQueue(INITIAL_SCAN_RAG_MAX_CONCURRENCY);
   for (const entry of initialEntries) {
     upsertFile(entry);
     const dedupeKey = `${runtimeState.orgId}:${entry.relativePath}:${entry.fileSize}:${entry.modifiedAt}`;
@@ -594,6 +733,26 @@ const startWatcherRuntime = async (watchPath, orgId) => {
       activityFolder: entry.activityFolder,
       fileType: entry.fileType,
       dedupeKey: `scan:${dedupeKey}`
+    });
+
+    void enqueueInitialRagIndex(async () => {
+      await indexFileForRag({
+        orgId: runtimeState.orgId,
+        filePath: entry.filePath,
+        relativePath: entry.relativePath,
+        fileName: entry.fileName,
+        activityFolder: entry.activityFolder,
+        fileType: entry.fileType,
+        fileSize: entry.fileSize,
+        extension: entry.extension,
+        modifiedAt: entry.modifiedAt
+      });
+    }).catch((error) => {
+      console.warn(
+        `[RAG-Indexer] Initial scan index failed for ${entry.fileName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     });
   }
   runtimeState.initialScanCount = initialEntries.length;
@@ -616,6 +775,24 @@ const startWatcherRuntime = async (watchPath, orgId) => {
         dedupeKey: `${eventType}:${dedupeKey}`
       });
 
+      void indexFileForRag({
+        orgId: runtimeState.orgId,
+        filePath: entry.filePath,
+        relativePath: rendererEntry.relativePath,
+        fileName: rendererEntry.fileName,
+        activityFolder: rendererEntry.activityFolder,
+        fileType: rendererEntry.fileType,
+        fileSize: entry.fileSize,
+        extension: entry.extension,
+        modifiedAt: entry.modifiedAt
+      }).catch((error) => {
+        console.warn(
+          `[RAG-Indexer] Background index failed for ${rendererEntry.fileName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+
       emitWatcherStatus();
     },
     onDelete: async (deleted) => {
@@ -624,6 +801,18 @@ const startWatcherRuntime = async (watchPath, orgId) => {
         relativePath: deleted.relativePath,
         fileName: deleted.fileName
       });
+
+      void deleteFileFromRag({
+        orgId: runtimeState.orgId,
+        relativePath: deleted.relativePath
+      }).catch((error) => {
+        console.warn(
+          `[RAG-Indexer] Background delete failed for ${deleted.fileName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+
       emitWatcherStatus();
     }
   });
@@ -637,6 +826,22 @@ const enqueueRuntimeStart = (watchPath, orgId) => {
     console.error("[Runtime] Failed to start watcher runtime:", error);
   });
   return runtimeTask;
+};
+
+const resumeWatcherRuntimeAfterAuth = async () => {
+  emitWatcherStatus();
+
+  if (!runtimeState.onboardingCompleted) {
+    return;
+  }
+  if (!runtimeState.watchPath) {
+    return;
+  }
+  if (runtimeState.isRunning) {
+    return;
+  }
+
+  await enqueueRuntimeStart(runtimeState.watchPath, runtimeState.orgId);
 };
 
 const getChatRuntimeConfig = () => ({
@@ -906,62 +1111,45 @@ const registerIpcHandlers = () => {
     return getDesktopRuntimeConfig();
   });
 
-  ipcMain.handle("auth:get-stored-session", () => {
+  ipcMain.handle("auth:get-stored-session", async () => {
     if (runtimeState.authSession && !isSessionExpired(runtimeState.authSession)) {
+      await resumeWatcherRuntimeAfterAuth();
       return runtimeState.authSession;
     }
 
-    const stored = loadAuthSession();
-    if (!stored || isSessionExpired(stored)) {
+    const stored = await resolveStoredAuthSession();
+    if (!stored) {
+      runtimeState.authSession = null;
+      emitWatcherStatus();
       return null;
     }
 
     runtimeState.authSession = stored;
+    await resumeWatcherRuntimeAfterAuth();
     return stored;
   });
 
   ipcMain.handle("auth:save-session", async (_, payload) => {
-    const normalized = parseAuthSessionPayload(payload);
-    if (!normalized) {
-      throw new Error("Invalid auth session payload.");
-    }
-
-    try {
-      const persisted = saveAuthSession(normalized);
-      runtimeState.authSession = persisted;
-      return persisted;
-    } catch (error) {
-      if (!isStorageUnavailableError(error)) {
-        throw error;
-      }
-
-      console.warn("[Auth] secure session persistence unavailable; using in-memory session only.");
-      runtimeState.authSession = normalized;
-      return normalized;
-    }
+    const persisted = persistAuthSessionWithFallback(payload, "manual save");
+    runtimeState.authSession = persisted;
+    await resumeWatcherRuntimeAfterAuth();
+    return persisted;
   });
 
   ipcMain.handle("auth:clear-session", async () => {
     clearAuthSession();
     runtimeState.authSession = null;
+    await stopWatcher();
+    emitWatcherStatus();
     return { ok: true };
   });
 
   ipcMain.handle("auth:start-google-oauth", async () => {
     const sessionPayload = await runGoogleOAuthWithSystemBrowser();
-    try {
-      const persisted = saveAuthSession(sessionPayload);
-      runtimeState.authSession = persisted;
-      return persisted;
-    } catch (error) {
-      if (!isStorageUnavailableError(error)) {
-        throw error;
-      }
-
-      console.warn("[Auth] secure session persistence unavailable; using in-memory session only.");
-      runtimeState.authSession = sessionPayload;
-      return sessionPayload;
-    }
+    const persisted = persistAuthSessionWithFallback(sessionPayload, "google oauth");
+    runtimeState.authSession = persisted;
+    await resumeWatcherRuntimeAfterAuth();
+    return persisted;
   });
 
   const fetchEntitlement = async (payload) => {
@@ -1510,8 +1698,8 @@ app.whenReady().then(async () => {
     instagramUrl: config.onboardingDraft?.instagramUrl ?? ""
   });
   runtimeState.onboardingLastSynthesis = null;
-  const storedAuth = loadAuthSession();
-  runtimeState.authSession = storedAuth && !isSessionExpired(storedAuth) ? storedAuth : null;
+  const storedAuth = await resolveStoredAuthSession();
+  runtimeState.authSession = storedAuth;
 
   mainWindow = await createWindow();
   registerIpcHandlers();

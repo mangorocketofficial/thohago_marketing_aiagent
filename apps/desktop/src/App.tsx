@@ -34,6 +34,9 @@ const FALLBACK_ENTITLEMENT: OrgEntitlement = {
   current_period_end: null
 };
 
+const resolveOnboardingEntryStep = (onboardingCompleted: boolean): OnboardingStep =>
+  onboardingCompleted ? 1 : 0;
+
 const defaultOnboardingDraft = (): OnboardingDraft => ({
   websiteUrl: "",
   naverBlogUrl: "",
@@ -447,8 +450,11 @@ const App = () => {
       return;
     }
 
+    let onboardingCompletedAtBootstrap = false;
+
     const init = async () => {
       const nextDesktopConfig = await runtime.app.getConfig();
+      onboardingCompletedAtBootstrap = !!nextDesktopConfig.onboardingCompleted;
       setDesktopConfig(nextDesktopConfig);
       setOnboardingDraft(nextDesktopConfig.onboardingDraft ?? defaultOnboardingDraft());
       setSelectedPath(nextDesktopConfig.watchPath ?? "");
@@ -460,7 +466,7 @@ const App = () => {
       setStatus(nextStatus);
       setMode(nextStatus.requiresOnboarding ? "onboarding" : "dashboard");
       if (nextStatus.requiresOnboarding) {
-        setOnboardingStep(0);
+        setOnboardingStep(resolveOnboardingEntryStep(onboardingCompletedAtBootstrap));
       }
 
       const nextFiles = await runtime.watcher.getFiles();
@@ -505,7 +511,12 @@ const App = () => {
       setMode((prevMode) => {
         const nextMode = nextStatus.requiresOnboarding ? "onboarding" : "dashboard";
         if (nextMode === "onboarding" && prevMode !== "onboarding") {
-          setOnboardingStep(0);
+          setOnboardingStep((prevStep) => {
+            if (prevStep > 0) {
+              return prevStep;
+            }
+            return resolveOnboardingEntryStep(onboardingCompletedAtBootstrap);
+          });
         }
         return nextMode;
       });
@@ -513,7 +524,12 @@ const App = () => {
 
     const offShowOnboarding = runtime.watcher.onShowOnboarding(() => {
       setMode("onboarding");
-      setOnboardingStep(0);
+      setOnboardingStep((prevStep) => {
+        if (prevStep > 0) {
+          return prevStep;
+        }
+        return resolveOnboardingEntryStep(onboardingCompletedAtBootstrap);
+      });
     });
 
     const offActionResult = runtime.chat.onActionResult((payload) => {

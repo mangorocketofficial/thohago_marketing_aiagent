@@ -5,6 +5,7 @@ import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
 import { memoryRouter } from "./routes/memory";
 import { onboardingRouter } from "./routes/onboarding";
+import { ragRouter } from "./routes/rag";
 import { sessionsRouter } from "./routes/sessions";
 import { triggerRouter } from "./routes/trigger";
 import { startRagIngestionWorker } from "./rag/ingest-brand-profile";
@@ -22,6 +23,7 @@ app.use(triggerRouter);
 app.use(sessionsRouter);
 app.use(onboardingRouter);
 app.use(memoryRouter);
+app.use(ragRouter);
 app.use(entitlementRouter);
 
 app.use((_req, res) => {
