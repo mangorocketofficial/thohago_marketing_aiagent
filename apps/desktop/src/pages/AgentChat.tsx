@@ -7,16 +7,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
+import { getWorkflowStatusLabel } from "../types/workflow";
 
 type AgentChatPageProps = {
   formatDateTime: (iso: string | null | undefined) => string;
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  proposed: "Proposed",
-  revision_requested: "Revision Requested",
-  approved: "Approved",
-  rejected: "Rejected"
 };
 
 const toTextArray = (value: unknown): string[] => {
@@ -219,7 +213,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                 const cardData = toRecord(message.metadata.card_data);
                 const title = typeof cardData.title === "string" ? cardData.title : "Action Card";
                 const workflowStatus = message.metadata.workflow_status;
-                const statusLabel = STATUS_LABEL[workflowStatus] ?? workflowStatus;
+                const statusLabel = getWorkflowStatusLabel(workflowStatus);
                 const currentVersion = Math.max(1, Math.floor(message.metadata.expected_version));
                 const latestVersion =
                   latestVersionByWorkflowItem.get(message.metadata.workflow_item_id) ?? currentVersion;

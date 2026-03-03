@@ -1,16 +1,6 @@
-﻿import { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { useChatContext } from "../context/ChatContext";
-
-type RuntimeSummary = {
-  platform: string;
-  watchPath: string;
-  isRunning: boolean;
-  fileCount: number;
-  scanCount: number;
-  activeSessionId: string;
-  sessionStep: string;
-  sessionStatus: string;
-};
+import type { RuntimeSummary } from "../types/runtime";
 
 type SettingsPageProps = {
   orgId: string;

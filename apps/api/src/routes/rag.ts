@@ -2,6 +2,7 @@ import { Router } from "express";
 import { chunkBySourceType, type RagChunk } from "@repo/rag";
 import { requireApiSecret } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { asRecord, parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { getRagEmbedder, ragConfig, ragStore } from "../lib/rag";
 import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
@@ -11,12 +12,8 @@ const MIN_TEXT_LENGTH = 50;
 const VALID_FILE_TYPES = new Set(["document", "image", "video"]);
 const RAG_TABLE = "org_rag_embeddings";
 
-const parseRequiredString = (value: unknown, field: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_body", `${field} is required.`);
-  }
-  return value.trim();
-};
+const parseRequiredBodyString = (value: unknown, field: string): string =>
+  parseRequiredString(value, field, { code: "invalid_body" });
 
 const parseFileType = (value: unknown): "document" | "image" | "video" => {
   if (typeof value !== "string") {
@@ -37,14 +34,6 @@ const parseExtractedText = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
-const parseOptionalString = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
-
 const parseOptionalNonNegativeInt = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     return Math.floor(value);
@@ -58,20 +47,9 @@ const parseOptionalNonNegativeInt = (value: unknown): number | null => {
   return null;
 };
 
-const toRecord = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Record<string, unknown>;
-};
-
 const readMetadataString = (metadata: Record<string, unknown>, key: string): string | null => {
   const value = metadata[key];
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+  return parseOptionalString(value);
 };
 
 const readMetadataInt = (metadata: Record<string, unknown>, key: string): number | null => {
@@ -119,7 +97,7 @@ const getExistingSignature = async (
     return null;
   }
 
-  const metadata = toRecord(rows[0]?.metadata);
+  const metadata = asRecord(rows[0]?.metadata);
   return {
     fileModifiedAt: readMetadataString(metadata, "file_modified_at"),
     fileSizeBytes: readMetadataInt(metadata, "file_size_bytes"),
@@ -211,14 +189,14 @@ ragRouter.post("/rag/index-document", async (req, res) => {
   }
 
   try {
-    const orgId = parseRequiredString(req.body?.org_id, "org_id");
+    const orgId = parseRequiredBodyString(req.body?.org_id, "org_id");
     if (!(await requireActiveSubscription(res, orgId))) {
       return;
     }
 
-    const sourceId = parseRequiredString(req.body?.source_id, "source_id");
-    const activityFolder = parseRequiredString(req.body?.activity_folder, "activity_folder");
-    const fileName = parseRequiredString(req.body?.file_name, "file_name");
+    const sourceId = parseRequiredBodyString(req.body?.source_id, "source_id");
+    const activityFolder = parseRequiredBodyString(req.body?.activity_folder, "activity_folder");
+    const fileName = parseRequiredBodyString(req.body?.file_name, "file_name");
     const fileType = parseFileType(req.body?.file_type);
     const extractedText = parseExtractedText(req.body?.extracted_text);
     const fileModifiedAt = parseOptionalString(req.body?.file_modified_at);
@@ -299,7 +277,7 @@ ragRouter.post("/rag/embed-pending-content", async (req, res) => {
   }
 
   try {
-    const orgId = parseRequiredString(req.body?.org_id, "org_id");
+    const orgId = parseRequiredBodyString(req.body?.org_id, "org_id");
     if (!(await requireActiveSubscription(res, orgId))) {
       return;
     }
@@ -323,12 +301,12 @@ ragRouter.delete("/rag/index-document", async (req, res) => {
   }
 
   try {
-    const orgId = parseRequiredString(req.body?.org_id, "org_id");
+    const orgId = parseRequiredBodyString(req.body?.org_id, "org_id");
     if (!(await requireActiveSubscription(res, orgId))) {
       return;
     }
 
-    const sourceId = parseRequiredString(req.body?.source_id, "source_id");
+    const sourceId = parseRequiredBodyString(req.body?.source_id, "source_id");
     await ragStore.deleteBySource(orgId, "local_doc", sourceId, ragConfig.defaultEmbeddingProfile);
 
     res.json({

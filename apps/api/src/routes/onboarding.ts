@@ -4,6 +4,8 @@ import { Router } from "express";
 import { requireUserJwt } from "../lib/auth";
 import { env } from "../lib/env";
 import { HttpError, toHttpError } from "../lib/errors";
+import { requireOrgMembership } from "../lib/org-membership";
+import { asRecord, parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { ensureOrgSubscription, getOrgEntitlement, requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { enqueueRagIngestion } from "../rag/ingest-brand-profile";
@@ -68,28 +70,9 @@ const loadPinnedReviewMarkdown = (): { markdown: string; sourcePath: string } | 
   return null;
 };
 
-const parseOptionalString = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
-
 const normalizeSynthesisMode = (value: unknown): "phase_1_7a" | "phase_1_7b" => {
   const normalized = parseOptionalString(value);
   return normalized === "phase_1_7a" ? "phase_1_7a" : PHASE_1_7_REPORT_VERSION;
-};
-
-const parseRequiredString = (value: unknown, field: string, maxLength = 200): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_payload", `${field} is required.`);
-  }
-  const trimmed = value.trim();
-  if (trimmed.length > maxLength) {
-    throw new HttpError(400, "invalid_payload", `${field} is too long.`);
-  }
-  return trimmed;
 };
 
 const parseOptionalUrl = (value: unknown): string | null => {
@@ -123,13 +106,6 @@ const parseJsonSize = (value: unknown, field: string, maxLength = MAX_JSON_LENGT
   if (serialized.length > maxLength) {
     throw new HttpError(413, "payload_too_large", `${field} is too large.`);
   }
-};
-
-const toRecord = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Record<string, unknown>;
 };
 
 const extractJsonObject = (value: string): string | null => {
@@ -214,29 +190,6 @@ const getExistingMembership = async (userId: string): Promise<MembershipRow | nu
   }
 
   return (data as MembershipRow | null) ?? null;
-};
-
-const requireOrgMembership = async (
-  userId: string,
-  orgId: string
-): Promise<{ role: "owner" | "admin" | "member" }> => {
-  const { data, error } = await supabaseAdmin
-    .from("organization_members")
-    .select("role")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "db_error", `Failed to query organization membership: ${error.message}`);
-  }
-  if (!data?.role) {
-    throw new HttpError(403, "forbidden", "You are not a member of this organization.");
-  }
-
-  return {
-    role: data.role as "owner" | "admin" | "member"
-  };
 };
 
 const createInitialOrg = async (params: {
@@ -565,8 +518,8 @@ const toIssueTable = (issues: ReviewIssue[]): string => {
 };
 
 const getCrawlSource = (crawlResult: Record<string, unknown>, sourceKey: string): Record<string, unknown> => {
-  const sources = toRecord(crawlResult.sources);
-  return toRecord(sources[sourceKey]);
+  const sources = asRecord(crawlResult.sources);
+  return asRecord(sources[sourceKey]);
 };
 
 const getCrawlSourceStatus = (crawlResult: Record<string, unknown>, sourceKey: string): string =>
@@ -630,7 +583,7 @@ const collectKnownDataGaps = (
   const naverStatus = getCrawlSourceStatus(crawlResult, "naver_blog");
   const instagramStatus = getCrawlSourceStatus(crawlResult, "instagram");
   const instagramSource = getCrawlSource(crawlResult, "instagram");
-  const instagramData = toRecord(instagramSource.data);
+  const instagramData = asRecord(instagramSource.data);
   const instagramPosts = parseStringArray(
     Array.isArray(instagramData.recent_posts)
       ? instagramData.recent_posts.map((entry) =>
@@ -669,7 +622,7 @@ const collectKnownDataGaps = (
 };
 
 const normalizeBrandProfile = (raw: unknown, fallback: SynthesizedProfile): SynthesizedProfile => {
-  const row = toRecord(raw);
+  const row = asRecord(raw);
   const tone = parseOptionalString(row.detected_tone) ?? fallback.detected_tone;
   const toneGuardrails = parseStringArray(row.tone_guardrails, 8);
   const keyThemes = parseStringArray(row.key_themes, 10);
@@ -924,7 +877,7 @@ const callOpenAiJson = async (params: {
         trace: {
           ...traceBase,
           response: {
-            ...toRecord(traceBase.response),
+            ...asRecord(traceBase.response),
             parse_error: "empty_response_content"
           }
         }
@@ -939,7 +892,7 @@ const callOpenAiJson = async (params: {
         trace: {
           ...traceBase,
           response: {
-            ...toRecord(traceBase.response),
+            ...asRecord(traceBase.response),
             parse_error: "non_object_json"
           }
         }
@@ -950,7 +903,7 @@ const callOpenAiJson = async (params: {
       trace: {
         ...traceBase,
         response: {
-          ...toRecord(traceBase.response),
+          ...asRecord(traceBase.response),
           parse_ok: true,
           parsed_preview: toPreviewJson(parsed, 2000)
         }
@@ -981,9 +934,9 @@ const buildFallbackReviewMarkdown = (params: {
   const websiteSource = getCrawlSource(params.crawlResult, "website");
   const naverSource = getCrawlSource(params.crawlResult, "naver_blog");
   const instagramSource = getCrawlSource(params.crawlResult, "instagram");
-  const websiteData = toRecord(websiteSource.data);
-  const naverData = toRecord(naverSource.data);
-  const instagramData = toRecord(instagramSource.data);
+  const websiteData = asRecord(websiteSource.data);
+  const naverData = asRecord(naverSource.data);
+  const instagramData = asRecord(instagramSource.data);
   const websiteHeadings = parseStringArray(websiteData.headings, 6);
   const websiteParagraphs = parseStringArray(websiteData.paragraphs, 4);
   const naverPosts = parseStringArray(
@@ -1712,7 +1665,7 @@ onboardingRouter.post("/onboarding/interview", async (req, res) => {
     const body = parseObject(req.body, "body");
     parseJsonSize(body, "body");
 
-    const orgId = parseRequiredString(body.org_id, "org_id", 120);
+    const orgId = parseRequiredString(body.org_id, "org_id", { maxLength: 120 });
     await requireOrgMembership(user.userId, orgId);
     if (!(await requireActiveSubscription(res, orgId))) {
       return;
@@ -1793,12 +1746,12 @@ function extractHistoricalPosts(
   crawlResult: Record<string, unknown>
 ): HistoricalPost[] {
   const posts: HistoricalPost[] = [];
-  const sources = toRecord(crawlResult.sources);
+  const sources = asRecord(crawlResult.sources);
 
   // ── Naver Blog Posts ──
-  const naverSource = toRecord(sources.naver_blog);
+  const naverSource = asRecord(sources.naver_blog);
   const naverStatus = parseOptionalString(naverSource.status);
-  const naverData = toRecord(naverSource.data);
+  const naverData = asRecord(naverSource.data);
 
   if (
     (naverStatus === "done" || naverStatus === "partial") &&
@@ -1845,9 +1798,9 @@ function extractHistoricalPosts(
   }
 
   // ── Instagram Posts ──
-  const igSource = toRecord(sources.instagram);
+  const igSource = asRecord(sources.instagram);
   const igStatus = parseOptionalString(igSource.status);
-  const igData = toRecord(igSource.data);
+  const igData = asRecord(igSource.data);
 
   if (
     (igStatus === "done" || igStatus === "partial") &&
@@ -1973,7 +1926,7 @@ onboardingRouter.post("/onboarding/synthesize", async (req, res) => {
     const body = parseObject(req.body, "body");
     parseJsonSize(body, "body");
 
-    const orgId = parseRequiredString(body.org_id, "org_id", 120);
+    const orgId = parseRequiredString(body.org_id, "org_id", { maxLength: 120 });
     await requireOrgMembership(user.userId, orgId);
     if (!(await requireActiveSubscription(res, orgId))) {
       return;

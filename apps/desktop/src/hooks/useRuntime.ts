@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { OrchestratorSession } from "@repo/types";
+import type { RuntimeSummary } from "../types/runtime";
 
 type RuntimeSummaryInput = {
   runtimePlatform: string;
@@ -19,7 +20,7 @@ export const useRuntime = ({
   scanCount,
   activeSession,
   formatSessionStatus
-}: RuntimeSummaryInput) =>
+}: RuntimeSummaryInput): RuntimeSummary =>
   useMemo(
     () => ({
       platform: runtimePlatform,
@@ -33,4 +34,3 @@ export const useRuntime = ({
     }),
     [activeSession, fileCount, formatSessionStatus, isRunning, runtimePlatform, scanCount, watchPath]
   );
-

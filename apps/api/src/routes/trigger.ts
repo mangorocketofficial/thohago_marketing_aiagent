@@ -2,19 +2,13 @@ import { Router } from "express";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { requireApiSecret } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { enqueueTrigger, getActiveSessionForOrg } from "../orchestrator/service";
 import type { PipelineTriggerRow, TriggerFileType } from "../orchestrator/types";
 
 const FILE_TYPES = new Set<TriggerFileType>(["image", "video", "document"]);
-
-const parseRequiredString = (value: unknown, field: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_payload", `${field} is required.`);
-  }
-  return value.trim();
-};
 
 const parseFileType = (value: unknown): TriggerFileType => {
   const fileType = parseRequiredString(value, "file_type").toLowerCase() as TriggerFileType;

@@ -531,18 +531,6 @@ button.primary {
   color: #9f1239;
 }
 
-.queue-editor {
-  border: 1px solid #c8d2e1;
-  border-radius: 9px;
-  padding: 10px;
-  font-size: 14px;
-  font-family: inherit;
-  color: #111827;
-  min-height: 92px;
-  resize: vertical;
-  line-height: 1.42;
-}
-
 .empty {
   color: #6b7280;
   font-size: 14px;

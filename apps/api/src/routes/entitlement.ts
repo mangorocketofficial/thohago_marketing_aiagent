@@ -2,6 +2,8 @@ import { Router } from "express";
 import { requireApiSecret, requireUserJwt } from "../lib/auth";
 import { env } from "../lib/env";
 import { HttpError, toHttpError } from "../lib/errors";
+import { requireOrgMembership } from "../lib/org-membership";
+import { parseRequiredString } from "../lib/request-parsers";
 import {
   ensureOrgSubscription,
   getOrgEntitlement,
@@ -10,13 +12,6 @@ import {
   type SubscriptionStatus
 } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
-
-const parseRequiredString = (value: unknown, field: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_payload", `${field} is required.`);
-  }
-  return value.trim();
-};
 
 const parseOptionalIsoPatch = (
   row: Record<string, unknown>,
@@ -38,22 +33,6 @@ const parseOptionalIsoPatch = (
     throw new HttpError(400, "invalid_payload", `${field} must be a valid ISO datetime string.`);
   }
   return { provided: true, value: parsed.toISOString() };
-};
-
-const requireOrgMembership = async (userId: string, orgId: string): Promise<void> => {
-  const { data, error } = await supabaseAdmin
-    .from("organization_members")
-    .select("role")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "db_error", `Failed to query organization membership: ${error.message}`);
-  }
-  if (!data?.role) {
-    throw new HttpError(403, "forbidden", "You are not a member of this organization.");
-  }
 };
 
 const computeDefaultTrialEndsAt = (status: SubscriptionStatus): string | null => {

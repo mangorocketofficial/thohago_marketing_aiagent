@@ -1,32 +1,10 @@
 import { Router } from "express";
 import { hasValidApiSecret, requireUserJwt } from "../lib/auth";
-import { HttpError, toHttpError } from "../lib/errors";
+import { requireOrgMembership } from "../lib/org-membership";
+import { toHttpError } from "../lib/errors";
+import { parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
-import { supabaseAdmin } from "../lib/supabase-admin";
 import { getMemoryMdForOrg } from "../rag/memory-service";
-
-const parseRequiredString = (value: unknown, field: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_payload", `${field} is required.`);
-  }
-  return value.trim();
-};
-
-const requireOrgMembership = async (userId: string, orgId: string): Promise<void> => {
-  const { data, error } = await supabaseAdmin
-    .from("organization_members")
-    .select("role")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "db_error", `Failed to query organization membership: ${error.message}`);
-  }
-  if (!data?.role) {
-    throw new HttpError(403, "forbidden", "You are not a member of this organization.");
-  }
-};
 
 export const memoryRouter: Router = Router();
 

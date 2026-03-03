@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireApiSecret } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import { getActiveSessionForOrg, getSessionById, resumeSession } from "../orchestrator/service";
 import type { ResumeEventRequest, ResumeEventType } from "../orchestrator/types";
@@ -12,13 +13,6 @@ const SUPPORTED_EVENTS = new Set<ResumeEventType>([
   "campaign_rejected",
   "content_rejected"
 ]);
-
-const parseRequiredString = (value: unknown, field: string): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new HttpError(400, "invalid_payload", `${field} is required.`);
-  }
-  return value.trim();
-};
 
 const parseOptionalPositiveInt = (value: unknown, field: string): number | undefined => {
   if (value === undefined || value === null || value === "") {

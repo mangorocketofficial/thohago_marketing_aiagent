@@ -2,17 +2,8 @@
 import { useTranslation } from "react-i18next";
 import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
-
-type RuntimeSummary = {
-  platform: string;
-  watchPath: string;
-  isRunning: boolean;
-  fileCount: number;
-  scanCount: number;
-  activeSessionId: string;
-  sessionStep: string;
-  sessionStatus: string;
-};
+import type { RuntimeSummary } from "../types/runtime";
+import { WORKFLOW_STATUS_LABEL } from "../types/workflow";
 
 type IndexedFile = {
   relativePath: string;
@@ -31,13 +22,6 @@ type DashboardPageProps = {
   onOpenWatchFolder: () => void;
   onRefreshActiveSession: () => void;
   onSignOut: () => void;
-};
-
-const WORKFLOW_STATUS_LABEL: Record<WorkflowStatus, string> = {
-  proposed: "Proposed",
-  revision_requested: "Revision Requested",
-  approved: "Approved",
-  rejected: "Rejected"
 };
 
 const WorkflowHintBadge = ({
