@@ -82,11 +82,7 @@ const getSupabaseClientForConfig = (config: ChatConfig | null): SupabaseClient |
     return null;
   }
 
-  const cacheKey = [
-    config.supabaseUrl,
-    config.supabaseAnonKey.slice(0, 16),
-    config.supabaseAccessToken.slice(0, 16)
-  ].join("|");
+  const cacheKey = [config.supabaseUrl, config.supabaseAnonKey, config.supabaseAccessToken].join("|");
 
   if (cachedSupabaseClient && cachedSupabaseClientKey === cacheKey) {
     return cachedSupabaseClient;
@@ -191,6 +187,24 @@ const App = () => {
     setMode("onboarding");
   }, []);
 
+  const refreshChatConfig = useCallback(async (): Promise<ChatConfig | null> => {
+    if (!runtime) {
+      return null;
+    }
+
+    try {
+      const config = await runtime.chat.getConfig();
+      setChatConfig(config);
+      if (config.message) {
+        setNotice(config.message);
+      }
+      return config;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to refresh chat config.");
+      return null;
+    }
+  }, [runtime]);
+
   const refreshActiveSession = useCallback(async (): Promise<OrchestratorSession | null> => {
     if (!runtime) {
       return null;
@@ -261,11 +275,7 @@ const App = () => {
       const nextFiles = await runtime.watcher.getFiles();
       setFiles(nextFiles);
 
-      const config = await runtime.chat.getConfig();
-      setChatConfig(config);
-      if (config.message) {
-        setNotice(config.message);
-      }
+      await refreshChatConfig();
 
       await refreshActiveSession();
     };
@@ -316,7 +326,7 @@ const App = () => {
       offStatus();
       offShowOnboarding();
     };
-  }, [enterOnboarding, i18n, refreshActiveSession, runtime, scheduleRefreshActiveSession]);
+  }, [enterOnboarding, i18n, refreshActiveSession, refreshChatConfig, runtime, scheduleRefreshActiveSession]);
 
   useEffect(() => {
     if (!authSupabase || !runtime) {
@@ -337,6 +347,8 @@ const App = () => {
         }
       }
 
+      await refreshChatConfig();
+
       const { data } = await authSupabase.auth.getSession();
       if (!mounted) {
         return;
@@ -350,11 +362,14 @@ const App = () => {
       setAuthSession(session ?? null);
       if (session?.access_token && session.refresh_token) {
         const expiresAt = session.expires_at ?? parseJwtExpiration(session.access_token) ?? null;
-        void runtime.auth.saveSession({
-          accessToken: session.access_token,
-          refreshToken: session.refresh_token,
-          expiresAt
-        });
+        void (async () => {
+          await runtime.auth.saveSession({
+            accessToken: session.access_token,
+            refreshToken: session.refresh_token,
+            expiresAt
+          });
+          await refreshChatConfig();
+        })();
         return;
       }
 
@@ -363,7 +378,10 @@ const App = () => {
         return;
       }
       if (event === "SIGNED_OUT") {
-        void runtime.auth.clearSession();
+        void (async () => {
+          await runtime.auth.clearSession();
+          await refreshChatConfig();
+        })();
       }
     });
 
@@ -371,7 +389,7 @@ const App = () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [authSupabase, runtime]);
+  }, [authSupabase, refreshChatConfig, runtime]);
 
   const updateLanguage = useCallback(
     async (language: "ko" | "en") => {

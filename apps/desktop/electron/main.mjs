@@ -990,7 +990,6 @@ const getChatRuntimeConfig = () => ({
   })(),
   orgId: runtimeState.orgId,
   apiBaseUrl: orchestratorApiBase,
-  apiToken: configuredApiToken,
   supabaseUrl,
   supabaseAnonKey,
   enabled: !!(orchestratorApiBase && supabaseUrl && supabaseAnonKey),

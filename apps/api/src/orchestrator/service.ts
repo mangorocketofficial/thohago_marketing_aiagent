@@ -48,14 +48,15 @@ const withLock = async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
     releaseCurrent = resolve;
   });
 
-  lockQueueByKey.set(key, previous.then(() => current));
+  const queued = previous.then(() => current);
+  lockQueueByKey.set(key, queued);
   await previous;
 
   try {
     return await fn();
   } finally {
     releaseCurrent();
-    if (lockQueueByKey.get(key) === current) {
+    if (lockQueueByKey.get(key) === queued) {
       lockQueueByKey.delete(key);
     }
   }

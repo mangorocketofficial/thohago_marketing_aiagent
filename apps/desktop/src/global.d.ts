@@ -76,7 +76,6 @@ type ChatActionError = {
 type ChatConfig = {
   orgId: string;
   apiBaseUrl: string;
-  apiToken: string;
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseAccessToken: string;
