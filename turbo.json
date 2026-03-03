@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["API_PORT", "ORCHESTRATOR_API_BASE"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

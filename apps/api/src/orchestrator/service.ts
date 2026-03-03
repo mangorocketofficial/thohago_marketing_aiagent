@@ -597,11 +597,153 @@ const buildWorkflowActionIdempotencyKey = (
   sessionId: string,
   eventType: ResumeEventRequest["event_type"],
   itemId: string,
-  eventIdempotencyKey: string | null
+  eventIdempotencyKey: string | null,
+  actionSuffix?: string
 ): string =>
   eventIdempotencyKey
-    ? `wf:action:${sessionId}:${eventType}:${itemId}:${eventIdempotencyKey}`
-    : `wf:action:${sessionId}:${eventType}:${itemId}:${randomUUID()}`;
+    ? `wf:action:${sessionId}:${eventType}:${itemId}:${actionSuffix ?? "main"}:${eventIdempotencyKey}`
+    : `wf:action:${sessionId}:${eventType}:${itemId}:${actionSuffix ?? "main"}:${randomUUID()}`;
+
+const resolveExpectedVersion = (payload?: Record<string, unknown>): number | undefined => {
+  const raw = payload?.expected_version;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 1) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return parsed;
+    }
+  }
+  return undefined;
+};
+
+const buildCampaignSummary = (activityFolder: string, plan: CampaignPlan): string =>
+  [
+    `캠페인 초안이 준비되었습니다: ${activityFolder}`,
+    `- 채널: ${plan.channels.join(", ")}`,
+    `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
+    "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
+  ].join("\n");
+
+const buildContentSummary = (channel: string, forbiddenCheck: ForbiddenCheckMeta): string =>
+  forbiddenCheck.passed
+    ? `첫 번째 ${channel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
+    : `첫 번째 ${channel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`;
+
+const emitCampaignActionCardProjection = async (params: {
+  orgId: string;
+  sessionId: string;
+  workflowItem: WorkflowItemRow;
+  activityFolder: string;
+  plan: CampaignPlan;
+}): Promise<string> => {
+  const campaignProjectionKey = buildProjectionKey({
+    channel: DEFAULT_CHAT_CHANNEL,
+    workflowItemId: params.workflowItem.id,
+    eventType: "campaign_proposed",
+    expectedVersion: params.workflowItem.version
+  });
+
+  return insertChatMessage({
+    orgId: params.orgId,
+    role: "assistant",
+    content: buildCampaignSummary(params.activityFolder, params.plan),
+    channel: DEFAULT_CHAT_CHANNEL,
+    messageType: "action_card",
+    metadata: buildCampaignPlanProjectionMetadata({
+      workflowItem: params.workflowItem,
+      sessionId: params.sessionId,
+      activityFolder: params.activityFolder,
+      plan: params.plan
+    }),
+    workflowItemId: params.workflowItem.id,
+    projectionKey: campaignProjectionKey
+  });
+};
+
+const emitContentActionCardProjection = async (params: {
+  orgId: string;
+  sessionId: string;
+  workflowItem: WorkflowItemRow;
+  activityFolder: string;
+  channel: string;
+  draft: string;
+  forbiddenCheck: ForbiddenCheckMeta;
+}): Promise<string> => {
+  const contentProjectionKey = buildProjectionKey({
+    channel: DEFAULT_CHAT_CHANNEL,
+    workflowItemId: params.workflowItem.id,
+    eventType: "content_proposed",
+    expectedVersion: params.workflowItem.version
+  });
+
+  return insertChatMessage({
+    orgId: params.orgId,
+    role: "assistant",
+    content: buildContentSummary(params.channel, params.forbiddenCheck),
+    channel: DEFAULT_CHAT_CHANNEL,
+    messageType: "action_card",
+    metadata: buildContentDraftProjectionMetadata({
+      workflowItem: params.workflowItem,
+      sessionId: params.sessionId,
+      activityFolder: params.activityFolder,
+      channel: params.channel,
+      draft: params.draft,
+      forbiddenCheck: params.forbiddenCheck
+    }),
+    workflowItemId: params.workflowItem.id,
+    projectionKey: contentProjectionKey
+  });
+};
+
+const generateContentDraftWithForbiddenCheck = async (params: {
+  orgId: string;
+  activityFolder: string;
+  channel: string;
+  topic: string;
+  revisionReason?: string;
+  previousDraft?: string;
+}): Promise<{
+  draft: string;
+  ragMeta: RagContextMeta;
+  forbiddenCheck: ForbiddenCheckMeta;
+}> => {
+  let { draft, ragMeta } = await generateContentDraft(params.orgId, params.activityFolder, params.channel, params.topic, {
+    revisionReason: params.revisionReason ?? null,
+    previousDraft: params.previousDraft ?? null
+  });
+  let forbiddenResult = await checkForbiddenWords(params.orgId, draft);
+  let regenerated = false;
+
+  const maxRetries = env.ragForbiddenCheckEnabled ? env.ragForbiddenMaxRetries : 0;
+  for (let attempt = 0; !forbiddenResult.passed && attempt < maxRetries; attempt += 1) {
+    regenerated = true;
+    console.warn(
+      `[FORBIDDEN_CHECK] Violations for org ${params.orgId}: ${forbiddenResult.violations.join(", ")} (retry ${
+        attempt + 1
+      }/${maxRetries})`
+    );
+
+    const retry = await generateContentDraft(params.orgId, params.activityFolder, params.channel, params.topic, {
+      revisionReason: params.revisionReason ?? null,
+      previousDraft: params.previousDraft ?? null
+    });
+    draft = retry.draft;
+    ragMeta = retry.ragMeta;
+    forbiddenResult = await checkForbiddenWords(params.orgId, draft);
+  }
+
+  return {
+    draft,
+    ragMeta,
+    forbiddenCheck: {
+      passed: forbiddenResult.passed,
+      violations: forbiddenResult.violations,
+      regenerated
+    }
+  };
+};
 
 const mirrorCampaignStatusFromWorkflow = async (
   orgId: string,
@@ -750,12 +892,6 @@ const applyUserMessageStep = async (
     throw new HttpError(500, "db_error", `Failed to create campaign: ${campaignError?.message ?? "unknown"}`);
   }
 
-  const summary = [
-    `캠페인 초안이 준비되었습니다: ${state.activity_folder}`,
-    `- 채널: ${plan.channels.join(", ")}`,
-    `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
-    "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
-  ].join("\n");
   const campaignId = campaign.id as string;
   const campaignWorkflowItem = await ensureCampaignWorkflowItem({
     orgId: session.org_id,
@@ -768,26 +904,12 @@ const applyUserMessageStep = async (
     },
     idempotencyKey: buildWorkflowCreateIdempotencyKey(session.id, "campaign_plan", campaignId, eventIdempotencyKey)
   });
-  const campaignProjectionKey = buildProjectionKey({
-    channel: DEFAULT_CHAT_CHANNEL,
-    workflowItemId: campaignWorkflowItem.id,
-    eventType: "campaign_proposed",
-    expectedVersion: campaignWorkflowItem.version
-  });
-  const summaryMessageId = await insertChatMessage({
+  const summaryMessageId = await emitCampaignActionCardProjection({
     orgId: session.org_id,
-    role: "assistant",
-    content: summary,
-    channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildCampaignPlanProjectionMetadata({
-      workflowItem: campaignWorkflowItem,
-      sessionId: session.id,
-      activityFolder: state.activity_folder,
-      plan
-    }),
-    workflowItemId: campaignWorkflowItem.id,
-    projectionKey: campaignProjectionKey
+    sessionId: session.id,
+    workflowItem: campaignWorkflowItem,
+    activityFolder: state.activity_folder,
+    plan
   });
   await linkWorkflowItemOriginChatMessage({
     orgId: session.org_id,
@@ -835,6 +957,7 @@ const applyCampaignApprovedStep = async (
     campaignId,
     eventIdempotencyKey
   });
+  const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
   const campaignApproval = await applyWorkflowAction({
     orgId: session.org_id,
     itemId: campaignWorkflowItem.id,
@@ -844,12 +967,13 @@ const applyCampaignApprovedStep = async (
       campaign_id: campaignId,
       topic: asString(payload?.topic, "").trim() || null
     },
-    expectedVersion: campaignWorkflowItem.version,
+    expectedVersion,
     idempotencyKey: buildWorkflowActionIdempotencyKey(
       session.id,
       "campaign_approved",
       campaignWorkflowItem.id,
-      eventIdempotencyKey
+      eventIdempotencyKey,
+      "approved"
     )
   });
   await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignApproval.item.status);
@@ -864,30 +988,13 @@ const applyCampaignApprovedStep = async (
   const payloadTopic = asString(payload?.topic, "").trim();
   const topic = payloadTopic || asString(firstSchedule?.type, "").trim() || state.activity_folder;
 
-  let { draft, ragMeta } = await generateContentDraft(session.org_id, state.activity_folder, firstChannel, topic);
-  let forbiddenResult = await checkForbiddenWords(session.org_id, draft);
-  let regenerated = false;
-
-  const maxRetries = env.ragForbiddenCheckEnabled ? env.ragForbiddenMaxRetries : 0;
-  for (let attempt = 0; !forbiddenResult.passed && attempt < maxRetries; attempt += 1) {
-    regenerated = true;
-    console.warn(
-      `[FORBIDDEN_CHECK] Violations for org ${session.org_id}: ${forbiddenResult.violations.join(", ")} (retry ${
-        attempt + 1
-      }/${maxRetries})`
-    );
-
-    const retry = await generateContentDraft(session.org_id, state.activity_folder, firstChannel, topic);
-    draft = retry.draft;
-    ragMeta = retry.ragMeta;
-    forbiddenResult = await checkForbiddenWords(session.org_id, draft);
-  }
-
-  const forbiddenCheck: ForbiddenCheckMeta = {
-    passed: forbiddenResult.passed,
-    violations: forbiddenResult.violations,
-    regenerated
-  };
+  const generated = await generateContentDraftWithForbiddenCheck({
+    orgId: session.org_id,
+    activityFolder: state.activity_folder,
+    channel: firstChannel,
+    topic
+  });
+  const { draft, ragMeta, forbiddenCheck } = generated;
 
   const { data: content, error: contentError } = await supabaseAdmin
     .from("contents")
@@ -927,31 +1034,14 @@ const applyCampaignApprovedStep = async (
     contentId,
     eventIdempotencyKey
   });
-  const contentSummary = forbiddenCheck.passed
-    ? `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
-    : `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`;
-  const contentProjectionKey = buildProjectionKey({
-    channel: DEFAULT_CHAT_CHANNEL,
-    workflowItemId: contentWorkflowItem.id,
-    eventType: "content_proposed",
-    expectedVersion: contentWorkflowItem.version
-  });
-  const contentMessageId = await insertChatMessage({
+  const contentMessageId = await emitContentActionCardProjection({
     orgId: session.org_id,
-    role: "assistant",
-    content: contentSummary,
-    channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildContentDraftProjectionMetadata({
-      workflowItem: contentWorkflowItem,
-      sessionId: session.id,
-      activityFolder: state.activity_folder,
-      channel: firstChannel,
-      draft,
-      forbiddenCheck
-    }),
-    workflowItemId: contentWorkflowItem.id,
-    projectionKey: contentProjectionKey
+    sessionId: session.id,
+    workflowItem: contentWorkflowItem,
+    activityFolder: state.activity_folder,
+    channel: firstChannel,
+    draft,
+    forbiddenCheck
   });
   await linkWorkflowItemOriginChatMessage({
     orgId: session.org_id,
@@ -1002,6 +1092,7 @@ const applyContentApprovedStep = async (
     contentId,
     eventIdempotencyKey
   });
+  const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
   const contentApproval = await applyWorkflowAction({
     orgId: session.org_id,
     itemId: contentWorkflowItem.id,
@@ -1011,12 +1102,13 @@ const applyContentApprovedStep = async (
       content_id: contentId,
       ...(editedBody ? { edited_body: editedBody } : {})
     },
-    expectedVersion: contentWorkflowItem.version,
+    expectedVersion,
     idempotencyKey: buildWorkflowActionIdempotencyKey(
       session.id,
       "content_approved",
       contentWorkflowItem.id,
-      eventIdempotencyKey
+      eventIdempotencyKey,
+      "approved"
     )
   });
   await updateLatestActionCardProjectionStatus({
@@ -1091,7 +1183,276 @@ const applyContentApprovedStep = async (
   };
 };
 
-const applyRejectStep = async (
+const applyCampaignRevisionStep = async (
+  session: OrchestratorSessionRow,
+  state: SessionState,
+  payload?: Record<string, unknown>,
+  eventIdempotencyKey: string | null = null
+): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
+  if (session.current_step !== "await_campaign_approval") {
+    throw new HttpError(
+      409,
+      "invalid_step",
+      `Session is at "${session.current_step}" and cannot process campaign revision event.`
+    );
+  }
+
+  const campaignId = resolveCampaignId(state, payload);
+  const reason = asString(payload?.reason, "").trim();
+  if (!reason) {
+    throw new HttpError(400, "invalid_payload", "payload.reason is required when payload.mode is revision.");
+  }
+
+  const campaignWorkflowItem = await ensureCampaignWorkflowItemForState({
+    session,
+    state,
+    campaignId,
+    eventIdempotencyKey
+  });
+  const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
+  const revisionRequested = await applyWorkflowAction({
+    orgId: session.org_id,
+    itemId: campaignWorkflowItem.id,
+    action: "request_revision",
+    actorType: "user",
+    payload: { mode: "revision", reason },
+    expectedVersion,
+    idempotencyKey: buildWorkflowActionIdempotencyKey(
+      session.id,
+      "campaign_rejected",
+      campaignWorkflowItem.id,
+      eventIdempotencyKey,
+      "request_revision"
+    )
+  });
+  await updateLatestActionCardProjectionStatus({
+    orgId: session.org_id,
+    workflowItem: revisionRequested.item,
+    sessionId: session.id
+  });
+
+  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, state.user_message ?? "", {
+    previousPlan: state.campaign_plan,
+    revisionReason: reason
+  });
+
+  const { error: updateCampaignError } = await supabaseAdmin
+    .from("campaigns")
+    .update({
+      status: "draft",
+      channels: plan.channels,
+      plan
+    })
+    .eq("id", campaignId)
+    .eq("org_id", session.org_id);
+  if (updateCampaignError) {
+    throw new HttpError(500, "db_error", `Failed to apply revised campaign plan: ${updateCampaignError.message}`);
+  }
+
+  const resubmitted = await applyWorkflowAction({
+    orgId: session.org_id,
+    itemId: campaignWorkflowItem.id,
+    action: "resubmitted",
+    actorType: "assistant",
+    payload: { mode: "revision", reason, plan },
+    expectedVersion: revisionRequested.item.version,
+    idempotencyKey: buildWorkflowActionIdempotencyKey(
+      session.id,
+      "campaign_rejected",
+      campaignWorkflowItem.id,
+      eventIdempotencyKey,
+      "resubmitted"
+    )
+  });
+  await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, resubmitted.item.status);
+
+  const messageId = await emitCampaignActionCardProjection({
+    orgId: session.org_id,
+    sessionId: session.id,
+    workflowItem: resubmitted.item,
+    activityFolder: state.activity_folder,
+    plan
+  });
+  await linkWorkflowItemOriginChatMessage({
+    orgId: session.org_id,
+    itemId: resubmitted.item.id,
+    chatMessageId: messageId
+  });
+
+  return {
+    state: {
+      ...state,
+      campaign_id: campaignId,
+      campaign_workflow_item_id: resubmitted.item.id,
+      campaign_plan: plan,
+      rag_context: ragMeta,
+      last_error: null
+    },
+    step: "await_campaign_approval",
+    status: "paused"
+  };
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const applyContentRevisionStep = async (
+  session: OrchestratorSessionRow,
+  state: SessionState,
+  payload?: Record<string, unknown>,
+  eventIdempotencyKey: string | null = null
+): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
+  if (session.current_step !== "await_content_approval") {
+    throw new HttpError(
+      409,
+      "invalid_step",
+      `Session is at "${session.current_step}" and cannot process content revision event.`
+    );
+  }
+
+  const contentId = resolveContentId(state, payload);
+  const reason = asString(payload?.reason, "").trim();
+  if (!reason) {
+    throw new HttpError(400, "invalid_payload", "payload.reason is required when payload.mode is revision.");
+  }
+
+  const contentWorkflowItem = await ensureContentWorkflowItemForState({
+    session,
+    state,
+    contentId,
+    eventIdempotencyKey
+  });
+  const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
+  const revisionRequested = await applyWorkflowAction({
+    orgId: session.org_id,
+    itemId: contentWorkflowItem.id,
+    action: "request_revision",
+    actorType: "user",
+    payload: { mode: "revision", reason },
+    expectedVersion,
+    idempotencyKey: buildWorkflowActionIdempotencyKey(
+      session.id,
+      "content_rejected",
+      contentWorkflowItem.id,
+      eventIdempotencyKey,
+      "request_revision"
+    )
+  });
+  await updateLatestActionCardProjectionStatus({
+    orgId: session.org_id,
+    workflowItem: revisionRequested.item,
+    sessionId: session.id
+  });
+
+  const { data: contentRow, error: contentReadError } = await supabaseAdmin
+    .from("contents")
+    .select("channel, body, metadata")
+    .eq("org_id", session.org_id)
+    .eq("id", contentId)
+    .maybeSingle();
+  if (contentReadError) {
+    throw new HttpError(500, "db_error", `Failed to read content for revision: ${contentReadError.message}`);
+  }
+  if (!contentRow) {
+    throw new HttpError(404, "not_found", "Content not found for revision.");
+  }
+
+  const channel = normalizeChannel((contentRow as Record<string, unknown>).channel);
+  const previousDraft = asString((contentRow as Record<string, unknown>).body, state.content_draft ?? "");
+  const topicHint = asString(state.campaign_plan?.suggested_schedule?.[0]?.type, "").trim();
+  const generated = await generateContentDraftWithForbiddenCheck({
+    orgId: session.org_id,
+    activityFolder: state.activity_folder,
+    channel,
+    topic: topicHint || state.activity_folder,
+    revisionReason: reason,
+    previousDraft
+  });
+
+  const nextMetadata = {
+    ...asRecord((contentRow as Record<string, unknown>).metadata),
+    phase: "3-3",
+    source: "orchestrator_revision",
+    rag_context: generated.ragMeta,
+    forbidden_check: generated.forbiddenCheck,
+    revision_reason: reason,
+    revised_at: new Date().toISOString()
+  };
+
+  const { error: contentUpdateError } = await supabaseAdmin
+    .from("contents")
+    .update({
+      channel,
+      status: "pending_approval",
+      body: generated.draft,
+      metadata: nextMetadata,
+      published_at: null
+    })
+    .eq("org_id", session.org_id)
+    .eq("id", contentId);
+  if (contentUpdateError) {
+    throw new HttpError(500, "db_error", `Failed to apply revised content draft: ${contentUpdateError.message}`);
+  }
+
+  const resubmitted = await applyWorkflowAction({
+    orgId: session.org_id,
+    itemId: contentWorkflowItem.id,
+    action: "resubmitted",
+    actorType: "assistant",
+    payload: {
+      mode: "revision",
+      reason,
+      draft: generated.draft,
+      channel,
+      rag_context: generated.ragMeta,
+      forbidden_check: generated.forbiddenCheck
+    },
+    expectedVersion: revisionRequested.item.version,
+    idempotencyKey: buildWorkflowActionIdempotencyKey(
+      session.id,
+      "content_rejected",
+      contentWorkflowItem.id,
+      eventIdempotencyKey,
+      "resubmitted"
+    )
+  });
+  await mirrorContentStatusFromWorkflow({
+    orgId: session.org_id,
+    contentId,
+    workflowStatus: resubmitted.item.status
+  });
+
+  const messageId = await emitContentActionCardProjection({
+    orgId: session.org_id,
+    sessionId: session.id,
+    workflowItem: resubmitted.item,
+    activityFolder: state.activity_folder,
+    channel,
+    draft: generated.draft,
+    forbiddenCheck: generated.forbiddenCheck
+  });
+  await linkWorkflowItemOriginChatMessage({
+    orgId: session.org_id,
+    itemId: resubmitted.item.id,
+    chatMessageId: messageId
+  });
+
+  return {
+    state: {
+      ...state,
+      content_id: contentId,
+      content_workflow_item_id: resubmitted.item.id,
+      content_draft: generated.draft,
+      rag_context: generated.ragMeta,
+      forbidden_check: generated.forbiddenCheck,
+      last_error: null
+    },
+    step: "await_content_approval",
+    status: "paused"
+  };
+};
+
+const applyTerminalRejectStep = async (
   session: OrchestratorSessionRow,
   state: SessionState,
   type: "campaign_rejected" | "content_rejected",
@@ -1110,18 +1471,20 @@ const applyRejectStep = async (
       campaignId,
       eventIdempotencyKey
     });
+    const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
     const campaignRejection = await applyWorkflowAction({
       orgId: session.org_id,
       itemId: campaignWorkflowItem.id,
       action: "rejected",
       actorType: "user",
       payload: reason ? { reason } : {},
-      expectedVersion: campaignWorkflowItem.version,
+      expectedVersion,
       idempotencyKey: buildWorkflowActionIdempotencyKey(
         session.id,
         "campaign_rejected",
         campaignWorkflowItem.id,
-        eventIdempotencyKey
+        eventIdempotencyKey,
+        "rejected"
       )
     });
     await updateLatestActionCardProjectionStatus({
@@ -1139,18 +1502,20 @@ const applyRejectStep = async (
       contentId,
       eventIdempotencyKey
     });
+    const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
     const contentRejection = await applyWorkflowAction({
       orgId: session.org_id,
       itemId: contentWorkflowItem.id,
       action: "rejected",
       actorType: "user",
       payload: reason ? { reason } : {},
-      expectedVersion: contentWorkflowItem.version,
+      expectedVersion,
       idempotencyKey: buildWorkflowActionIdempotencyKey(
         session.id,
         "content_rejected",
         contentWorkflowItem.id,
-        eventIdempotencyKey
+        eventIdempotencyKey,
+        "rejected"
       )
     });
     await updateLatestActionCardProjectionStatus({
@@ -1186,6 +1551,28 @@ const applyRejectStep = async (
     status: "failed",
     completed: true
   };
+};
+
+const applyRejectStep = async (
+  session: OrchestratorSessionRow,
+  state: SessionState,
+  type: "campaign_rejected" | "content_rejected",
+  payload?: Record<string, unknown>,
+  eventIdempotencyKey: string | null = null
+): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
+  const mode = asString(payload?.mode, "").trim().toLowerCase();
+
+  if (mode === "revision") {
+    if (type === "campaign_rejected") {
+      const next = await applyCampaignRevisionStep(session, state, payload, eventIdempotencyKey);
+      return { ...next, completed: false };
+    }
+
+    const next = await applyContentRevisionStep(session, state, payload, eventIdempotencyKey);
+    return { ...next, completed: false };
+  }
+
+  return applyTerminalRejectStep(session, state, type, payload, eventIdempotencyKey);
 };
 
 const processResumeEvent = async (

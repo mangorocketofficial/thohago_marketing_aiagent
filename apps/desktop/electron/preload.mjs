@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     sendMessage: (payload) => ipcRenderer.invoke("chat:send-message", payload),
     approveCampaign: (payload) => ipcRenderer.invoke("chat:approve-campaign", payload),
     approveContent: (payload) => ipcRenderer.invoke("chat:approve-content", payload),
-    reject: (payload) => ipcRenderer.invoke("chat:reject", payload)
+    reject: (payload) => ipcRenderer.invoke("chat:reject", payload),
+    dispatchAction: (payload) => ipcRenderer.invoke("chat:dispatch-action", payload)
   }
 });

@@ -138,6 +138,19 @@ export type ChatActionCardAction = {
   disabled?: boolean;
 };
 
+export type ChatActionCardDispatchInput = {
+  sessionId: string;
+  workflowItemId: string;
+  expectedVersion: number;
+  actionId: ChatActionCardAction["id"];
+  eventType: ChatActionCardEventType;
+  campaignId?: string;
+  contentId?: string;
+  mode?: "revision";
+  reason?: string;
+  editedBody?: string;
+};
+
 export type CampaignPlanActionCardData = {
   title: string;
   channels: string[];
@@ -152,6 +165,7 @@ export type ContentDraftActionCardData = {
   title: string;
   channel: string;
   body_preview: string;
+  body_full?: string;
   media_urls: string[];
 };
 
@@ -181,6 +195,41 @@ export type ChatMessage = {
   projection_key: string | null;
   created_at: string;
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+export const isWorkflowActionCardMetadata = (value: unknown): value is WorkflowActionCardMetadata => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value.projection_type !== "workflow_action_card") {
+    return false;
+  }
+  if (value.card_type !== "campaign_plan" && value.card_type !== "content_draft" && value.card_type !== "content_generation_request") {
+    return false;
+  }
+  if (typeof value.workflow_item_id !== "string" || !value.workflow_item_id.trim()) {
+    return false;
+  }
+  if (typeof value.session_id !== "string" || !value.session_id.trim()) {
+    return false;
+  }
+  if (typeof value.expected_version !== "number" || !Number.isFinite(value.expected_version)) {
+    return false;
+  }
+  if (!Array.isArray(value.actions)) {
+    return false;
+  }
+
+  return true;
+};
+
+export const isActionCardMessage = (
+  message: ChatMessage
+): message is ChatMessage & { message_type: "action_card"; metadata: WorkflowActionCardMetadata } =>
+  message.message_type === "action_card" && isWorkflowActionCardMetadata(message.metadata);
 
 export type SessionStatus = "running" | "paused" | "done" | "failed";
 export type OrchestratorStep =

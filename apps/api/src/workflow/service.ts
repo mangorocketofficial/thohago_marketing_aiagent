@@ -77,6 +77,22 @@ const resolveNextStatus = (from: WorkflowStatus, action: WorkflowAction): Workfl
   }
 };
 
+const versionConflict = (params: {
+  itemId: string;
+  expectedVersion?: number | null;
+  currentVersion: number;
+  workflowStatus: WorkflowStatus;
+}): HttpError =>
+  new HttpError(409, "version_conflict", "Workflow item version mismatch.", {
+    workflow_item_id: params.itemId,
+    expected_version:
+      typeof params.expectedVersion === "number" && Number.isFinite(params.expectedVersion)
+        ? Math.max(1, Math.floor(params.expectedVersion))
+        : null,
+    current_version: Math.max(1, Math.floor(params.currentVersion)),
+    workflow_status: params.workflowStatus
+  });
+
 export const createWorkflowItem = async (input: CreateWorkflowItemInput): Promise<WorkflowItemRow> => {
   const status: WorkflowStatus = input.status ?? "proposed";
   const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey, `wf:create:${input.orgId}:${input.type}`);
@@ -164,7 +180,12 @@ export const applyWorkflowAction = async (input: ApplyWorkflowActionInput): Prom
 
     if (typeof input.expectedVersion === "number" && Number.isFinite(input.expectedVersion)) {
       if (Math.floor(input.expectedVersion) !== current.version) {
-        throw new HttpError(409, "version_conflict", "Workflow item version mismatch.");
+        throw versionConflict({
+          itemId: current.id,
+          expectedVersion: input.expectedVersion,
+          currentVersion: current.version,
+          workflowStatus: current.status
+        });
       }
     }
 
@@ -192,7 +213,13 @@ export const applyWorkflowAction = async (input: ApplyWorkflowActionInput): Prom
     });
 
     if (!updated) {
-      throw new HttpError(409, "version_conflict", "Workflow item changed before action could be applied.");
+      const latest = await getWorkflowItemById(input.orgId, input.itemId);
+      throw versionConflict({
+        itemId: input.itemId,
+        expectedVersion: input.expectedVersion ?? current.version,
+        currentVersion: latest?.version ?? current.version,
+        workflowStatus: latest?.status ?? current.status
+      });
     }
 
     try {

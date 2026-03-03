@@ -168,9 +168,15 @@ const main = async () => {
   const relativePath = `${activityFolder}/${fileName}`;
   const sourceEventId = `smoke-${now}-event`;
   const userEventKey = `smoke-${now}-user`;
+  const campaignRevisionEventKey = `smoke-${now}-campaign-revision`;
+  const campaignVersionConflictEventKey = `smoke-${now}-campaign-version-conflict`;
   const campaignApprovedEventKey = `smoke-${now}-campaign-approved`;
+  const contentRevisionEventKey = `smoke-${now}-content-revision`;
+  const contentVersionConflictEventKey = `smoke-${now}-content-version-conflict`;
   const contentApprovedEventKey = `smoke-${now}-content-approved`;
   const userMessage = "네, 인스타그램 중심으로 진행해줘.";
+  const campaignRevisionReason = "채널을 인스타그램 중심으로 조정하고 CTA를 더 선명하게 해주세요.";
+  const contentRevisionReason = "문장을 더 간결하게 하고 후원 CTA를 마지막 문장에 넣어주세요.";
 
   const apiLogs = [];
   const apiServer = spawnProcess(
@@ -360,6 +366,133 @@ const main = async () => {
     );
     console.log("PASS - campaign action-card projection is idempotent on replay");
 
+    const initialCampaignVersion =
+      typeof campaignMeta?.expected_version === "number" ? campaignMeta.expected_version : 1;
+
+    const campaignRevisionReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "campaign_rejected",
+        idempotency_key: campaignRevisionEventKey,
+        payload: {
+          campaign_id: campaignId,
+          mode: "revision",
+          reason: campaignRevisionReason,
+          expected_version: initialCampaignVersion
+        }
+      })
+    });
+    assert(campaignRevisionReq.response.ok, `campaign revision failed: ${JSON.stringify(campaignRevisionReq.body)}`);
+    assert(
+      campaignRevisionReq.body?.current_step === "await_campaign_approval",
+      `Unexpected step after campaign revision: ${campaignRevisionReq.body?.current_step}`
+    );
+
+    const { data: campaignCardsAfterRevision, error: campaignCardsAfterRevisionError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id, metadata, projection_key")
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", campaignWorkflowItemId)
+      .eq("message_type", "action_card")
+      .order("created_at", { ascending: true });
+    assert(
+      !campaignCardsAfterRevisionError,
+      `Failed to read campaign cards after revision: ${campaignCardsAfterRevisionError?.message}`
+    );
+    assert(
+      Array.isArray(campaignCardsAfterRevision) && campaignCardsAfterRevision.length === 2,
+      `Expected 2 campaign action-card rows after revision, got ${campaignCardsAfterRevision?.length ?? 0}`
+    );
+    const campaignCardV1 = campaignCardsAfterRevision[0]?.metadata ?? {};
+    const campaignCardV2 = campaignCardsAfterRevision[1]?.metadata ?? {};
+    assert(
+      campaignCardV1?.workflow_status === "revision_requested",
+      `Expected old campaign card status=revision_requested, got ${campaignCardV1?.workflow_status}`
+    );
+    assert(
+      campaignCardV2?.workflow_status === "proposed",
+      `Expected latest campaign card status=proposed, got ${campaignCardV2?.workflow_status}`
+    );
+    assert(
+      Number(campaignCardV2?.expected_version ?? 0) > Number(campaignCardV1?.expected_version ?? 0),
+      "Expected latest campaign card version to increase after revision"
+    );
+    console.log("PASS - campaign revision loop emitted new proposed card with incremented version");
+
+    const replayCampaignRevisionReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "campaign_rejected",
+        idempotency_key: campaignRevisionEventKey,
+        payload: {
+          campaign_id: campaignId,
+          mode: "revision",
+          reason: campaignRevisionReason,
+          expected_version: initialCampaignVersion
+        }
+      })
+    });
+    assert(
+      replayCampaignRevisionReq.response.ok,
+      `campaign revision replay failed: ${JSON.stringify(replayCampaignRevisionReq.body)}`
+    );
+    assert(replayCampaignRevisionReq.body?.idempotent === true, "Expected idempotent=true on campaign revision replay.");
+
+    const { count: campaignCardCountAfterRevisionReplay, error: campaignRevisionReplayCountError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", campaignWorkflowItemId)
+      .eq("message_type", "action_card");
+    assert(
+      !campaignRevisionReplayCountError,
+      `Failed to count campaign cards after revision replay: ${campaignRevisionReplayCountError?.message}`
+    );
+    assert(
+      (campaignCardCountAfterRevisionReplay ?? 0) === 2,
+      `Expected campaign action-card count=2 after revision replay, got ${campaignCardCountAfterRevisionReplay}`
+    );
+    console.log("PASS - campaign revision replay did not duplicate cards");
+
+    const campaignVersionConflictReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "campaign_approved",
+        idempotency_key: campaignVersionConflictEventKey,
+        payload: {
+          campaign_id: campaignId,
+          expected_version: initialCampaignVersion
+        }
+      })
+    });
+    assert(
+      campaignVersionConflictReq.response.status === 409,
+      `Expected campaign version conflict HTTP 409, got ${campaignVersionConflictReq.response.status}`
+    );
+    assert(
+      campaignVersionConflictReq.body?.error === "version_conflict",
+      `Expected campaign version conflict error code, got ${campaignVersionConflictReq.body?.error}`
+    );
+    assert(
+      Number(campaignVersionConflictReq.body?.details?.current_version ?? 0) > initialCampaignVersion,
+      "Expected campaign version conflict details.current_version to be greater than stale expected version"
+    );
+    console.log("PASS - campaign stale expected_version conflict is recoverable with details");
+
+    const latestCampaignVersion = Number(campaignCardV2?.expected_version ?? initialCampaignVersion + 2);
+
     const resumeCampaignReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: "POST",
       headers: {
@@ -369,7 +502,7 @@ const main = async () => {
       body: JSON.stringify({
         event_type: "campaign_approved",
         idempotency_key: campaignApprovedEventKey,
-        payload: { campaign_id: campaignId }
+        payload: { campaign_id: campaignId, expected_version: latestCampaignVersion }
       })
     });
     assert(
@@ -439,7 +572,7 @@ const main = async () => {
       body: JSON.stringify({
         event_type: "campaign_approved",
         idempotency_key: campaignApprovedEventKey,
-        payload: { campaign_id: campaignId }
+        payload: { campaign_id: campaignId, expected_version: latestCampaignVersion }
       })
     });
     assert(replayCampaignReq.response.ok, `campaign_approved replay failed: ${JSON.stringify(replayCampaignReq.body)}`);
@@ -457,6 +590,133 @@ const main = async () => {
     );
     console.log("PASS - content action-card projection is idempotent on replay");
 
+    const initialContentVersion =
+      typeof contentMeta?.expected_version === "number" ? contentMeta.expected_version : 1;
+
+    const contentRevisionReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "content_rejected",
+        idempotency_key: contentRevisionEventKey,
+        payload: {
+          content_id: contentId,
+          mode: "revision",
+          reason: contentRevisionReason,
+          expected_version: initialContentVersion
+        }
+      })
+    });
+    assert(contentRevisionReq.response.ok, `content revision failed: ${JSON.stringify(contentRevisionReq.body)}`);
+    assert(
+      contentRevisionReq.body?.current_step === "await_content_approval",
+      `Unexpected step after content revision: ${contentRevisionReq.body?.current_step}`
+    );
+
+    const { data: contentCardsAfterRevision, error: contentCardsAfterRevisionError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id, metadata, projection_key")
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", contentWorkflowItemId)
+      .eq("message_type", "action_card")
+      .order("created_at", { ascending: true });
+    assert(
+      !contentCardsAfterRevisionError,
+      `Failed to read content cards after revision: ${contentCardsAfterRevisionError?.message}`
+    );
+    assert(
+      Array.isArray(contentCardsAfterRevision) && contentCardsAfterRevision.length === 2,
+      `Expected 2 content action-card rows after revision, got ${contentCardsAfterRevision?.length ?? 0}`
+    );
+    const contentCardV1 = contentCardsAfterRevision[0]?.metadata ?? {};
+    const contentCardV2 = contentCardsAfterRevision[1]?.metadata ?? {};
+    assert(
+      contentCardV1?.workflow_status === "revision_requested",
+      `Expected old content card status=revision_requested, got ${contentCardV1?.workflow_status}`
+    );
+    assert(
+      contentCardV2?.workflow_status === "proposed",
+      `Expected latest content card status=proposed, got ${contentCardV2?.workflow_status}`
+    );
+    assert(
+      Number(contentCardV2?.expected_version ?? 0) > Number(contentCardV1?.expected_version ?? 0),
+      "Expected latest content card version to increase after revision"
+    );
+    console.log("PASS - content revision loop emitted new proposed card with incremented version");
+
+    const replayContentRevisionReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "content_rejected",
+        idempotency_key: contentRevisionEventKey,
+        payload: {
+          content_id: contentId,
+          mode: "revision",
+          reason: contentRevisionReason,
+          expected_version: initialContentVersion
+        }
+      })
+    });
+    assert(
+      replayContentRevisionReq.response.ok,
+      `content revision replay failed: ${JSON.stringify(replayContentRevisionReq.body)}`
+    );
+    assert(replayContentRevisionReq.body?.idempotent === true, "Expected idempotent=true on content revision replay.");
+
+    const { count: contentCardCountAfterRevisionReplay, error: contentRevisionReplayCountError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", contentWorkflowItemId)
+      .eq("message_type", "action_card");
+    assert(
+      !contentRevisionReplayCountError,
+      `Failed to count content cards after revision replay: ${contentRevisionReplayCountError?.message}`
+    );
+    assert(
+      (contentCardCountAfterRevisionReplay ?? 0) === 2,
+      `Expected content action-card count=2 after revision replay, got ${contentCardCountAfterRevisionReplay}`
+    );
+    console.log("PASS - content revision replay did not duplicate cards");
+
+    const contentVersionConflictReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "content_approved",
+        idempotency_key: contentVersionConflictEventKey,
+        payload: {
+          content_id: contentId,
+          expected_version: initialContentVersion
+        }
+      })
+    });
+    assert(
+      contentVersionConflictReq.response.status === 409,
+      `Expected content version conflict HTTP 409, got ${contentVersionConflictReq.response.status}`
+    );
+    assert(
+      contentVersionConflictReq.body?.error === "version_conflict",
+      `Expected content version conflict error code, got ${contentVersionConflictReq.body?.error}`
+    );
+    assert(
+      Number(contentVersionConflictReq.body?.details?.current_version ?? 0) > initialContentVersion,
+      "Expected content version conflict details.current_version to be greater than stale expected version"
+    );
+    console.log("PASS - content stale expected_version conflict is recoverable with details");
+
+    const latestContentVersion = Number(contentCardV2?.expected_version ?? initialContentVersion + 2);
+
     const resumeContentReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: "POST",
       headers: {
@@ -466,7 +726,11 @@ const main = async () => {
       body: JSON.stringify({
         event_type: "content_approved",
         idempotency_key: contentApprovedEventKey,
-        payload: { content_id: contentId }
+        payload: {
+          content_id: contentId,
+          expected_version: latestContentVersion,
+          edited_body: "Revision-approved final copy with clearer CTA and concise structure."
+        }
       })
     });
     assert(
@@ -484,6 +748,10 @@ const main = async () => {
     assert(!finalContentError, `Failed to read final content row: ${finalContentError?.message}`);
     assert(finalContent.status === "published", `Expected content status=published, got ${finalContent.status}`);
     assert(!!finalContent.published_at, "published_at was not set.");
+    assert(
+      typeof finalContent.body === "string" && finalContent.body.includes("Revision-approved"),
+      "Expected edited_body to be persisted on final content row."
+    );
 
     const { data: finalTrigger, error: finalTriggerError } = await supabaseAdmin
       .from("pipeline_triggers")
@@ -510,8 +778,15 @@ const main = async () => {
       .eq("message_type", "action_card")
       .in("workflow_item_id", [campaignWorkflowItemId, contentWorkflowItemId]);
     assert(!resolvedCardsError, `Failed to read resolved action-card rows: ${resolvedCardsError?.message}`);
-    const campaignResolved = (resolvedCards ?? []).find((row) => row.workflow_item_id === campaignWorkflowItemId);
-    const contentResolved = (resolvedCards ?? []).find((row) => row.workflow_item_id === contentWorkflowItemId);
+    const latestByWorkflowItem = (workflowItemId) =>
+      (resolvedCards ?? [])
+        .filter((row) => row.workflow_item_id === workflowItemId)
+        .sort(
+          (a, b) =>
+            Number((b?.metadata ?? {}).expected_version ?? 0) - Number((a?.metadata ?? {}).expected_version ?? 0)
+        )[0] ?? null;
+    const campaignResolved = latestByWorkflowItem(campaignWorkflowItemId);
+    const contentResolved = latestByWorkflowItem(contentWorkflowItemId);
     assert(campaignResolved?.metadata?.workflow_status === "approved", "campaign card workflow_status should be approved");
     assert(contentResolved?.metadata?.workflow_status === "approved", "content card workflow_status should be approved");
     assert(

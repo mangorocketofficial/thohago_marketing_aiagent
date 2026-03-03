@@ -9,6 +9,7 @@ import { SEED_ORG_ID } from "./constants.mjs";
 import {
   getDesktopConfig,
   saveLanguage,
+  saveLastAuthUserId,
   saveOnboardingCompleted,
   saveOnboardingDraft,
   saveOrgId,
@@ -59,6 +60,7 @@ const runtimeState = {
   orgId: SEED_ORG_ID,
   language: "ko",
   onboardingCompleted: false,
+  authUserId: "",
   authSession: null,
   isRunning: false,
   initialScanCount: 0,
@@ -94,6 +96,35 @@ const buildIdempotencyKey = (action, parts = []) => {
   return `desktop:${action}:${digest}`;
 };
 
+const normalizeEditableInput = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+
+const parsePositiveInteger = (value) => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return null;
+  }
+  return Math.floor(parsed);
+};
+
+const buildChatActionIdempotencyKey = (params) => {
+  const expectedVersion = Math.max(1, Math.floor(params.expectedVersion));
+  const base = `chat_action:${params.sessionId}:${params.workflowItemId}:${params.actionId}:v${expectedVersion}`;
+  const normalizedInputs = (params.editableInputs ?? [])
+    .map((entry) => normalizeEditableInput(entry))
+    .filter((entry) => !!entry);
+  if (normalizedInputs.length === 0) {
+    return base;
+  }
+
+  const digest = createHash("sha256").update(normalizedInputs.join("|")).digest("hex").slice(0, 16);
+  return `${base}:${digest}`;
+};
+
 const parseJsonResponse = async (response) => {
   const text = await response.text();
   if (!text) {
@@ -124,10 +155,35 @@ const callOrchestratorApi = async (path, options = {}) => {
   const body = await parseJsonResponse(response);
   if (!response.ok) {
     const message = body?.message ?? body?.error ?? `HTTP ${response.status}`;
-    throw new Error(typeof message === "string" ? message : `HTTP ${response.status}`);
+    const error = new Error(typeof message === "string" ? message : `HTTP ${response.status}`);
+    error.status = response.status;
+    if (typeof body?.error === "string") {
+      error.code = body.error;
+    }
+    if (body?.details && typeof body.details === "object" && !Array.isArray(body.details)) {
+      error.details = body.details;
+    }
+    throw error;
   }
 
   return body;
+};
+
+const toRuntimeError = (error, fallbackMessage) => {
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  const runtimeError = new Error(message);
+  if (error && typeof error === "object") {
+    if (typeof error.code === "string") {
+      runtimeError.code = error.code;
+    }
+    if (typeof error.status === "number" && Number.isFinite(error.status)) {
+      runtimeError.status = Math.floor(error.status);
+    }
+    if (error.details && typeof error.details === "object" && !Array.isArray(error.details)) {
+      runtimeError.details = error.details;
+    }
+  }
+  return runtimeError;
 };
 
 const parseJwtExpiration = (token) => {
@@ -145,6 +201,24 @@ const parseJwtExpiration = (token) => {
     return typeof payload.exp === "number" ? payload.exp : null;
   } catch {
     return null;
+  }
+};
+
+const parseJwtSubject = (token) => {
+  if (!token) {
+    return "";
+  }
+
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return "";
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return typeof payload.sub === "string" ? payload.sub.trim() : "";
+  } catch {
+    return "";
   }
 };
 
@@ -616,13 +690,41 @@ const createWindow = async () => {
   return win;
 };
 
+const normalizeWatchPath = (candidatePath) => {
+  const trimmed = String(candidatePath ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const resolved = path.resolve(trimmed);
+  try {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return "";
+    }
+    return resolved;
+  } catch {
+    return "";
+  }
+};
+
 const getDesktopRuntimeConfig = () => {
   const config = getDesktopConfig();
+  const normalizedWatchPath = normalizeWatchPath(config.watchPath);
+  const normalizedOnboardingCompleted = !!config.onboardingCompleted && !!normalizedWatchPath;
+  const rawWatchPath = String(config.watchPath ?? "").trim();
+
+  if (rawWatchPath !== normalizedWatchPath) {
+    saveWatchPath(normalizedWatchPath);
+  }
+  if (!!config.onboardingCompleted !== normalizedOnboardingCompleted) {
+    saveOnboardingCompleted(normalizedOnboardingCompleted);
+  }
+
   return {
-    watchPath: (config.watchPath || "").trim(),
+    watchPath: normalizedWatchPath,
     orgId: (config.orgId || SEED_ORG_ID).trim() || SEED_ORG_ID,
     language: (config.language || "ko").trim().toLowerCase() === "en" ? "en" : "ko",
-    onboardingCompleted: !!config.onboardingCompleted,
+    onboardingCompleted: normalizedOnboardingCompleted,
     onboardingDraft: {
       websiteUrl: config.onboardingDraft?.websiteUrl ?? "",
       naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? "",
@@ -636,12 +738,14 @@ const getDesktopRuntimeConfig = () => {
 
 const getWatcherStatus = () => {
   const hasValidAuthSession = !!(runtimeState.authSession && !isSessionExpired(runtimeState.authSession));
+  const normalizedWatchPath = normalizeWatchPath(runtimeState.watchPath);
+  const hasWatchPath = !!normalizedWatchPath;
   return {
-    watchPath: runtimeState.watchPath || null,
+    watchPath: normalizedWatchPath || null,
     orgId: runtimeState.orgId,
     fileCount: getActiveFiles().length,
     isRunning: runtimeState.isRunning,
-    requiresOnboarding: !runtimeState.onboardingCompleted || !hasValidAuthSession
+    requiresOnboarding: !runtimeState.onboardingCompleted || !hasValidAuthSession || !hasWatchPath
   };
 };
 
@@ -659,6 +763,16 @@ const stopWatcher = async () => {
   }
   runtimeState.isRunning = false;
   emitWatcherStatus();
+};
+
+const resetLocalOnboardingState = async () => {
+  await stopWatcher();
+  clearFileIndex();
+  saveWatchPath("");
+  saveOnboardingCompleted(false);
+  runtimeState.watchPath = "";
+  runtimeState.onboardingCompleted = false;
+  runtimeState.onboardingLastSynthesis = null;
 };
 
 /**
@@ -842,6 +956,28 @@ const resumeWatcherRuntimeAfterAuth = async () => {
   }
 
   await enqueueRuntimeStart(runtimeState.watchPath, runtimeState.orgId);
+};
+
+const saveRuntimeAuthSession = async (payload, context = "session update") => {
+  const persisted = persistAuthSessionWithFallback(payload, context);
+  const previousUserId = String(runtimeState.authUserId ?? "").trim();
+  const nextUserId = parseJwtSubject(persisted.accessToken);
+  const isAccountSwitch = !!previousUserId && !!nextUserId && previousUserId !== nextUserId;
+
+  runtimeState.authSession = persisted;
+  if (nextUserId && nextUserId !== previousUserId) {
+    runtimeState.authUserId = nextUserId;
+    saveLastAuthUserId(nextUserId);
+  }
+
+  if (isAccountSwitch) {
+    await resetLocalOnboardingState();
+    emitWatcherStatus();
+    return persisted;
+  }
+
+  await resumeWatcherRuntimeAfterAuth();
+  return persisted;
 };
 
 const getChatRuntimeConfig = () => ({
@@ -1113,6 +1249,11 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle("auth:get-stored-session", async () => {
     if (runtimeState.authSession && !isSessionExpired(runtimeState.authSession)) {
+      const sessionUserId = parseJwtSubject(runtimeState.authSession.accessToken);
+      if (sessionUserId && sessionUserId !== runtimeState.authUserId) {
+        runtimeState.authUserId = sessionUserId;
+        saveLastAuthUserId(sessionUserId);
+      }
       await resumeWatcherRuntimeAfterAuth();
       return runtimeState.authSession;
     }
@@ -1125,16 +1266,16 @@ const registerIpcHandlers = () => {
     }
 
     runtimeState.authSession = stored;
+    const storedUserId = parseJwtSubject(stored.accessToken);
+    if (storedUserId && storedUserId !== runtimeState.authUserId) {
+      runtimeState.authUserId = storedUserId;
+      saveLastAuthUserId(storedUserId);
+    }
     await resumeWatcherRuntimeAfterAuth();
     return stored;
   });
 
-  ipcMain.handle("auth:save-session", async (_, payload) => {
-    const persisted = persistAuthSessionWithFallback(payload, "manual save");
-    runtimeState.authSession = persisted;
-    await resumeWatcherRuntimeAfterAuth();
-    return persisted;
-  });
+  ipcMain.handle("auth:save-session", async (_, payload) => saveRuntimeAuthSession(payload, "manual save"));
 
   ipcMain.handle("auth:clear-session", async () => {
     clearAuthSession();
@@ -1146,10 +1287,7 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle("auth:start-google-oauth", async () => {
     const sessionPayload = await runGoogleOAuthWithSystemBrowser();
-    const persisted = persistAuthSessionWithFallback(sessionPayload, "google oauth");
-    runtimeState.authSession = persisted;
-    await resumeWatcherRuntimeAfterAuth();
-    return persisted;
+    return saveRuntimeAuthSession(sessionPayload, "google oauth");
   });
 
   const fetchEntitlement = async (payload) => {
@@ -1236,8 +1374,14 @@ const registerIpcHandlers = () => {
       throw new Error("orgId is required.");
     }
 
+    const previousOrgId = String(runtimeState.orgId ?? "").trim();
+    const orgChanged = previousOrgId !== orgId;
     saveOrgId(orgId);
     runtimeState.orgId = orgId;
+    if (orgChanged) {
+      await resetLocalOnboardingState();
+    }
+    emitWatcherStatus();
     return getDesktopRuntimeConfig();
   });
 
@@ -1422,10 +1566,6 @@ const registerIpcHandlers = () => {
         : body;
 
     runtimeState.onboardingLastSynthesis = responseWithExport ?? null;
-    if (responseWithExport?.ok) {
-      saveOnboardingCompleted(true);
-      runtimeState.onboardingCompleted = true;
-    }
     return responseWithExport;
   });
 
@@ -1562,7 +1702,7 @@ const registerIpcHandlers = () => {
         message,
         sessionId
       });
-      throw new Error(message);
+      throw toRuntimeError(error, "Failed to send message.");
     }
   });
 
@@ -1596,7 +1736,7 @@ const registerIpcHandlers = () => {
         message,
         sessionId
       });
-      throw new Error(message);
+      throw toRuntimeError(error, "Failed to approve campaign.");
     }
   });
 
@@ -1634,7 +1774,7 @@ const registerIpcHandlers = () => {
         message,
         sessionId
       });
-      throw new Error(message);
+      throw toRuntimeError(error, "Failed to approve content.");
     }
   });
 
@@ -1685,17 +1825,109 @@ const registerIpcHandlers = () => {
         message,
         sessionId
       });
-      throw new Error(message);
+      throw toRuntimeError(error, "Failed to reject item.");
+    }
+  });
+
+  ipcMain.handle("chat:dispatch-action", async (_, payload) => {
+    const sessionId = (payload?.sessionId ?? "").trim();
+    const workflowItemId = (payload?.workflowItemId ?? "").trim();
+    const actionId = (payload?.actionId ?? "").trim();
+    const eventType = (payload?.eventType ?? "").trim();
+    const expectedVersion = parsePositiveInteger(payload?.expectedVersion);
+    const campaignId = (payload?.campaignId ?? "").trim();
+    const contentId = (payload?.contentId ?? "").trim();
+    const reason = typeof payload?.reason === "string" ? payload.reason.trim() : "";
+    const editedBody = typeof payload?.editedBody === "string" ? payload.editedBody.trim() : "";
+    const mode = typeof payload?.mode === "string" ? payload.mode.trim().toLowerCase() : "";
+
+    if (!sessionId || !workflowItemId || !actionId || !eventType || !expectedVersion) {
+      throw new Error("sessionId, workflowItemId, actionId, eventType, expectedVersion are required.");
+    }
+
+    const allowedEventTypes = new Set([
+      "campaign_approved",
+      "campaign_rejected",
+      "content_approved",
+      "content_rejected"
+    ]);
+    if (!allowedEventTypes.has(eventType)) {
+      throw new Error("Unsupported eventType for chat action dispatch.");
+    }
+
+    const eventPayload = {
+      expected_version: expectedVersion
+    };
+    if (eventType.startsWith("campaign_")) {
+      if (!campaignId) {
+        throw new Error("campaignId is required for campaign events.");
+      }
+      eventPayload.campaign_id = campaignId;
+    }
+    if (eventType.startsWith("content_")) {
+      if (!contentId) {
+        throw new Error("contentId is required for content events.");
+      }
+      eventPayload.content_id = contentId;
+    }
+    if (eventType === "content_approved" && editedBody) {
+      eventPayload.edited_body = editedBody;
+    }
+
+    if (mode === "revision") {
+      if (!reason) {
+        throw new Error("reason is required when mode is revision.");
+      }
+      eventPayload.mode = "revision";
+      eventPayload.reason = reason;
+    } else if ((eventType === "campaign_rejected" || eventType === "content_rejected") && reason) {
+      eventPayload.reason = reason;
+    }
+
+    const idempotencyKey = buildChatActionIdempotencyKey({
+      sessionId,
+      workflowItemId,
+      actionId,
+      expectedVersion,
+      editableInputs: [reason, editedBody]
+    });
+
+    try {
+      const body = await callOrchestratorApi(`/sessions/${sessionId}/resume`, {
+        method: "POST",
+        body: JSON.stringify({
+          event_type: eventType,
+          payload: eventPayload,
+          idempotency_key: idempotencyKey
+        })
+      });
+
+      emitChatActionResult({
+        action: "dispatch-action",
+        ok: true,
+        sessionId
+      });
+      return body;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to dispatch chat action.";
+      emitChatActionError({
+        action: "dispatch-action",
+        message,
+        sessionId
+      });
+      throw toRuntimeError(error, "Failed to dispatch chat action.");
     }
   });
 };
 
 app.whenReady().then(async () => {
   const config = getDesktopRuntimeConfig();
+  const rawConfig = getDesktopConfig();
   runtimeState.orgId = config.orgId;
   runtimeState.watchPath = config.watchPath;
   runtimeState.language = config.language;
   runtimeState.onboardingCompleted = config.onboardingCompleted;
+  runtimeState.authUserId = String(rawConfig.lastAuthUserId ?? "").trim();
   runtimeState.onboardingCrawlState = createInitialCrawlState({
     websiteUrl: config.onboardingDraft?.websiteUrl ?? "",
     naverBlogUrl: config.onboardingDraft?.naverBlogUrl ?? "",
@@ -1704,13 +1936,18 @@ app.whenReady().then(async () => {
   runtimeState.onboardingLastSynthesis = null;
   const storedAuth = await resolveStoredAuthSession();
   runtimeState.authSession = storedAuth;
+  const storedAuthUserId = parseJwtSubject(storedAuth?.accessToken ?? "");
+  if (storedAuthUserId && storedAuthUserId !== runtimeState.authUserId) {
+    runtimeState.authUserId = storedAuthUserId;
+    saveLastAuthUserId(storedAuthUserId);
+  }
 
   mainWindow = await createWindow();
   registerIpcHandlers();
   await waitForWindowReady(mainWindow);
 
-  const hasValidAuthSession = !!runtimeState.authSession;
-  if (!config.onboardingCompleted || !hasValidAuthSession) {
+  const hasValidAuthSession = !!(runtimeState.authSession && !isSessionExpired(runtimeState.authSession));
+  if (!config.onboardingCompleted || !hasValidAuthSession || !config.watchPath) {
     emitWatcherStatus();
     mainWindow.webContents.send("app:show-onboarding");
   } else {

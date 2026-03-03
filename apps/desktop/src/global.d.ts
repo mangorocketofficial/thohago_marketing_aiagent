@@ -1,6 +1,8 @@
 export {};
 import type {
   BrandProfile,
+  ChatActionCardAction,
+  ChatActionCardEventType,
   InterviewAnswers,
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
@@ -51,7 +53,13 @@ type WatcherOpenFolderResult = {
   message: string | null;
 };
 
-type ChatAction = "get-active-session" | "send-message" | "approve-campaign" | "approve-content" | "reject";
+type ChatAction =
+  | "get-active-session"
+  | "send-message"
+  | "approve-campaign"
+  | "approve-content"
+  | "reject"
+  | "dispatch-action";
 
 type ChatActionResult = {
   action: ChatAction;
@@ -88,6 +96,19 @@ type ChatResumeResult = {
   current_step: string;
   status: string;
   idempotent?: boolean;
+};
+
+type ChatDispatchActionPayload = {
+  sessionId: string;
+  workflowItemId: string;
+  expectedVersion: number;
+  actionId: ChatActionCardAction["id"];
+  eventType: ChatActionCardEventType;
+  campaignId?: string;
+  contentId?: string;
+  mode?: "revision";
+  reason?: string;
+  editedBody?: string;
 };
 
 type SecureAuthSession = {
@@ -226,6 +247,7 @@ declare global {
           id: string;
           reason?: string;
         }) => Promise<ChatResumeResult>;
+        dispatchAction: (payload: ChatDispatchActionPayload) => Promise<ChatResumeResult>;
       };
     };
   }

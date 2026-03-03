@@ -12,6 +12,7 @@ import { DashboardPage } from "./pages/Dashboard";
 import { SettingsPage } from "./pages/Settings";
 import type {
   Campaign,
+  ChatActionCardDispatchInput,
   ChatMessage,
   Content,
   InterviewAnswers,
@@ -155,6 +156,52 @@ const formatDateTime = (iso: string | null | undefined): string => {
     return iso;
   }
   return parsed.toLocaleString();
+};
+
+type RuntimeActionError = Error & {
+  code?: string;
+  status?: number;
+  details?: Record<string, unknown>;
+};
+
+const toRuntimeActionError = (error: unknown, fallbackMessage: string): RuntimeActionError => {
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  const next = new Error(message) as RuntimeActionError;
+
+  if (error && typeof error === "object") {
+    const row = error as Record<string, unknown>;
+    if (typeof row.code === "string") {
+      next.code = row.code;
+    }
+    if (typeof row.status === "number" && Number.isFinite(row.status)) {
+      next.status = Math.floor(row.status);
+    }
+    if (row.details && typeof row.details === "object" && !Array.isArray(row.details)) {
+      next.details = row.details as Record<string, unknown>;
+    }
+  }
+
+  return next;
+};
+
+const buildVersionConflictNotice = (error: RuntimeActionError): string => {
+  const details = error.details ?? {};
+  const currentVersion =
+    typeof details.current_version === "number" && Number.isFinite(details.current_version)
+      ? Math.floor(details.current_version)
+      : null;
+  const expectedVersion =
+    typeof details.expected_version === "number" && Number.isFinite(details.expected_version)
+      ? Math.floor(details.expected_version)
+      : null;
+
+  if (currentVersion && expectedVersion) {
+    return `Action failed due to stale card version (expected v${expectedVersion}, current v${currentVersion}). Refreshed latest timeline.`;
+  }
+  if (currentVersion) {
+    return `Action failed due to stale card version (current v${currentVersion}). Refreshed latest timeline.`;
+  }
+  return "Action failed due to stale card version. Refreshed latest timeline.";
 };
 
 const isValidHttpUrl = (value: string): boolean => {
@@ -592,13 +639,24 @@ const App = () => {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "chat_messages",
           filter: `org_id=eq.${chatConfig.orgId}`
         },
         (payload) => {
-          setMessages((prev) => upsertMessage(prev, payload.new as ChatMessage));
+          const nextRow = (payload.new ?? null) as ChatMessage | null;
+          const oldRow = (payload.old ?? null) as ChatMessage | null;
+
+          setMessages((prev) => {
+            if (nextRow && typeof nextRow.id === "string") {
+              return upsertMessage(prev, nextRow);
+            }
+            if (oldRow && typeof oldRow.id === "string") {
+              return prev.filter((item) => item.id !== oldRow.id);
+            }
+            return prev;
+          });
           scheduleRefreshActiveSession();
         }
       )
@@ -1455,11 +1513,17 @@ const App = () => {
     setChatNotice("");
     try {
       await action();
+      await refreshMessages();
       await refreshActiveSession();
       await Promise.all([refreshDraftCampaigns(), refreshPendingContents()]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Action failed.";
-      setChatNotice(message);
+      const runtimeError = toRuntimeActionError(error, "Action failed.");
+      if (runtimeError.code === "version_conflict") {
+        setChatNotice(buildVersionConflictNotice(runtimeError));
+        await Promise.all([refreshMessages(), refreshActiveSession(), refreshDraftCampaigns(), refreshPendingContents()]);
+      } else {
+        setChatNotice(runtimeError.message);
+      }
     } finally {
       setIsActionPending(false);
     }
@@ -1543,6 +1607,40 @@ const App = () => {
         type: "content",
         id: contentId
       });
+    });
+  };
+
+  const dispatchCardAction = async (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => {
+    const sessionId = payload.sessionId.trim();
+    if (!sessionId) {
+      setChatNotice("sessionId is required for action card dispatch.");
+      return;
+    }
+
+    const activeCampaignId = typeof activeSession?.state?.campaign_id === "string" ? activeSession.state.campaign_id.trim() : "";
+    const activeContentId = typeof activeSession?.state?.content_id === "string" ? activeSession.state.content_id.trim() : "";
+
+    const isCampaignEvent = payload.eventType.startsWith("campaign_");
+    const isContentEvent = payload.eventType.startsWith("content_");
+    if (isCampaignEvent && !activeCampaignId) {
+      setChatNotice("Active session campaign_id is missing. Refresh session and retry.");
+      return;
+    }
+    if (isContentEvent && !activeContentId) {
+      setChatNotice("Active session content_id is missing. Refresh session and retry.");
+      return;
+    }
+
+    await runChatAction(async () => {
+      await window.desktopRuntime.chat.dispatchAction({
+        ...payload,
+        ...(isCampaignEvent ? { campaignId: activeCampaignId } : {}),
+        ...(isContentEvent ? { contentId: activeContentId } : {})
+      });
+
+      if (payload.eventType === "content_approved" && activeContentId) {
+        removeContentEdit(activeContentId);
+      }
     });
   };
 
@@ -2022,13 +2120,11 @@ const App = () => {
             chatNotice={chatNotice}
             chatConfigMessage={chatConfig?.message ?? ""}
             activeSessionId={activeSession?.id ?? null}
-            campaignToReview={campaignToReview}
             isActionPending={isActionPending}
             formatDateTime={formatDateTime}
             onChatInputChange={setChatInput}
             onSendMessage={() => void sendMessage()}
-            onApproveCampaign={(campaignId) => void approveCampaign(campaignId)}
-            onRejectCampaign={(campaignId) => void rejectCampaign(campaignId)}
+            onDispatchCardAction={(payload) => void dispatchCardAction(payload)}
           />
         }
         settingsPage={

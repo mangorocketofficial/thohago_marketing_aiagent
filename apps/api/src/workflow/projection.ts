@@ -33,6 +33,7 @@ type ContentDraftCardData = {
   title: string;
   channel: string;
   body_preview: string;
+  body_full?: string;
   media_urls: string[];
 };
 
@@ -47,10 +48,10 @@ export type WorkflowActionCardMetadata = {
   card_data: CampaignPlanCardData | ContentDraftCardData | Record<string, unknown>;
 };
 
-const isTerminalStatus = (status: WorkflowStatus): boolean => status === "approved" || status === "rejected";
+const isResolvedStatus = (status: WorkflowStatus): boolean => status !== "proposed";
 
-const disableActionsIfTerminal = (actions: WorkflowActionCardAction[], status: WorkflowStatus): WorkflowActionCardAction[] =>
-  isTerminalStatus(status) ? actions.map((action) => ({ ...action, disabled: true })) : actions;
+const disableActionsIfResolved = (actions: WorkflowActionCardAction[], status: WorkflowStatus): WorkflowActionCardAction[] =>
+  isResolvedStatus(status) ? actions.map((action) => ({ ...action, disabled: true })) : actions;
 
 const formatDateOnly = (value: Date): string => {
   const year = value.getUTCFullYear();
@@ -85,7 +86,7 @@ const truncatePreview = (value: string, maxLength = 240): string => {
 };
 
 const campaignActions = (status: WorkflowStatus): WorkflowActionCardAction[] =>
-  disableActionsIfTerminal(
+  disableActionsIfResolved(
     [
       { id: "approve", label: "Approve", event_type: "campaign_approved" },
       {
@@ -100,7 +101,7 @@ const campaignActions = (status: WorkflowStatus): WorkflowActionCardAction[] =>
   );
 
 const contentActions = (status: WorkflowStatus): WorkflowActionCardAction[] =>
-  disableActionsIfTerminal(
+  disableActionsIfResolved(
     [
       { id: "approve", label: "Approve", event_type: "content_approved" },
       {
@@ -162,6 +163,7 @@ export const buildContentDraftProjectionMetadata = (params: {
     title: `${toCardTitle(params.activityFolder, "Content Draft")} - ${params.channel}`,
     channel: params.channel,
     body_preview: truncatePreview(params.draft),
+    body_full: params.draft,
     media_urls: [],
     ...(params.forbiddenCheck && !params.forbiddenCheck.passed
       ? {
@@ -181,7 +183,7 @@ const inferActions = (cardType: ProjectionCardType, status: WorkflowStatus): Wor
   if (cardType === "content_draft") {
     return contentActions(status);
   }
-  return disableActionsIfTerminal([], status);
+  return disableActionsIfResolved([], status);
 };
 
 export const patchActionCardMetadataStatus = (params: {
@@ -215,7 +217,7 @@ export const patchActionCardMetadataStatus = (params: {
   }
   const actions =
     parsedActions.length > 0
-      ? disableActionsIfTerminal(parsedActions, params.workflowStatus)
+      ? disableActionsIfResolved(parsedActions, params.workflowStatus)
       : inferActions(cardType, params.workflowStatus);
 
   return {
@@ -230,6 +232,6 @@ export const patchActionCardMetadataStatus = (params: {
     session_id: typeof metadata.session_id === "string" ? metadata.session_id : (params.sessionId ?? ""),
     actions,
     card_data: asRecord(metadata.card_data),
-    ...(isTerminalStatus(params.workflowStatus) ? { resolved_at: new Date().toISOString() } : {})
+    ...(isResolvedStatus(params.workflowStatus) ? { resolved_at: new Date().toISOString() } : {})
   };
 };

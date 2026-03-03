@@ -108,6 +108,14 @@ const fallbackPlan = (activityFolder: string): CampaignPlan =>
 const fallbackDraft = (activityFolder: string): string =>
   `${activityFolder} 현장에서 만난 변화의 순간을 전합니다. 여러분의 관심이 다음 활동을 가능하게 만듭니다. 함께 응원해 주세요. #국제개발 #현장소식 #함께하는변화`;
 
+const safeJson = (value: unknown): string => {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "{}";
+  }
+};
+
 const callAnthropic = async (prompt: string, maxTokens: number): Promise<string | null> => {
   if (!env.anthropicApiKey) {
     return null;
@@ -161,7 +169,11 @@ export const generateDetectMessage = async (activityFolder: string, fileName: st
 export const generateCampaignPlan = async (
   orgId: string,
   activityFolder: string,
-  userMessage: string
+  userMessage: string,
+  options?: {
+    previousPlan?: CampaignPlan | null;
+    revisionReason?: string | null;
+  }
 ): Promise<{ plan: CampaignPlan; ragMeta: RagContextMeta }> => {
   const ctx = await buildCampaignPlanContext(orgId);
 
@@ -172,6 +184,19 @@ export const generateCampaignPlan = async (
 
   if (ctx.memoryMd) {
     promptParts.push("=== 조직 컨텍스트(memory.md) ===", ctx.memoryMd, "");
+  }
+
+  const revisionReason = normalizeString(options?.revisionReason, "");
+  const hasPreviousPlan = !!options?.previousPlan;
+  if (revisionReason || hasPreviousPlan) {
+    promptParts.push("=== 리비전 컨텍스트 ===");
+    if (revisionReason) {
+      promptParts.push(`수정 요청 사유: "${revisionReason}"`);
+    }
+    if (hasPreviousPlan) {
+      promptParts.push("이전 캠페인 계획(JSON):", safeJson(options?.previousPlan));
+    }
+    promptParts.push("이전 계획을 바탕으로 수정 사유를 반영한 개선안을 작성하세요.", "");
   }
 
   promptParts.push(
@@ -213,7 +238,11 @@ export const generateContentDraft = async (
   orgId: string,
   activityFolder: string,
   channel: string,
-  topic: string
+  topic: string,
+  options?: {
+    previousDraft?: string | null;
+    revisionReason?: string | null;
+  }
 ): Promise<{ draft: string; ragMeta: RagContextMeta }> => {
   const normalizedChannel = normalizeChannel(channel);
   const normalizedTopic = normalizeString(topic, activityFolder);
@@ -230,6 +259,19 @@ export const generateContentDraft = async (
 
   if (ctx.tier2Sections) {
     promptParts.push(ctx.tier2Sections, "");
+  }
+
+  const revisionReason = normalizeString(options?.revisionReason, "");
+  const previousDraft = normalizeString(options?.previousDraft, "");
+  if (revisionReason || previousDraft) {
+    promptParts.push("=== 리비전 컨텍스트 ===");
+    if (revisionReason) {
+      promptParts.push(`수정 요청 사유: "${revisionReason}"`);
+    }
+    if (previousDraft) {
+      promptParts.push("이전 초안:", previousDraft);
+    }
+    promptParts.push("이전 초안을 참고하되 수정 사유를 충족하는 새 본문으로 전체 재작성하세요.", "");
   }
 
   promptParts.push(

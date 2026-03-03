@@ -307,7 +307,7 @@ button.primary {
   padding: 10px;
   display: grid;
   gap: 10px;
-  max-height: 360px;
+  max-height: 520px;
   overflow-y: auto;
 }
 
@@ -338,6 +338,105 @@ button.primary {
 .chat-item p {
   white-space: pre-wrap;
   line-height: 1.42;
+}
+
+.chat-action-card {
+  background: #f8fbff;
+  border-color: #c7d8f0;
+  gap: 8px;
+}
+
+.chat-action-card.is-resolved {
+  background: #f5f7fb;
+  border-color: #d7ddea;
+}
+
+.chat-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.chat-card-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.chat-card-subtitle {
+  color: #475467;
+  font-size: 12px;
+}
+
+.chat-card-toggle {
+  margin: 0;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.chat-card-collapsed {
+  color: #475467;
+  font-size: 13px;
+}
+
+.chat-card-meta {
+  display: grid;
+  gap: 5px;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.chat-card-preview {
+  white-space: pre-wrap;
+  background: #ffffff;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.chat-card-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-card-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #fff3e6;
+  border: 1px solid #f1cb87;
+  color: #92400e;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+.chat-card-reason,
+.chat-card-editor {
+  border: 1px solid #c8d2e1;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.chat-card-reason {
+  min-height: 68px;
+}
+
+.chat-card-editor-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-card-editor-toggle {
+  justify-self: start;
+}
+
+.chat-card-editor {
+  min-height: 140px;
+  line-height: 1.45;
 }
 
 .campaign-card {
