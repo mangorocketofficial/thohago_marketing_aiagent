@@ -55,7 +55,7 @@ The UI track introduces structure in safe increments:
 | UI Phase | Title | Status | Report |
 |---|---|---|---|
 | UI-1 | Main Layout Shell Foundation | Done | [ui-1-completion.md](./progress/ui-1-completion.md) |
-| UI-2 | Navigation Contract (Router-Ready) | Planned | [UI-2-navigation-contract-dev-request.md](./ui/UI-2-navigation-contract-dev-request.md) |
+| UI-2 | Navigation Contract (Router-Ready) | Done | [ui-2-completion.md](./progress/ui-2-completion.md) |
 | UI-3 | Page Migration Batch A (Dashboard, Agent Chat, Settings) | Planned | [UI-3-page-migration-batch-a-dev-request.md](./ui/UI-3-page-migration-batch-a-dev-request.md) |
 | UI-3.5 | Onboarding Extraction from App.tsx | Planned | [UI-3.5-onboarding-extraction-dev-request.md](./ui/UI-3.5-onboarding-extraction-dev-request.md) |
 | UI-4 | Page Skeleton Batch B (Brand Review, Content Create, Campaign, Analytics, Email) | Planned | [UI-4-page-skeleton-batch-b-dev-request.md](./ui/UI-4-page-skeleton-batch-b-dev-request.md) |
@@ -75,5 +75,5 @@ The UI track introduces structure in safe increments:
 
 ---
 
-*Document version: v2.1 (UI special phase track)*
+*Document version: v2.2 (UI special phase track)*
 *Created: 2026-03-03*

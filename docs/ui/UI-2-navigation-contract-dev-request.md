@@ -27,6 +27,8 @@ State switching is sufficient today, but deep-linking and route history requirem
   - `setContextPanelMode(mode)`
   - `setContextPanelCollapsed(value)`
 - Move sidebar page switching to context API.
+- Define side-effect behavior of `navigate()` in the contract.
+- Define full-width page auto-hide policy in the navigation layer.
 
 ### Out of Scope
 
@@ -63,6 +65,18 @@ export type PageId =
   | "settings";
 
 export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
+
+export type NavigateOptions = {
+  // Optional override applied at the same time as page transition.
+  contextPanelMode?: ContextPanelMode;
+};
+
+export const FULL_WIDTH_PAGES: PageId[] = ["agent-chat", "settings"];
+// Default navigation policy:
+// - navigate(target) => contextPanelMode is auto-resolved.
+// - if target is in FULL_WIDTH_PAGES => contextPanelMode = "hidden"
+// - otherwise => contextPanelMode = "page-context"
+// - options.contextPanelMode overrides default policy for explicit transitions.
 ```
 
 ---
@@ -74,6 +88,7 @@ export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
 3. Navigation API can be adapted to router internals later without page component rewrites.
 4. `pnpm --filter @repo/desktop type-check` passes.
 5. `pnpm --filter @repo/desktop build` passes.
+6. Onboarding branch behavior remains unchanged (provider is applied to main layout path only).
 
 ---
 
@@ -81,4 +96,3 @@ export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
 
 - Risk: over-designing navigation early.
 - Control: keep interface minimal and current needs focused.
-

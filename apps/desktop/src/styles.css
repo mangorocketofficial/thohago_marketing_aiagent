@@ -605,3 +605,9 @@ th {
   display: grid;
   gap: 8px;
 }
+
+.ui-context-mode {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}

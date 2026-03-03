@@ -2,6 +2,7 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import { NavigationProvider } from "./context/NavigationContext";
 import { MainLayout } from "./layouts/MainLayout";
 import type {
   Campaign,
@@ -2016,7 +2017,8 @@ const App = () => {
   const campaignToReview = draftCampaigns[0] ?? null;
 
   return (
-    <MainLayout>
+    <NavigationProvider>
+      <MainLayout>
       <div className="app-shell ui-dashboard-shell">
       <section className="panel">
         <p className="eyebrow">Phase 1-5b Runtime</p>
@@ -2207,7 +2209,8 @@ const App = () => {
         </div>
       </section>
       </div>
-    </MainLayout>
+      </MainLayout>
+    </NavigationProvider>
   );
 };
 

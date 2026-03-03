@@ -8,12 +8,33 @@ export type PageId =
   | "agent-chat"
   | "settings";
 
+export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
+
+export type NavigateOptions = {
+  contextPanelMode?: ContextPanelMode;
+};
+
+export type NavigationState = {
+  activePage: PageId;
+  contextPanelMode: ContextPanelMode;
+  contextPanelCollapsed: boolean;
+};
+
 export type NavItem = {
   id: PageId;
   label: string;
   icon: string;
   section: "primary" | "secondary";
 };
+
+export const FULL_WIDTH_PAGES: readonly PageId[] = ["agent-chat", "settings"] as const;
+
+const FULL_WIDTH_PAGE_SET = new Set<PageId>(FULL_WIDTH_PAGES);
+
+export const isFullWidthPage = (pageId: PageId): boolean => FULL_WIDTH_PAGE_SET.has(pageId);
+
+export const defaultContextPanelModeForPage = (pageId: PageId): ContextPanelMode =>
+  isFullWidthPage(pageId) ? "hidden" : "page-context";
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "DB", section: "primary" },

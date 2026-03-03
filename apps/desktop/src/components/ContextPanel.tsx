@@ -1,7 +1,8 @@
-import type { PageId } from "../types/navigation";
+import type { ContextPanelMode, PageId } from "../types/navigation";
 
 type ContextPanelProps = {
   activePage: PageId;
+  mode: ContextPanelMode;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
 };
@@ -17,7 +18,7 @@ const PAGE_CONTEXT_LABELS: Record<PageId, string> = {
   settings: "Settings Context"
 };
 
-export const ContextPanel = ({ activePage, isCollapsed, onToggleCollapsed }: ContextPanelProps) => {
+export const ContextPanel = ({ activePage, mode, isCollapsed, onToggleCollapsed }: ContextPanelProps) => {
   return (
     <aside className={`ui-context-panel ${isCollapsed ? "is-collapsed" : ""}`}>
       <button
@@ -32,6 +33,7 @@ export const ContextPanel = ({ activePage, isCollapsed, onToggleCollapsed }: Con
       {!isCollapsed ? (
         <div className="ui-context-inner">
           <h3>{PAGE_CONTEXT_LABELS[activePage]}</h3>
+          <p className="ui-context-mode">Mode: {mode}</p>
           <p>
             UI-1 provides the shell only. Page-specific context cards and mini agent chat will be delivered in later UI
             phases.
@@ -41,4 +43,3 @@ export const ContextPanel = ({ activePage, isCollapsed, onToggleCollapsed }: Con
     </aside>
   );
 };
-

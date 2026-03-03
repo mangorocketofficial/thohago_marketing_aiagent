@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ContextPanel } from "../components/ContextPanel";
 import { Sidebar } from "../components/Sidebar";
+import { useNavigation } from "../context/NavigationContext";
 import type { PageId } from "../types/navigation";
 
 type MainLayoutProps = {
@@ -18,12 +19,18 @@ const PLACEHOLDER_TITLES: Record<Exclude<PageId, "dashboard">, string> = {
 };
 
 export const MainLayout = ({ children }: MainLayoutProps) => {
-  const [activePage, setActivePage] = useState<PageId>("dashboard");
-  const [isContextCollapsed, setIsContextCollapsed] = useState(false);
+  const {
+    activePage,
+    navigate,
+    contextPanelMode,
+    contextPanelCollapsed,
+    isContextPanelHidden,
+    toggleContextPanelCollapsed
+  } = useNavigation();
 
   return (
     <div className="ui-main-layout">
-      <Sidebar activePage={activePage} onSelectPage={setActivePage} />
+      <Sidebar activePage={activePage} onSelectPage={navigate} />
 
       <main className="ui-main-content">
         {activePage === "dashboard" ? (
@@ -42,12 +49,14 @@ export const MainLayout = ({ children }: MainLayoutProps) => {
         )}
       </main>
 
-      <ContextPanel
-        activePage={activePage}
-        isCollapsed={isContextCollapsed}
-        onToggleCollapsed={() => setIsContextCollapsed((previous) => !previous)}
-      />
+      {!isContextPanelHidden ? (
+        <ContextPanel
+          activePage={activePage}
+          mode={contextPanelMode}
+          isCollapsed={contextPanelCollapsed}
+          onToggleCollapsed={toggleContextPanelCollapsed}
+        />
+      ) : null}
     </div>
   );
 };
-
