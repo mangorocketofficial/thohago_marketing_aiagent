@@ -2,23 +2,25 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
-import { onContentEdited } from "../rag/ingest-edit-pattern";
-import { onContentPublished } from "../rag/ingest-content";
-import { invalidateMemoryCache } from "../rag/memory-service";
 import {
-  buildCampaignPlanProjectionMetadata,
-  buildContentDraftProjectionMetadata,
-  buildProjectionKey,
-  patchActionCardMetadataStatus
-} from "../workflow/projection";
+  emitCampaignActionCardProjection,
+  emitContentActionCardProjection,
+  insertChatMessage,
+  updateLatestActionCardProjectionStatus
+} from "./chat-projection";
+import { runContentApprovalSideEffects } from "./side-effects";
 import {
-  applyWorkflowAction,
+  applyCampaignApprovedStep,
+  applyCampaignRejectStep,
+  applyUserMessageStep
+} from "./steps/campaign";
+import { applyContentApprovedStep, applyContentRejectStep } from "./steps/content";
+import {
   ensureCampaignWorkflowItem,
-  ensureContentWorkflowItem,
-  linkWorkflowItemOriginChatMessage
+  ensureContentWorkflowItem
 } from "../workflow/service";
 import type { WorkflowItemRow, WorkflowStatus } from "../workflow/types";
-import { generateCampaignPlan, generateContentDraft, generateDetectMessage } from "./ai";
+import { generateContentDraft, generateDetectMessage } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
 import type {
   CampaignPlan,
@@ -36,7 +38,6 @@ import type {
 
 const ACTIVE_SESSION_STATUSES: SessionStatus[] = ["running", "paused"];
 const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
-const DEFAULT_CHAT_CHANNEL = "dashboard";
 
 const lockQueueByKey = new Map<string, Promise<void>>();
 
@@ -68,6 +69,9 @@ const asString = (value: unknown, fallback = ""): string => {
   }
   return fallback;
 };
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 const asStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) {
@@ -353,137 +357,6 @@ const updateSession = async (
   }
 };
 
-type ChatMessageType = "text" | "action_card" | "system";
-type ChatChannel = "dashboard" | "telegram";
-
-type InsertChatMessageInput = {
-  orgId: string;
-  role: "user" | "assistant";
-  content: string;
-  channel?: ChatChannel;
-  messageType?: ChatMessageType;
-  metadata?: Record<string, unknown>;
-  workflowItemId?: string | null;
-  projectionKey?: string | null;
-};
-
-const readChatMessageIdByProjectionKey = async (orgId: string, projectionKey: string): Promise<string | null> => {
-  const { data, error } = await supabaseAdmin
-    .from("chat_messages")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("projection_key", projectionKey)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(
-      500,
-      "db_error",
-      `Failed to read chat message by projection key: ${error.message}`
-    );
-  }
-
-  if (!data) {
-    return null;
-  }
-  const id = asString((data as Record<string, unknown>).id, "");
-  return id || null;
-};
-
-const insertChatMessage = async (input: InsertChatMessageInput): Promise<string> => {
-  const payload = {
-    org_id: input.orgId,
-    role: input.role,
-    content: input.content,
-    channel: input.channel ?? DEFAULT_CHAT_CHANNEL,
-    message_type: input.messageType ?? "text",
-    metadata: input.metadata ?? {},
-    workflow_item_id: input.workflowItemId ?? null,
-    projection_key: input.projectionKey ?? null
-  };
-
-  if (input.projectionKey) {
-    const { data, error } = await supabaseAdmin
-      .from("chat_messages")
-      .upsert(payload, {
-        onConflict: "org_id,projection_key",
-        ignoreDuplicates: true
-      })
-      .select("id")
-      .maybeSingle();
-
-    if (error) {
-      throw new HttpError(500, "db_error", `Failed to upsert chat projection message: ${error.message}`);
-    }
-
-    if (data) {
-      const insertedId = asString((data as Record<string, unknown>).id, "");
-      if (insertedId) {
-        return insertedId;
-      }
-    }
-
-    const existingId = await readChatMessageIdByProjectionKey(input.orgId, input.projectionKey);
-    if (existingId) {
-      return existingId;
-    }
-    throw new HttpError(500, "db_error", "Failed to resolve chat projection message id after upsert.");
-  }
-
-  const { data, error } = await supabaseAdmin.from("chat_messages").insert(payload).select("id").single();
-  if (error || !data) {
-    throw new HttpError(500, "db_error", `Failed to insert chat message: ${error?.message ?? "unknown"}`);
-  }
-  return asString((data as Record<string, unknown>).id, "");
-};
-
-const updateLatestActionCardProjectionStatus = async (params: {
-  orgId: string;
-  workflowItem: WorkflowItemRow;
-  sessionId: string;
-}): Promise<void> => {
-  const { data, error } = await supabaseAdmin
-    .from("chat_messages")
-    .select("id, metadata")
-    .eq("org_id", params.orgId)
-    .eq("workflow_item_id", params.workflowItem.id)
-    .eq("message_type", "action_card")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "db_error", `Failed to query action-card projection: ${error.message}`);
-  }
-  if (!data) {
-    return;
-  }
-
-  const row = data as Record<string, unknown>;
-  const messageId = asString(row.id, "");
-  if (!messageId) {
-    return;
-  }
-
-  const nextMetadata = patchActionCardMetadataStatus({
-    metadata: row.metadata,
-    workflowStatus: params.workflowItem.status,
-    expectedVersion: params.workflowItem.version,
-    workflowItemId: params.workflowItem.id,
-    sessionId: params.sessionId
-  });
-
-  const { error: updateError } = await supabaseAdmin
-    .from("chat_messages")
-    .update({ metadata: nextMetadata })
-    .eq("org_id", params.orgId)
-    .eq("id", messageId);
-
-  if (updateError) {
-    throw new HttpError(500, "db_error", `Failed to update action-card projection status: ${updateError.message}`);
-  }
-};
-
 const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<string> => {
   const state = emptyStateFromTrigger(trigger);
 
@@ -617,85 +490,6 @@ const resolveExpectedVersion = (payload?: Record<string, unknown>): number | und
     }
   }
   return undefined;
-};
-
-const buildCampaignSummary = (activityFolder: string, plan: CampaignPlan): string =>
-  [
-    `캠페인 초안이 준비되었습니다: ${activityFolder}`,
-    `- 채널: ${plan.channels.join(", ")}`,
-    `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
-    "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
-  ].join("\n");
-
-const buildContentSummary = (channel: string, forbiddenCheck: ForbiddenCheckMeta): string =>
-  forbiddenCheck.passed
-    ? `첫 번째 ${channel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
-    : `첫 번째 ${channel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`;
-
-const emitCampaignActionCardProjection = async (params: {
-  orgId: string;
-  sessionId: string;
-  workflowItem: WorkflowItemRow;
-  activityFolder: string;
-  plan: CampaignPlan;
-}): Promise<string> => {
-  const campaignProjectionKey = buildProjectionKey({
-    channel: DEFAULT_CHAT_CHANNEL,
-    workflowItemId: params.workflowItem.id,
-    eventType: "campaign_proposed",
-    expectedVersion: params.workflowItem.version
-  });
-
-  return insertChatMessage({
-    orgId: params.orgId,
-    role: "assistant",
-    content: buildCampaignSummary(params.activityFolder, params.plan),
-    channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildCampaignPlanProjectionMetadata({
-      workflowItem: params.workflowItem,
-      sessionId: params.sessionId,
-      activityFolder: params.activityFolder,
-      plan: params.plan
-    }),
-    workflowItemId: params.workflowItem.id,
-    projectionKey: campaignProjectionKey
-  });
-};
-
-const emitContentActionCardProjection = async (params: {
-  orgId: string;
-  sessionId: string;
-  workflowItem: WorkflowItemRow;
-  activityFolder: string;
-  channel: string;
-  draft: string;
-  forbiddenCheck: ForbiddenCheckMeta;
-}): Promise<string> => {
-  const contentProjectionKey = buildProjectionKey({
-    channel: DEFAULT_CHAT_CHANNEL,
-    workflowItemId: params.workflowItem.id,
-    eventType: "content_proposed",
-    expectedVersion: params.workflowItem.version
-  });
-
-  return insertChatMessage({
-    orgId: params.orgId,
-    role: "assistant",
-    content: buildContentSummary(params.channel, params.forbiddenCheck),
-    channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildContentDraftProjectionMetadata({
-      workflowItem: params.workflowItem,
-      sessionId: params.sessionId,
-      activityFolder: params.activityFolder,
-      channel: params.channel,
-      draft: params.draft,
-      forbiddenCheck: params.forbiddenCheck
-    }),
-    workflowItemId: params.workflowItem.id,
-    projectionKey: contentProjectionKey
-  });
 };
 
 const generateContentDraftWithForbiddenCheck = async (params: {
@@ -850,778 +644,66 @@ const ensureContentWorkflowItemForState = async (params: {
   });
 };
 
-const applyUserMessageStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
-  if (session.current_step !== "await_user_input") {
-    throw new HttpError(
-      409,
-      "invalid_step",
-      `Session is at "${session.current_step}" and cannot process user_message event.`
-    );
-  }
-
-  const userMessage = asString(payload?.content, "").trim();
-  if (!userMessage) {
-    throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
-  }
-
-  const rawUiContext =
-    payload?.ui_context && typeof payload.ui_context === "object" && !Array.isArray(payload.ui_context)
-      ? (payload.ui_context as Record<string, unknown>)
-      : null;
-  const source = asString(rawUiContext?.source, "").trim();
-  const pageId = asString(rawUiContext?.pageId, "").trim();
-  const contextPanelMode = asString(rawUiContext?.contextPanelMode, "").trim();
-  const focusWorkflowItemId = asString(rawUiContext?.focusWorkflowItemId, "").trim();
-  const focusContentId = asString(rawUiContext?.focusContentId, "").trim();
-  const focusCampaignId = asString(rawUiContext?.focusCampaignId, "").trim();
-
-  const uiContextMetadata =
-    source && pageId
-      ? {
-          source,
-          page_id: pageId,
-          ...(contextPanelMode ? { context_panel_mode: contextPanelMode } : {}),
-          ...(focusWorkflowItemId ? { focus_workflow_item_id: focusWorkflowItemId } : {}),
-          ...(focusContentId ? { focus_content_id: focusContentId } : {}),
-          ...(focusCampaignId ? { focus_campaign_id: focusCampaignId } : {})
-        }
-      : null;
-
-  await insertChatMessage({
-    orgId: session.org_id,
-    role: "user",
-    content: userMessage,
-    ...(uiContextMetadata ? { metadata: { ui_context: uiContextMetadata } } : {})
-  });
-
-  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, userMessage);
-  const { data: campaign, error: campaignError } = await supabaseAdmin
-    .from("campaigns")
-    .insert({
-      org_id: session.org_id,
-      title: `${state.activity_folder} Campaign`,
-      activity_folder: state.activity_folder,
-      status: "draft",
-      channels: plan.channels,
-      plan
-    })
-    .select("id")
-    .single();
-
-  if (campaignError || !campaign) {
-    throw new HttpError(500, "db_error", `Failed to create campaign: ${campaignError?.message ?? "unknown"}`);
-  }
-
-  const campaignId = campaign.id as string;
-  const campaignWorkflowItem = await ensureCampaignWorkflowItem({
-    orgId: session.org_id,
-    campaignId,
-    payload: {
-      campaign_id: campaignId,
-      activity_folder: state.activity_folder,
-      user_message: userMessage,
-      plan
-    },
-    idempotencyKey: buildWorkflowCreateIdempotencyKey(session.id, "campaign_plan", campaignId, eventIdempotencyKey)
-  });
-  const summaryMessageId = await emitCampaignActionCardProjection({
-    orgId: session.org_id,
-    sessionId: session.id,
-    workflowItem: campaignWorkflowItem,
-    activityFolder: state.activity_folder,
-    plan
-  });
-  await linkWorkflowItemOriginChatMessage({
-    orgId: session.org_id,
-    itemId: campaignWorkflowItem.id,
-    chatMessageId: summaryMessageId
-  });
-
-  return {
-    state: {
-      ...state,
-      user_message: userMessage,
-      campaign_id: campaignId,
-      campaign_workflow_item_id: campaignWorkflowItem.id,
-      campaign_plan: plan,
-      content_id: null,
-      content_workflow_item_id: null,
-      content_draft: null,
-      rag_context: ragMeta,
-      forbidden_check: null,
-      last_error: null
-    },
-    step: "await_campaign_approval",
-    status: "paused"
-  };
-};
-
-const applyCampaignApprovedStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
-  if (session.current_step !== "await_campaign_approval") {
-    throw new HttpError(
-      409,
-      "invalid_step",
-      `Session is at "${session.current_step}" and cannot process campaign_approved event.`
-    );
-  }
-
-  const campaignId = resolveCampaignId(state, payload);
-  const campaignWorkflowItem = await ensureCampaignWorkflowItemForState({
-    session,
-    state,
-    campaignId,
-    eventIdempotencyKey
-  });
-  const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
-  const campaignApproval = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: campaignWorkflowItem.id,
-    action: "approved",
-    actorType: "user",
-    payload: {
-      campaign_id: campaignId,
-      topic: asString(payload?.topic, "").trim() || null
-    },
-    expectedVersion,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "campaign_approved",
-      campaignWorkflowItem.id,
-      eventIdempotencyKey,
-      "approved"
-    )
-  });
-  await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignApproval.item.status);
-  await updateLatestActionCardProjectionStatus({
-    orgId: session.org_id,
-    workflowItem: campaignApproval.item,
-    sessionId: session.id
-  });
-
-  const firstSchedule = state.campaign_plan?.suggested_schedule?.[0];
-  const firstChannel = normalizeChannel(firstSchedule?.channel);
-  const payloadTopic = asString(payload?.topic, "").trim();
-  const topic = payloadTopic || asString(firstSchedule?.type, "").trim() || state.activity_folder;
-
-  const generated = await generateContentDraftWithForbiddenCheck({
-    orgId: session.org_id,
-    activityFolder: state.activity_folder,
-    channel: firstChannel,
-    topic
-  });
-  const { draft, ragMeta, forbiddenCheck } = generated;
-
-  const { data: content, error: contentError } = await supabaseAdmin
-    .from("contents")
-    .insert({
-      org_id: session.org_id,
-      campaign_id: campaignId,
-      channel: firstChannel,
-      content_type: "text",
-      status: "pending_approval",
-      body: draft,
-      metadata: {
-        phase: "2-3",
-        source: "orchestrator",
-        rag_context: ragMeta,
-        forbidden_check: forbiddenCheck
-      },
-      created_by: "ai"
-    })
-    .select("id")
-    .single();
-
-  if (contentError || !content) {
-    throw new HttpError(500, "db_error", `Failed to create content draft: ${contentError?.message ?? "unknown"}`);
-  }
-
-  const contentId = content.id as string;
-  const contentWorkflowItem = await ensureContentWorkflowItemForState({
-    session,
-    state: {
-      ...state,
-      campaign_id: campaignId,
-      content_id: contentId,
-      content_draft: draft,
-      rag_context: ragMeta,
-      forbidden_check: forbiddenCheck
-    },
-    contentId,
-    eventIdempotencyKey
-  });
-  const contentMessageId = await emitContentActionCardProjection({
-    orgId: session.org_id,
-    sessionId: session.id,
-    workflowItem: contentWorkflowItem,
-    activityFolder: state.activity_folder,
-    channel: firstChannel,
-    draft,
-    forbiddenCheck
-  });
-  await linkWorkflowItemOriginChatMessage({
-    orgId: session.org_id,
-    itemId: contentWorkflowItem.id,
-    chatMessageId: contentMessageId
-  });
-
-  return {
-    state: {
-      ...state,
-      campaign_id: campaignId,
-      campaign_workflow_item_id: campaignApproval.item.id,
-      content_id: contentId,
-      content_workflow_item_id: contentWorkflowItem.id,
-      content_draft: draft,
-      rag_context: ragMeta,
-      forbidden_check: forbiddenCheck,
-      last_error: null
-    },
-    step: "await_content_approval",
-    status: "paused"
-  };
-};
-
-const applyContentApprovedStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: true }> => {
-  if (session.current_step !== "await_content_approval") {
-    throw new HttpError(
-      409,
-      "invalid_step",
-      `Session is at "${session.current_step}" and cannot process content_approved event.`
-    );
-  }
-
-  const contentId = resolveContentId(state, payload);
-  const editedBody = asString(payload?.edited_body, "").trim();
-  const publishedAt = new Date().toISOString();
-  const shouldCaptureEditPattern =
-    !!editedBody && !!state.content_draft?.trim() && editedBody !== state.content_draft.trim();
-  const editPatternChannel = normalizeChannel(state.campaign_plan?.suggested_schedule?.[0]?.channel);
-  const contentWorkflowItem = await ensureContentWorkflowItemForState({
-    session,
-    state,
-    contentId,
-    eventIdempotencyKey
-  });
-  const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
-  const contentApproval = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: contentWorkflowItem.id,
-    action: "approved",
-    actorType: "user",
-    payload: {
-      content_id: contentId,
-      ...(editedBody ? { edited_body: editedBody } : {})
-    },
-    expectedVersion,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "content_approved",
-      contentWorkflowItem.id,
-      eventIdempotencyKey,
-      "approved"
-    )
-  });
-  await updateLatestActionCardProjectionStatus({
-    orgId: session.org_id,
-    workflowItem: contentApproval.item,
-    sessionId: session.id
-  });
-  await mirrorContentStatusFromWorkflow({
-    orgId: session.org_id,
-    contentId,
-    workflowStatus: contentApproval.item.status,
-    editedBody,
-    publishedAt
-  });
-
-  if (state.campaign_id) {
-    const { error: campaignError } = await supabaseAdmin
-      .from("campaigns")
-      .update({ status: "active" })
-      .eq("id", state.campaign_id)
-      .eq("org_id", session.org_id);
-
-    if (campaignError) {
-      throw new HttpError(500, "db_error", `Failed to update campaign status: ${campaignError.message}`);
-    }
-  }
-
-  await insertChatMessage({
-    orgId: session.org_id,
-    role: "assistant",
-    content: "콘텐츠 게시가 완료되었습니다(시뮬레이션)."
-  });
-
-  void onContentPublished(session.org_id, contentId).catch((error) => {
-    console.warn(
-      `[CONTENT_EMBED] Background embed failed. org=${session.org_id}, content=${contentId}, reason=${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-  });
-
-  if (shouldCaptureEditPattern) {
-    void onContentEdited(session.org_id, state.content_draft as string, editedBody, editPatternChannel).catch((error) => {
-      console.warn(
-        `[EDIT_PATTERN] Background extraction failed. org=${session.org_id}, content=${contentId}, reason=${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    });
-  }
-
-  void invalidateMemoryCache(session.org_id).catch((error) => {
-    console.warn(
-      `[MEMORY] Cache invalidation failed. org=${session.org_id}, reason=${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-  });
-
-  await updateTrigger(state.trigger_id, { status: "done" });
-
-  return {
-    state: {
-      ...state,
-      content_id: contentId,
-      content_workflow_item_id: contentApproval.item.id,
-      last_error: null
-    },
-    step: "done",
-    status: "done",
-    completed: true
-  };
-};
-
-const applyCampaignRevisionStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
-  if (session.current_step !== "await_campaign_approval") {
-    throw new HttpError(
-      409,
-      "invalid_step",
-      `Session is at "${session.current_step}" and cannot process campaign revision event.`
-    );
-  }
-
-  const campaignId = resolveCampaignId(state, payload);
-  const reason = asString(payload?.reason, "").trim();
-  if (!reason) {
-    throw new HttpError(400, "invalid_payload", "payload.reason is required when payload.mode is revision.");
-  }
-
-  const campaignWorkflowItem = await ensureCampaignWorkflowItemForState({
-    session,
-    state,
-    campaignId,
-    eventIdempotencyKey
-  });
-  const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
-  const revisionRequested = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: campaignWorkflowItem.id,
-    action: "request_revision",
-    actorType: "user",
-    payload: { mode: "revision", reason },
-    expectedVersion,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "campaign_rejected",
-      campaignWorkflowItem.id,
-      eventIdempotencyKey,
-      "request_revision"
-    )
-  });
-  await updateLatestActionCardProjectionStatus({
-    orgId: session.org_id,
-    workflowItem: revisionRequested.item,
-    sessionId: session.id
-  });
-
-  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, state.user_message ?? "", {
-    previousPlan: state.campaign_plan,
-    revisionReason: reason
-  });
-
-  const { error: updateCampaignError } = await supabaseAdmin
-    .from("campaigns")
-    .update({
-      status: "draft",
-      channels: plan.channels,
-      plan
-    })
-    .eq("id", campaignId)
-    .eq("org_id", session.org_id);
-  if (updateCampaignError) {
-    throw new HttpError(500, "db_error", `Failed to apply revised campaign plan: ${updateCampaignError.message}`);
-  }
-
-  const resubmitted = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: campaignWorkflowItem.id,
-    action: "resubmitted",
-    actorType: "assistant",
-    payload: { mode: "revision", reason, plan },
-    expectedVersion: revisionRequested.item.version,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "campaign_rejected",
-      campaignWorkflowItem.id,
-      eventIdempotencyKey,
-      "resubmitted"
-    )
-  });
-  await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, resubmitted.item.status);
-
-  const messageId = await emitCampaignActionCardProjection({
-    orgId: session.org_id,
-    sessionId: session.id,
-    workflowItem: resubmitted.item,
-    activityFolder: state.activity_folder,
-    plan
-  });
-  await linkWorkflowItemOriginChatMessage({
-    orgId: session.org_id,
-    itemId: resubmitted.item.id,
-    chatMessageId: messageId
-  });
-
-  return {
-    state: {
-      ...state,
-      campaign_id: campaignId,
-      campaign_workflow_item_id: resubmitted.item.id,
-      campaign_plan: plan,
-      rag_context: ragMeta,
-      last_error: null
-    },
-    step: "await_campaign_approval",
-    status: "paused"
-  };
-};
-
-const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-
-const applyContentRevisionStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus }> => {
-  if (session.current_step !== "await_content_approval") {
-    throw new HttpError(
-      409,
-      "invalid_step",
-      `Session is at "${session.current_step}" and cannot process content revision event.`
-    );
-  }
-
-  const contentId = resolveContentId(state, payload);
-  const reason = asString(payload?.reason, "").trim();
-  if (!reason) {
-    throw new HttpError(400, "invalid_payload", "payload.reason is required when payload.mode is revision.");
-  }
-
-  const contentWorkflowItem = await ensureContentWorkflowItemForState({
-    session,
-    state,
-    contentId,
-    eventIdempotencyKey
-  });
-  const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
-  const revisionRequested = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: contentWorkflowItem.id,
-    action: "request_revision",
-    actorType: "user",
-    payload: { mode: "revision", reason },
-    expectedVersion,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "content_rejected",
-      contentWorkflowItem.id,
-      eventIdempotencyKey,
-      "request_revision"
-    )
-  });
-  await updateLatestActionCardProjectionStatus({
-    orgId: session.org_id,
-    workflowItem: revisionRequested.item,
-    sessionId: session.id
-  });
-
-  const { data: contentRow, error: contentReadError } = await supabaseAdmin
-    .from("contents")
-    .select("channel, body, metadata")
-    .eq("org_id", session.org_id)
-    .eq("id", contentId)
-    .maybeSingle();
-  if (contentReadError) {
-    throw new HttpError(500, "db_error", `Failed to read content for revision: ${contentReadError.message}`);
-  }
-  if (!contentRow) {
-    throw new HttpError(404, "not_found", "Content not found for revision.");
-  }
-
-  const channel = normalizeChannel((contentRow as Record<string, unknown>).channel);
-  const previousDraft = asString((contentRow as Record<string, unknown>).body, state.content_draft ?? "");
-  const topicHint = asString(state.campaign_plan?.suggested_schedule?.[0]?.type, "").trim();
-  const generated = await generateContentDraftWithForbiddenCheck({
-    orgId: session.org_id,
-    activityFolder: state.activity_folder,
-    channel,
-    topic: topicHint || state.activity_folder,
-    revisionReason: reason,
-    previousDraft
-  });
-
-  const nextMetadata = {
-    ...asRecord((contentRow as Record<string, unknown>).metadata),
-    phase: "3-3",
-    source: "orchestrator_revision",
-    rag_context: generated.ragMeta,
-    forbidden_check: generated.forbiddenCheck,
-    revision_reason: reason,
-    revised_at: new Date().toISOString()
-  };
-
-  const { error: contentUpdateError } = await supabaseAdmin
-    .from("contents")
-    .update({
-      channel,
-      status: "pending_approval",
-      body: generated.draft,
-      metadata: nextMetadata,
-      published_at: null
-    })
-    .eq("org_id", session.org_id)
-    .eq("id", contentId);
-  if (contentUpdateError) {
-    throw new HttpError(500, "db_error", `Failed to apply revised content draft: ${contentUpdateError.message}`);
-  }
-
-  const resubmitted = await applyWorkflowAction({
-    orgId: session.org_id,
-    itemId: contentWorkflowItem.id,
-    action: "resubmitted",
-    actorType: "assistant",
-    payload: {
-      mode: "revision",
-      reason,
-      draft: generated.draft,
-      channel,
-      rag_context: generated.ragMeta,
-      forbidden_check: generated.forbiddenCheck
-    },
-    expectedVersion: revisionRequested.item.version,
-    idempotencyKey: buildWorkflowActionIdempotencyKey(
-      session.id,
-      "content_rejected",
-      contentWorkflowItem.id,
-      eventIdempotencyKey,
-      "resubmitted"
-    )
-  });
-  await mirrorContentStatusFromWorkflow({
-    orgId: session.org_id,
-    contentId,
-    workflowStatus: resubmitted.item.status
-  });
-
-  const messageId = await emitContentActionCardProjection({
-    orgId: session.org_id,
-    sessionId: session.id,
-    workflowItem: resubmitted.item,
-    activityFolder: state.activity_folder,
-    channel,
-    draft: generated.draft,
-    forbiddenCheck: generated.forbiddenCheck
-  });
-  await linkWorkflowItemOriginChatMessage({
-    orgId: session.org_id,
-    itemId: resubmitted.item.id,
-    chatMessageId: messageId
-  });
-
-  return {
-    state: {
-      ...state,
-      content_id: contentId,
-      content_workflow_item_id: resubmitted.item.id,
-      content_draft: generated.draft,
-      rag_context: generated.ragMeta,
-      forbidden_check: generated.forbiddenCheck,
-      last_error: null
-    },
-    step: "await_content_approval",
-    status: "paused"
-  };
-};
-
-const applyTerminalRejectStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  type: "campaign_rejected" | "content_rejected",
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: true }> => {
-  const reason = asString(payload?.reason, "").trim();
-  let nextCampaignWorkflowId = state.campaign_workflow_item_id;
-  let nextContentWorkflowId = state.content_workflow_item_id;
-
-  if (type === "campaign_rejected") {
-    const campaignId = resolveCampaignId(state, payload);
-    const campaignWorkflowItem = await ensureCampaignWorkflowItemForState({
-      session,
-      state,
-      campaignId,
-      eventIdempotencyKey
-    });
-    const expectedVersion = resolveExpectedVersion(payload) ?? campaignWorkflowItem.version;
-    const campaignRejection = await applyWorkflowAction({
-      orgId: session.org_id,
-      itemId: campaignWorkflowItem.id,
-      action: "rejected",
-      actorType: "user",
-      payload: reason ? { reason } : {},
-      expectedVersion,
-      idempotencyKey: buildWorkflowActionIdempotencyKey(
-        session.id,
-        "campaign_rejected",
-        campaignWorkflowItem.id,
-        eventIdempotencyKey,
-        "rejected"
-      )
-    });
-    await updateLatestActionCardProjectionStatus({
-      orgId: session.org_id,
-      workflowItem: campaignRejection.item,
-      sessionId: session.id
-    });
-    await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignRejection.item.status);
-    nextCampaignWorkflowId = campaignRejection.item.id;
-  } else {
-    const contentId = resolveContentId(state, payload);
-    const contentWorkflowItem = await ensureContentWorkflowItemForState({
-      session,
-      state,
-      contentId,
-      eventIdempotencyKey
-    });
-    const expectedVersion = resolveExpectedVersion(payload) ?? contentWorkflowItem.version;
-    const contentRejection = await applyWorkflowAction({
-      orgId: session.org_id,
-      itemId: contentWorkflowItem.id,
-      action: "rejected",
-      actorType: "user",
-      payload: reason ? { reason } : {},
-      expectedVersion,
-      idempotencyKey: buildWorkflowActionIdempotencyKey(
-        session.id,
-        "content_rejected",
-        contentWorkflowItem.id,
-        eventIdempotencyKey,
-        "rejected"
-      )
-    });
-    await updateLatestActionCardProjectionStatus({
-      orgId: session.org_id,
-      workflowItem: contentRejection.item,
-      sessionId: session.id
-    });
-    await mirrorContentStatusFromWorkflow({
-      orgId: session.org_id,
-      contentId,
-      workflowStatus: contentRejection.item.status
-    });
-    nextContentWorkflowId = contentRejection.item.id;
-  }
-
-  await insertChatMessage({
-    orgId: session.org_id,
-    role: "assistant",
-    content: reason
-      ? `요청을 반영했습니다. 세션을 종료합니다. 사유: ${reason}`
-      : "요청을 반영했습니다. 세션을 종료합니다."
-  });
-  await updateTrigger(state.trigger_id, { status: "failed" });
-
-  return {
-    state: {
-      ...state,
-      campaign_workflow_item_id: nextCampaignWorkflowId,
-      content_workflow_item_id: nextContentWorkflowId,
-      last_error: reason || "rejected_by_user"
-    },
-    step: session.current_step,
-    status: "failed",
-    completed: true
-  };
-};
-
-const applyRejectStep = async (
-  session: OrchestratorSessionRow,
-  state: SessionState,
-  type: "campaign_rejected" | "content_rejected",
-  payload?: Record<string, unknown>,
-  eventIdempotencyKey: string | null = null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
-  const mode = asString(payload?.mode, "").trim().toLowerCase();
-
-  if (mode === "revision") {
-    if (type === "campaign_rejected") {
-      const next = await applyCampaignRevisionStep(session, state, payload, eventIdempotencyKey);
-      return { ...next, completed: false };
-    }
-
-    const next = await applyContentRevisionStep(session, state, payload, eventIdempotencyKey);
-    return { ...next, completed: false };
-  }
-
-  return applyTerminalRejectStep(session, state, type, payload, eventIdempotencyKey);
-};
-
 const processResumeEvent = async (
   session: OrchestratorSessionRow,
   state: SessionState,
   event: ResumeEventRequest,
   idempotencyKey: string | null
 ): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
+  const campaignStepDeps = {
+    asString,
+    resolveCampaignId,
+    resolveExpectedVersion,
+    normalizeChannel,
+    buildWorkflowCreateIdempotencyKey,
+    buildWorkflowActionIdempotencyKey,
+    ensureCampaignWorkflowItemForState,
+    ensureContentWorkflowItemForState,
+    emitCampaignActionCardProjection,
+    emitContentActionCardProjection,
+    updateLatestActionCardProjectionStatus,
+    mirrorCampaignStatusFromWorkflow,
+    generateContentDraftWithForbiddenCheck,
+    insertChatMessage,
+    updateTrigger
+  };
+
+  const contentStepDeps = {
+    asString,
+    asRecord,
+    normalizeChannel,
+    resolveContentId,
+    resolveExpectedVersion,
+    buildWorkflowActionIdempotencyKey,
+    ensureContentWorkflowItemForState,
+    updateLatestActionCardProjectionStatus,
+    mirrorContentStatusFromWorkflow,
+    emitContentActionCardProjection,
+    generateContentDraftWithForbiddenCheck,
+    insertChatMessage,
+    updateTrigger,
+    runContentApprovalSideEffects
+  };
+
   switch (event.event_type) {
     case "user_message": {
-      const next = await applyUserMessageStep(session, state, event.payload, idempotencyKey);
+      const next = await applyUserMessageStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
       return { ...next, completed: false };
     }
     case "campaign_approved": {
-      const next = await applyCampaignApprovedStep(session, state, event.payload, idempotencyKey);
+      const next = await applyCampaignApprovedStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
       return { ...next, completed: false };
     }
     case "content_approved": {
-      const next = await applyContentApprovedStep(session, state, event.payload, idempotencyKey);
+      const next = await applyContentApprovedStep(session, state, event.payload, idempotencyKey, contentStepDeps);
       return next;
     }
-    case "campaign_rejected":
+    case "campaign_rejected": {
+      const next = await applyCampaignRejectStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
+      return next;
+    }
     case "content_rejected": {
-      const next = await applyRejectStep(session, state, event.event_type, event.payload, idempotencyKey);
+      const next = await applyContentRejectStep(session, state, event.payload, idempotencyKey, contentStepDeps);
       return next;
     }
     default:
