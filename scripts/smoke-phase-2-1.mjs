@@ -1,87 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import {
+  assert,
+  createUserWithToken,
+  loadEnvFile,
+  nowIso,
+  readSupabaseStatusEnv
+} from "./lib/smoke-harness.mjs";
 
 const STORAGE_DIM = 1536;
 const PASSWORD = "Phase2Smoke!12345";
-
-const loadEnvFile = (filePath) => {
-  if (!fs.existsSync(filePath)) {
-    return;
-  }
-
-  const raw = fs.readFileSync(filePath, "utf8");
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim();
-    if (!key || process.env[key]) {
-      continue;
-    }
-
-    process.env[key] = value;
-  }
-};
-
-const runCommandCapture = (command, args, options = {}) =>
-  new Promise((resolve, reject) => {
-    const child =
-      process.platform === "win32"
-        ? spawn("cmd.exe", ["/d", "/s", "/c", [command, ...args].join(" ")], options)
-        : spawn(command, args, options);
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(`Command failed (${command} ${args.join(" ")}): ${stderr || stdout}`));
-    });
-  });
-
-const parseEnvMap = (raw) => {
-  const map = {};
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || !trimmed.includes("=")) {
-      continue;
-    }
-    const [key, ...rest] = trimmed.split("=");
-    const rawValue = rest.join("=").trim();
-    const value =
-      rawValue.startsWith("\"") && rawValue.endsWith("\"") ? rawValue.slice(1, rawValue.length - 1) : rawValue;
-    map[key] = value;
-  }
-  return map;
-};
-
-const assert = (condition, message) => {
-  if (!condition) {
-    throw new Error(message);
-  }
-};
-
-const nowIso = () => new Date().toISOString();
 
 const makeStorageVector = ({ profileDim, hotIndex }) => {
   if (profileDim < 1 || profileDim > STORAGE_DIM) {
@@ -94,30 +23,6 @@ const makeStorageVector = ({ profileDim, hotIndex }) => {
   const vector = new Array(STORAGE_DIM).fill(0);
   vector[hotIndex] = 1;
   return vector;
-};
-
-const createUserWithToken = async ({ adminClient, anonClient, email, password }) => {
-  const { data: created, error: createError } = await adminClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true
-  });
-  if (createError || !created.user) {
-    throw new Error(`Failed to create auth user (${email}): ${createError?.message ?? "unknown"}`);
-  }
-
-  const { data: signedIn, error: signInError } = await anonClient.auth.signInWithPassword({
-    email,
-    password
-  });
-  if (signInError || !signedIn.session?.access_token) {
-    throw new Error(`Failed to sign in user (${email}): ${signInError?.message ?? "unknown"}`);
-  }
-
-  return {
-    userId: created.user.id,
-    accessToken: signedIn.session.access_token
-  };
 };
 
 const createUserClient = (url, anonKey, token) =>
@@ -135,8 +40,7 @@ const main = async () => {
   loadEnvFile(path.join(cwd, ".env"));
   loadEnvFile(path.join(cwd, ".env.local"));
 
-  const { stdout } = await runCommandCapture("pnpm", ["exec", "supabase", "status", "-o", "env"], { cwd });
-  const statusEnv = parseEnvMap(stdout);
+  const statusEnv = await readSupabaseStatusEnv({ cwd });
   const supabaseUrl = (statusEnv.API_URL ?? "").trim();
   const anonKey = (statusEnv.ANON_KEY ?? "").trim();
   const serviceRoleKey = (statusEnv.SERVICE_ROLE_KEY ?? "").trim();

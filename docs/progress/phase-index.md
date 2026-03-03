@@ -37,4 +37,5 @@
 | UI-7 | Hardening, Regression Validation, and Release Gate | Done | 2026-03-03 | [ui-7-completion.md](./ui-7-completion.md) |
 | 4-1 | Correctness and Security (P0) | Done | 2026-03-03 | [phase-4-1-completion.md](./phase-4-1-completion.md) |
 | 4-2 | Duplication Cleanup (P1) | Done | 2026-03-03 | [phase-4-2-completion.md](./phase-4-2-completion.md) |
+| 4-3 | Test Harness Consolidation (P1) | Done | 2026-03-03 | [phase-4-3-completion.md](./phase-4-3-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |

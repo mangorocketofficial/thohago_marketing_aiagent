@@ -1,6 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
-import { spawn } from "node:child_process";
 import process from "node:process";
+import {
+  assert,
+  fetchJson,
+  readSupabaseStatusEnv,
+  startApiServer,
+  stopProcessTree,
+  waitForHealth
+} from "./lib/smoke-harness.mjs";
 
 const SEED_ORG_ID = "a1b2c3d4-0000-0000-0000-000000000001";
 const API_PORT = Number.parseInt(process.env.SMOKE_API_PORT ?? "3011", 10);
@@ -11,150 +18,9 @@ const HEALTH_TIMEOUT_MS = 30_000;
 
 const pnpmCommand = "pnpm";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const quoteCmdArg = (value) => {
-  if (/^[a-zA-Z0-9_./:-]+$/.test(value)) {
-    return value;
-  }
-  return `"${value.replace(/"/g, '""')}"`;
-};
-
-const spawnProcess = (command, args, options = {}) => {
-  if (process.platform === "win32") {
-    const cmdLine = [command, ...args].map((item) => quoteCmdArg(item)).join(" ");
-    return spawn("cmd.exe", ["/d", "/s", "/c", cmdLine], options);
-  }
-  return spawn(command, args, options);
-};
-
-const runCommandCapture = (command, args, options = {}) =>
-  new Promise((resolve, reject) => {
-    const child = spawnProcess(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...options
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(`Command failed (${command} ${args.join(" ")}):\n${stderr || stdout}`));
-    });
-  });
-
-const parseSupabaseStatusEnv = (rawOutput) => {
-  const map = {};
-  for (const line of rawOutput.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || !trimmed.includes("=")) {
-      continue;
-    }
-
-    const [key, ...rest] = trimmed.split("=");
-    const valueRaw = rest.join("=").trim();
-    const value =
-      valueRaw.startsWith("\"") && valueRaw.endsWith("\"")
-        ? valueRaw.slice(1, -1)
-        : valueRaw;
-    map[key] = value;
-  }
-
-  return map;
-};
-
-const assert = (condition, message) => {
-  if (!condition) {
-    throw new Error(message);
-  }
-};
-
-const fetchJson = async (url, options) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-
-    const text = await response.text();
-    let body = null;
-    try {
-      body = text ? JSON.parse(text) : null;
-    } catch {
-      body = { raw: text };
-    }
-
-    return { response, body };
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const waitForHealth = async () => {
-  const startedAt = Date.now();
-  let lastError = null;
-
-  while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
-    try {
-      const { response, body } = await fetchJson(`${API_BASE}/health`, { method: "GET" });
-      if (response.ok && body?.ok) {
-        return;
-      }
-      lastError = new Error(`Health not ready: HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await sleep(500);
-  }
-
-  throw new Error(`API health check timeout: ${lastError?.message ?? "unknown error"}`);
-};
-
-const stopProcessTree = async (child) => {
-  if (!child || child.killed) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    try {
-      await runCommandCapture("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
-      return;
-    } catch {
-      // fallback below
-    }
-  }
-
-  try {
-    child.kill("SIGTERM");
-  } catch {
-    // ignore
-  }
-};
-
 const main = async () => {
   const cwd = process.cwd();
-  const { stdout: statusOutput } = await runCommandCapture(
-    pnpmCommand,
-    ["exec", "supabase", "status", "-o", "env"],
-    { cwd }
-  );
-  const envMap = parseSupabaseStatusEnv(statusOutput);
+  const envMap = await readSupabaseStatusEnv({ cwd, pnpmCommand });
 
   const supabaseUrl = envMap.API_URL;
   const serviceRoleKey = envMap.SERVICE_ROLE_KEY;
@@ -178,39 +44,19 @@ const main = async () => {
   const campaignRevisionReason = "채널을 인스타그램 중심으로 조정하고 CTA를 더 선명하게 해주세요.";
   const contentRevisionReason = "문장을 더 간결하게 하고 후원 CTA를 마지막 문장에 넣어주세요.";
 
-  const apiLogs = [];
-  const apiServer = spawnProcess(
-    pnpmCommand,
-    ["-C", "apps/api", "dev"],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
-        SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
-        API_PORT: String(API_PORT),
-        API_SECRET,
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
-        ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL ?? "claude-opus-4-5"
-      },
-      stdio: ["ignore", "pipe", "pipe"]
-    }
-  );
-
-  apiServer.stdout.on("data", (chunk) => {
-    const line = chunk.toString();
-    apiLogs.push(`[stdout] ${line}`);
-    if (apiLogs.length > 200) {
-      apiLogs.shift();
-    }
-  });
-
-  apiServer.stderr.on("data", (chunk) => {
-    const line = chunk.toString();
-    apiLogs.push(`[stderr] ${line}`);
-    if (apiLogs.length > 200) {
-      apiLogs.shift();
-    }
+  const apiServer = startApiServer({
+    cwd,
+    env: {
+      ...process.env,
+      NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
+      SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+      API_PORT: String(API_PORT),
+      API_SECRET,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
+      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL ?? "claude-opus-4-5"
+    },
+    pnpmArgs: ["-C", "apps/api", "dev"],
+    maxLogLines: 200
   });
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
@@ -223,7 +69,13 @@ const main = async () => {
   let contentId = "";
 
   try {
-    await waitForHealth();
+    await waitForHealth({
+      baseUrl: API_BASE,
+      timeoutMs: HEALTH_TIMEOUT_MS,
+      intervalMs: 500,
+      requireBodyOk: true,
+      requestTimeoutMs: HTTP_TIMEOUT_MS
+    });
     console.log(`PASS - API server is healthy at ${API_BASE}`);
 
     const triggerReq = await fetchJson(`${API_BASE}/trigger`, {
@@ -815,15 +667,16 @@ const main = async () => {
   } catch (error) {
     console.error("\nSMOKE TEST RESULT: FAIL");
     console.error(error);
-    if (apiLogs.length > 0) {
+    const apiLogLines = apiServer.getLogLines();
+    if (apiLogLines.length > 0) {
       console.error("\n--- API Logs (tail) ---");
-      for (const line of apiLogs.slice(-30)) {
+      for (const line of apiLogLines.slice(-30)) {
         process.stderr.write(line.endsWith("\n") ? line : `${line}\n`);
       }
     }
     process.exitCode = 1;
   } finally {
-    await stopProcessTree(apiServer);
+    await stopProcessTree(apiServer.child);
   }
 };
 

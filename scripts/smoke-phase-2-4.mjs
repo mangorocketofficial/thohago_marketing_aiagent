@@ -1,260 +1,32 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import {
+  assert,
+  createReport,
+  createUserWithToken,
+  loadEnvFile,
+  nowIso,
+  readSupabaseStatusEnv,
+  requestJson,
+  startApiServer,
+  stopProcessTree,
+  tailLines,
+  waitForHealth,
+  withCheck,
+  writeJsonReport
+} from "./lib/smoke-harness.mjs";
 
 const PASSWORD = "Phase24Smoke!12345";
 const API_START_TIMEOUT_MS = 120_000;
 const REPORT_PATH = path.join("docs", "reports", "phase-2-4-test-result.json");
 
-const loadEnvFile = (filePath) => {
-  if (!fs.existsSync(filePath)) {
-    return;
-  }
-
-  const raw = fs.readFileSync(filePath, "utf8");
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim();
-    if (!key || process.env[key]) {
-      continue;
-    }
-
-    process.env[key] = value;
-  }
-};
-
-const runCommandCapture = (command, args, options = {}) =>
-  new Promise((resolve, reject) => {
-    const child =
-      process.platform === "win32"
-        ? spawn("cmd.exe", ["/d", "/s", "/c", [command, ...args].join(" ")], options)
-        : spawn(command, args, options);
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(`Command failed (${command} ${args.join(" ")}): ${stderr || stdout}`));
-    });
+const writeReport = (report) =>
+  writeJsonReport({
+    report,
+    latestPath: REPORT_PATH,
+    timestampPrefix: "phase-2-4-test-result"
   });
-
-const parseEnvMap = (raw) => {
-  const map = {};
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || !trimmed.includes("=")) {
-      continue;
-    }
-    const [key, ...rest] = trimmed.split("=");
-    const rawValue = rest.join("=").trim();
-    const value =
-      rawValue.startsWith("\"") && rawValue.endsWith("\"") ? rawValue.slice(1, rawValue.length - 1) : rawValue;
-    map[key] = value;
-  }
-  return map;
-};
-
-const sleep = async (ms) =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-
-const assert = (condition, message) => {
-  if (!condition) {
-    throw new Error(message);
-  }
-};
-
-const nowIso = () => new Date().toISOString();
-
-const requestJson = async (url, options = {}) => {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
-  return {
-    ok: response.ok,
-    status: response.status,
-    text,
-    json
-  };
-};
-
-const startApiServer = ({ cwd, env }) => {
-  const args = ["--filter", "@repo/api", "dev"];
-  const child =
-    process.platform === "win32"
-      ? spawn("cmd.exe", ["/d", "/s", "/c", `pnpm ${args.join(" ")}`], {
-          cwd,
-          env,
-          stdio: ["ignore", "pipe", "pipe"]
-        })
-      : spawn("pnpm", args, {
-          cwd,
-          env,
-          stdio: ["ignore", "pipe", "pipe"]
-        });
-
-  let logs = "";
-  child.stdout.on("data", (chunk) => {
-    logs += chunk.toString();
-  });
-  child.stderr.on("data", (chunk) => {
-    logs += chunk.toString();
-  });
-
-  return {
-    child,
-    getLogs: () => logs
-  };
-};
-
-const stopApiServer = async (child) => {
-  if (!child || child.exitCode !== null) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    await runCommandCapture("taskkill", ["/pid", String(child.pid), "/t", "/f"]).catch(() => {});
-    return;
-  }
-
-  child.kill("SIGTERM");
-  await new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve(undefined);
-    }, 10_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve(undefined);
-    });
-  });
-};
-
-const waitForHealth = async (baseUrl) => {
-  const deadline = Date.now() + API_START_TIMEOUT_MS;
-  let lastError = "health check not started";
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseUrl}/health`);
-      if (response.ok) {
-        return;
-      }
-      lastError = `HTTP ${response.status}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await sleep(1_000);
-  }
-  throw new Error(`API health check timed out (${lastError})`);
-};
-
-const tailLines = (value, maxLines = 50) => {
-  const lines = String(value ?? "").split(/\r?\n/);
-  return lines.slice(Math.max(0, lines.length - maxLines)).join("\n");
-};
-
-const createReport = () => ({
-  run_id: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-  started_at: nowIso(),
-  finished_at: null,
-  success: false,
-  checks: [],
-  metrics: {},
-  environment: {},
-  artifacts: {},
-  error: null
-});
-
-const addCheck = (report, name, pass, details = {}) => {
-  report.checks.push({
-    name,
-    pass,
-    checked_at: nowIso(),
-    ...details
-  });
-};
-
-const withCheck = async (report, name, fn) => {
-  const started = Date.now();
-  try {
-    const details = (await fn()) ?? {};
-    addCheck(report, name, true, { duration_ms: Date.now() - started, details });
-    return details;
-  } catch (error) {
-    addCheck(report, name, false, {
-      duration_ms: Date.now() - started,
-      details: {
-        error: error instanceof Error ? error.message : String(error)
-      }
-    });
-    throw error;
-  }
-};
-
-const writeReport = (report) => {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const timestampedPath = path.join("docs", "reports", `phase-2-4-test-result-${timestamp}.json`);
-  fs.mkdirSync(path.dirname(REPORT_PATH), { recursive: true });
-  const serialized = JSON.stringify(report, null, 2);
-  fs.writeFileSync(REPORT_PATH, serialized, "utf8");
-  fs.writeFileSync(timestampedPath, serialized, "utf8");
-  return {
-    latest: REPORT_PATH,
-    timestamped: timestampedPath
-  };
-};
-
-const createUserWithToken = async ({ adminClient, anonClient, email, password }) => {
-  const { data: created, error: createError } = await adminClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true
-  });
-  if (createError || !created.user) {
-    throw new Error(`Failed to create auth user (${email}): ${createError?.message ?? "unknown"}`);
-  }
-
-  const { data: signedIn, error: signInError } = await anonClient.auth.signInWithPassword({
-    email,
-    password
-  });
-  if (signInError || !signedIn.session?.access_token) {
-    throw new Error(`Failed to sign in user (${email}): ${signInError?.message ?? "unknown"}`);
-  }
-
-  return {
-    userId: created.user.id,
-    accessToken: signedIn.session.access_token
-  };
-};
 
 const createEmbedding = async ({ apiKey, model, dimensions, input }) => {
   const body = {
@@ -310,23 +82,22 @@ const main = async () => {
     loadEnvFile(path.join(cwd, ".env.local"));
 
     const status = await withCheck(report, "supabase_status_env", async () => {
-      const { stdout } = await runCommandCapture("pnpm", ["exec", "supabase", "status", "-o", "env"], { cwd });
-      const statusEnv = parseEnvMap(stdout);
+      const statusEnv = await readSupabaseStatusEnv({ cwd });
       assert(statusEnv.API_URL, "Missing API_URL from `supabase status -o env`.");
       assert(statusEnv.ANON_KEY, "Missing ANON_KEY from `supabase status -o env`.");
       assert(statusEnv.SERVICE_ROLE_KEY, "Missing SERVICE_ROLE_KEY from `supabase status -o env`.");
       return {
         api_url: statusEnv.API_URL,
+        anon_key: statusEnv.ANON_KEY,
+        service_role_key: statusEnv.SERVICE_ROLE_KEY,
         anon_key_present: !!statusEnv.ANON_KEY,
         service_role_key_present: !!statusEnv.SERVICE_ROLE_KEY
       };
     });
 
     const supabaseUrl = status.api_url;
-    const { stdout } = await runCommandCapture("pnpm", ["exec", "supabase", "status", "-o", "env"], { cwd });
-    const statusEnv = parseEnvMap(stdout);
-    const anonKey = statusEnv.ANON_KEY;
-    const serviceRoleKey = statusEnv.SERVICE_ROLE_KEY;
+    const anonKey = status.anon_key;
+    const serviceRoleKey = status.service_role_key;
     const apiSecret = (process.env.API_SECRET ?? "").trim();
     const openAiApiKey = (process.env.OPENAI_API_KEY ?? "").trim();
     const ragEmbeddingModel = (process.env.RAG_EMBEDDING_MODEL ?? "text-embedding-3-small").trim();
@@ -360,7 +131,7 @@ const main = async () => {
 
     await withCheck(report, "api_startup", async () => {
       apiServer = startApiServer({ cwd, env: apiEnv });
-      await waitForHealth(apiBaseUrl);
+      await waitForHealth({ baseUrl: apiBaseUrl, timeoutMs: API_START_TIMEOUT_MS });
       return {
         api_base_url: apiBaseUrl
       };
@@ -795,7 +566,7 @@ const main = async () => {
       });
     }
 
-    await stopApiServer(apiServer?.child);
+    await stopProcessTree(apiServer?.child);
     if (apiServer) {
       report.artifacts.api_log_tail = tailLines(apiServer.getLogs());
     }
