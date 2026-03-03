@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { NavigationProvider } from "./context/NavigationContext";
+import { useChat } from "./hooks/useChat";
+import { usePendingApprovals } from "./hooks/usePendingApprovals";
+import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
+import { AgentChatPage } from "./pages/AgentChat";
+import { DashboardPage } from "./pages/Dashboard";
+import { SettingsPage } from "./pages/Settings";
 import type {
   Campaign,
   ChatMessage,
@@ -36,8 +42,8 @@ const FALLBACK_ENTITLEMENT: OrgEntitlement = {
   current_period_end: null
 };
 
-const resolveOnboardingEntryStep = (onboardingCompleted: boolean): OnboardingStep =>
-  onboardingCompleted ? 1 : 0;
+const resolveOnboardingEntryStep = (watchPath: string | null | undefined): OnboardingStep =>
+  String(watchPath ?? "").trim() ? 1 : 0;
 
 const defaultOnboardingDraft = (): OnboardingDraft => ({
   websiteUrl: "",
@@ -297,11 +303,11 @@ const App = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
   const [pendingContents, setPendingContents] = useState<Content[]>([]);
-  const [contentEdits, setContentEdits] = useState<Record<string, string>>({});
-  const [chatInput, setChatInput] = useState("");
   const [chatNotice, setChatNotice] = useState("");
   const [isActionPending, setIsActionPending] = useState(false);
   const refreshActiveSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { chatInput, setChatInput, clearChatInput, campaignToReview } = useChat(draftCampaigns);
+  const { contentEdits, updateContentEdit, removeContentEdit } = usePendingApprovals(pendingContents);
 
   const sortedFiles = useMemo(
     () =>
@@ -339,6 +345,15 @@ const App = () => {
   }, [synthesisResult]);
   const isEntitled = entitlement?.is_entitled === true;
   const entitlementStatus = entitlement?.status ?? FALLBACK_ENTITLEMENT.status;
+  const runtimeSummary = useRuntime({
+    runtimePlatform: runtime?.platform ?? "-",
+    watchPath: status?.watchPath,
+    isRunning: status?.isRunning,
+    fileCount: status?.fileCount,
+    scanCount,
+    activeSession,
+    formatSessionStatus
+  });
 
   const refreshActiveSession = useCallback(async (): Promise<OrchestratorSession | null> => {
     if (!runtime) {
@@ -445,17 +460,6 @@ const App = () => {
   }, [chatConfig, supabase]);
 
   useEffect(() => {
-    setContentEdits((prev) => {
-      const next: Record<string, string> = {};
-      for (const content of pendingContents) {
-        const existing = prev[content.id];
-        next[content.id] = typeof existing === "string" ? existing : content.body ?? "";
-      }
-      return next;
-    });
-  }, [pendingContents]);
-
-  useEffect(() => {
     if (!runtime) {
       setChatNotice(
         "desktopRuntime bridge is unavailable. Check preload script loading and restart the desktop app."
@@ -464,14 +468,14 @@ const App = () => {
       return;
     }
 
-    let onboardingCompletedAtBootstrap = false;
+    let watchPathAtBootstrap = "";
 
     const init = async () => {
       const nextDesktopConfig = await runtime.app.getConfig();
-      onboardingCompletedAtBootstrap = !!nextDesktopConfig.onboardingCompleted;
+      watchPathAtBootstrap = nextDesktopConfig.watchPath ?? "";
       setDesktopConfig(nextDesktopConfig);
       setOnboardingDraft(nextDesktopConfig.onboardingDraft ?? defaultOnboardingDraft());
-      setSelectedPath(nextDesktopConfig.watchPath ?? "");
+      setSelectedPath(watchPathAtBootstrap);
       if (nextDesktopConfig.language) {
         void i18n.changeLanguage(nextDesktopConfig.language);
       }
@@ -480,7 +484,7 @@ const App = () => {
       setStatus(nextStatus);
       setMode(nextStatus.requiresOnboarding ? "onboarding" : "dashboard");
       if (nextStatus.requiresOnboarding) {
-        setOnboardingStep(resolveOnboardingEntryStep(onboardingCompletedAtBootstrap));
+        setOnboardingStep(resolveOnboardingEntryStep(nextStatus.watchPath ?? watchPathAtBootstrap));
       }
 
       const nextFiles = await runtime.watcher.getFiles();
@@ -525,12 +529,10 @@ const App = () => {
       setMode((prevMode) => {
         const nextMode = nextStatus.requiresOnboarding ? "onboarding" : "dashboard";
         if (nextMode === "onboarding" && prevMode !== "onboarding") {
-          setOnboardingStep((prevStep) => {
-            if (prevStep > 0) {
-              return prevStep;
-            }
-            return resolveOnboardingEntryStep(onboardingCompletedAtBootstrap);
-          });
+          const watchPath = nextStatus.watchPath ?? "";
+          watchPathAtBootstrap = watchPath;
+          setSelectedPath(watchPath);
+          setOnboardingStep(resolveOnboardingEntryStep(watchPath));
         }
         return nextMode;
       });
@@ -538,12 +540,7 @@ const App = () => {
 
     const offShowOnboarding = runtime.watcher.onShowOnboarding(() => {
       setMode("onboarding");
-      setOnboardingStep((prevStep) => {
-        if (prevStep > 0) {
-          return prevStep;
-        }
-        return resolveOnboardingEntryStep(onboardingCompletedAtBootstrap);
-      });
+      setOnboardingStep(resolveOnboardingEntryStep(watchPathAtBootstrap));
     });
 
     const offActionResult = runtime.chat.onActionResult((payload) => {
@@ -781,6 +778,7 @@ const App = () => {
 
       const nextConfig = await runtime.onboarding.setOrgId(orgId);
       setDesktopConfig(nextConfig);
+      setSelectedPath(nextConfig.watchPath ?? "");
 
       if (body.entitlement) {
         setEntitlement({
@@ -1069,11 +1067,14 @@ const App = () => {
         const session = sessionData.session;
         if (session) {
           const orgId = await bootstrapOrgContext(session.access_token);
-          await refreshEntitlement({
+          const entitlementResponse = await refreshEntitlement({
             accessToken: session.access_token,
             orgId,
             silent: true
           });
+          if (!entitlementResponse) {
+            throw new Error("Signup completed, but failed to load organization entitlement.");
+          }
           setOnboardingStep(2);
         } else {
           setAuthNotice("Signup completed. Please verify email if confirmation is enabled, then sign in.");
@@ -1090,11 +1091,14 @@ const App = () => {
       }
 
       const orgId = await bootstrapOrgContext(data.session.access_token);
-      await refreshEntitlement({
+      const entitlementResponse = await refreshEntitlement({
         accessToken: data.session.access_token,
         orgId,
         silent: true
       });
+      if (!entitlementResponse) {
+        throw new Error("Sign-in completed, but failed to load organization entitlement.");
+      }
       setOnboardingStep(2);
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Authentication failed.");
@@ -1121,25 +1125,17 @@ const App = () => {
         console.warn("[Auth] Google session sync warning:", error.message);
       }
 
-      let bootstrapFailedMessage = "";
-      try {
-        const orgId = await bootstrapOrgContext(secureSession.accessToken);
-        await refreshEntitlement({
-          accessToken: secureSession.accessToken,
-          orgId,
-          silent: true
-        });
-      } catch (bootstrapError) {
-        const message =
-          bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
-        bootstrapFailedMessage = message;
-        console.warn("[Auth] bootstrap fallback:", message);
-        setAuthNotice(`Google sign-in completed, but org bootstrap failed. Continuing with local org context. (${message})`);
+      const orgId = await bootstrapOrgContext(secureSession.accessToken);
+      const entitlementResponse = await refreshEntitlement({
+        accessToken: secureSession.accessToken,
+        orgId,
+        silent: true
+      });
+      if (!entitlementResponse) {
+        throw new Error("Google sign-in completed, but failed to load organization entitlement.");
       }
       setOnboardingStep(2);
-      if (!bootstrapFailedMessage) {
-        setAuthNotice("Google sign-in completed.");
-      }
+      setAuthNotice("Google sign-in completed.");
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Google sign-in failed.");
     } finally {
@@ -1162,20 +1158,17 @@ const App = () => {
         return;
       }
 
-      try {
-        const orgId = await bootstrapOrgContext(accessToken);
-        await refreshEntitlement({
-          accessToken,
-          orgId,
-          silent: true
-        });
-      } catch (bootstrapError) {
-        const message =
-          bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
-        console.warn("[Auth] continue fallback:", message);
-        setAuthNotice(`Auth is valid, but org bootstrap failed. Continuing with local org context. (${message})`);
+      const orgId = await bootstrapOrgContext(accessToken);
+      const entitlementResponse = await refreshEntitlement({
+        accessToken,
+        orgId,
+        silent: true
+      });
+      if (!entitlementResponse) {
+        throw new Error("Auth is valid, but failed to load organization entitlement.");
       }
       moveToStep(2);
+      setAuthNotice("");
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Organization bootstrap failed.");
     } finally {
@@ -1184,20 +1177,26 @@ const App = () => {
   };
 
   const signOutAuth = async () => {
-    if (!authSupabase || !runtime) {
+    if (!runtime) {
       return;
     }
 
     setIsAuthPending(true);
     setAuthNotice("");
     try {
-      await authSupabase.auth.signOut();
+      if (authSupabase) {
+        await authSupabase.auth.signOut();
+      }
       await runtime.auth.clearSession();
       setAuthSession(null);
       setEntitlement(null);
       setAuthNotice("Signed out.");
+      setChatNotice("Signed out.");
+      setMode("onboarding");
+      setOnboardingStep(1);
     } catch (error) {
       setAuthNotice(error instanceof Error ? error.message : "Sign-out failed.");
+      setChatNotice(error instanceof Error ? error.message : "Sign-out failed.");
     } finally {
       setIsAuthPending(false);
     }
@@ -1211,29 +1210,17 @@ const App = () => {
     let cancelled = false;
     const run = async () => {
       try {
-        let resolvedOrgId = (desktopConfig?.orgId ?? "").trim();
-        if (!desktopConfig?.orgId || desktopConfig.orgId === "") {
-          try {
-            resolvedOrgId = await bootstrapOrgContext(authSession.access_token);
-          } catch (bootstrapError) {
-            const message =
-              bootstrapError instanceof Error ? bootstrapError.message : "Organization bootstrap failed.";
-            console.warn("[Auth] auto-bootstrap fallback:", message);
-            if (!cancelled) {
-              setAuthNotice(
-                `Authenticated, but org bootstrap failed. Continuing with local org context. (${message})`
-              );
-            }
-          }
-        }
-        if (!cancelled && resolvedOrgId) {
-          await refreshEntitlement({
-            accessToken: authSession.access_token,
-            orgId: resolvedOrgId,
-            silent: true
-          });
+        const resolvedOrgId = await bootstrapOrgContext(authSession.access_token);
+        const entitlementResponse = await refreshEntitlement({
+          accessToken: authSession.access_token,
+          orgId: resolvedOrgId,
+          silent: true
+        });
+        if (!entitlementResponse) {
+          throw new Error("Authenticated, but failed to load organization entitlement.");
         }
         if (!cancelled) {
+          setAuthNotice("");
           setOnboardingStep(2);
         }
       } catch (error) {
@@ -1247,7 +1234,7 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [authSession, bootstrapOrgContext, desktopConfig?.orgId, mode, onboardingStep, refreshEntitlement]);
+  }, [authSession, bootstrapOrgContext, mode, onboardingStep, refreshEntitlement]);
 
   useEffect(() => {
     if (mode !== "onboarding" || onboardingStep < 2) {
@@ -1445,6 +1432,7 @@ const App = () => {
       setStatus(nextStatus);
       const nextConfig = await window.desktopRuntime.app.getConfig();
       setDesktopConfig(nextConfig);
+      setSelectedPath(nextConfig.watchPath ?? "");
       setMode("dashboard");
       const nextFiles = await window.desktopRuntime.watcher.getFiles();
       setFiles(nextFiles);
@@ -1493,7 +1481,7 @@ const App = () => {
         sessionId,
         content
       });
-      setChatInput("");
+      clearChatInput();
     });
   };
 
@@ -1511,13 +1499,6 @@ const App = () => {
     });
   };
 
-  const updateContentEdit = (contentId: string, nextBody: string) => {
-    setContentEdits((prev) => ({
-      ...prev,
-      [contentId]: nextBody
-    }));
-  };
-
   const approveContent = async (contentId: string, editedBody?: string) => {
     const sessionId = await ensureActiveSessionId();
     if (!sessionId) {
@@ -1531,11 +1512,7 @@ const App = () => {
         contentId,
         ...(normalizedEditedBody ? { editedBody: normalizedEditedBody } : {})
       });
-      setContentEdits((prev) => {
-        const next = { ...prev };
-        delete next[contentId];
-        return next;
-      });
+      removeContentEdit(contentId);
     });
   };
 
@@ -2014,204 +1991,64 @@ const App = () => {
     );
   }
 
-  const campaignToReview = draftCampaigns[0] ?? null;
-
   return (
     <NavigationProvider>
-      <MainLayout>
-      <div className="app-shell ui-dashboard-shell">
-      <section className="panel">
-        <p className="eyebrow">Phase 1-5b Runtime</p>
-        <h1>Watcher, Chat, and Approval Queue</h1>
-        <p className="description">Desktop runtime listens to local files and drives server-side orchestration.</p>
-        <div className="meta-grid">
-          <p>
-            Platform: <strong>{runtime.platform}</strong>
-          </p>
-          <p>
-            Watch Path: <strong>{status?.watchPath ?? "-"}</strong>
-          </p>
-          <p>
-            Running: <strong>{status?.isRunning ? "Yes" : "No"}</strong>
-          </p>
-          <p>
-            Active Files: <strong>{status?.fileCount ?? 0}</strong>
-          </p>
-          <p>
-            Last Scan Count: <strong>{scanCount ?? 0}</strong>
-          </p>
-          <p>
-            Active Session: <strong>{activeSession?.id ?? "None"}</strong>
-          </p>
-          <p>
-            Session Step: <strong>{activeSession?.current_step ?? "-"}</strong>
-          </p>
-          <p>
-            Session Status: <strong>{formatSessionStatus(activeSession)}</strong>
-          </p>
-        </div>
-        <div className="button-row">
-          <button onClick={() => void openWatchFolder()}>Open Watch Folder</button>
-          <button onClick={() => void refreshActiveSession()}>Refresh Active Session</button>
-        </div>
-        {notice ? <p className="notice">{notice}</p> : null}
-      </section>
-
-      <section className="panel panel-split">
-        <article className="subpanel">
-          <h2>Chat</h2>
-          <p className="sub-description">
-            Realtime stream from <code>chat_messages</code>. Send user replies to resume the orchestrator session.
-          </p>
-          {chatConfig?.message ? <p className="notice">{chatConfig.message}</p> : null}
-          <div className="chat-list">
-            {messages.length === 0 ? (
-              <p className="empty">No chat messages yet.</p>
-            ) : (
-              messages.map((message) => (
-                <div key={message.id} className={`chat-item chat-${message.role}`}>
-                  <div className="chat-head">
-                    <strong>{message.role}</strong>
-                    <span>{formatDateTime(message.created_at)}</span>
-                  </div>
-                  <p>{message.content}</p>
-                </div>
-              ))
-            )}
-          </div>
-          {campaignToReview ? (
-            <div className="campaign-card">
-              <h3>Campaign Approval</h3>
-              <p>
-                <strong>{campaignToReview.title}</strong>
-              </p>
-              <p>Channels: {campaignToReview.channels.join(", ") || "-"}</p>
-              <p>
-                {campaignToReview.plan.post_count} posts / {campaignToReview.plan.duration_days} days
-              </p>
-              <div className="button-row">
-                <button
-                  className="primary"
-                  disabled={isActionPending}
-                  onClick={() => void approveCampaign(campaignToReview.id)}
-                >
-                  Approve Campaign
-                </button>
-                <button
-                  disabled={isActionPending}
-                  onClick={() => void rejectCampaign(campaignToReview.id)}
-                >
-                  Reject Campaign
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="empty">No draft campaign awaiting approval.</p>
-          )}
-          {!activeSession?.id ? (
-            <p className="empty">
-              No active session yet. Add a file under an activity folder (example:{" "}
-              <code>tanzania-activity/photo01.jpg</code>) or place a file at watch-root.
-            </p>
-          ) : null}
-          <div className="chat-input-row">
-            <input
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-              placeholder="Type a reply for the assistant..."
-              disabled={isActionPending}
-            />
-            <button className="primary" disabled={isActionPending || !chatInput.trim()} onClick={() => void sendMessage()}>
-              Send
-            </button>
-          </div>
-          {chatNotice ? <p className="notice">{chatNotice}</p> : null}
-        </article>
-
-        <article className="subpanel">
-          <h2>Approval Queue</h2>
-          <p className="sub-description">
-            Pending items from <code>contents.status = pending_approval</code>.
-          </p>
-          <div className="queue-list">
-            {pendingContents.length === 0 ? (
-              <p className="empty">No pending contents.</p>
-            ) : (
-              pendingContents.map((content) => (
-                <div key={content.id} className="queue-item">
-                  <div className="queue-meta">
-                    <p>
-                      <strong>{content.channel}</strong> · {content.content_type}
-                    </p>
-                    <p>Campaign: {content.campaign_id ?? "-"}</p>
-                    <p>Created: {formatDateTime(content.created_at)}</p>
-                  </div>
-                  <textarea
-                    className="queue-editor"
-                    value={contentEdits[content.id] ?? content.body ?? ""}
-                    onChange={(event) => updateContentEdit(content.id, event.target.value)}
-                    placeholder="Edit draft before approval..."
-                    disabled={isActionPending}
-                  />
-                  <div className="button-row">
-                    <button
-                      className="primary"
-                      disabled={isActionPending}
-                      onClick={() =>
-                        void approveContent(content.id, contentEdits[content.id] ?? content.body ?? "")
-                      }
-                    >
-                      Approve
-                    </button>
-                    <button
-                      disabled={isActionPending}
-                      onClick={() => void rejectContent(content.id)}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </article>
-      </section>
-
-      <section className="panel">
-        <h2>Indexed Files</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Activity</th>
-                <th>File</th>
-                <th>Type</th>
-                <th>Size</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedFiles.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>No active files indexed yet.</td>
-                </tr>
-              ) : (
-                sortedFiles.map((entry) => (
-                  <tr key={entry.relativePath}>
-                    <td>{entry.activityFolder}</td>
-                    <td>{entry.fileName}</td>
-                    <td>{entry.fileType}</td>
-                    <td>{entry.fileSize.toLocaleString()} B</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      </div>
-      </MainLayout>
+      <MainLayout
+        dashboardPage={
+          <DashboardPage
+            runtimeSummary={runtimeSummary}
+            notice={notice}
+            sortedFiles={sortedFiles}
+            pendingContents={pendingContents}
+            campaignToReview={campaignToReview}
+            contentEdits={contentEdits}
+            isActionPending={isActionPending}
+            isAuthPending={isAuthPending}
+            formatDateTime={formatDateTime}
+            onOpenWatchFolder={() => void openWatchFolder()}
+            onRefreshActiveSession={() => void refreshActiveSession()}
+            onSignOut={() => void signOutAuth()}
+            onApproveCampaign={(campaignId) => void approveCampaign(campaignId)}
+            onRejectCampaign={(campaignId) => void rejectCampaign(campaignId)}
+            onUpdateContentEdit={updateContentEdit}
+            onApproveContent={(contentId, editedBody) => void approveContent(contentId, editedBody)}
+            onRejectContent={(contentId) => void rejectContent(contentId)}
+          />
+        }
+        agentChatPage={
+          <AgentChatPage
+            messages={messages}
+            chatInput={chatInput}
+            chatNotice={chatNotice}
+            chatConfigMessage={chatConfig?.message ?? ""}
+            activeSessionId={activeSession?.id ?? null}
+            campaignToReview={campaignToReview}
+            isActionPending={isActionPending}
+            formatDateTime={formatDateTime}
+            onChatInputChange={setChatInput}
+            onSendMessage={() => void sendMessage()}
+            onApproveCampaign={(campaignId) => void approveCampaign(campaignId)}
+            onRejectCampaign={(campaignId) => void rejectCampaign(campaignId)}
+          />
+        }
+        settingsPage={
+          <SettingsPage
+            orgId={desktopConfig?.orgId ?? "-"}
+            watchPath={selectedPath || status?.watchPath || "-"}
+            language={i18n.language}
+            userEmail={authSession?.user?.email ?? "-"}
+            runtimeSummary={runtimeSummary}
+            isActionPending={isActionPending}
+            isAuthPending={isAuthPending}
+            onOpenWatchFolder={() => void openWatchFolder()}
+            onSignOut={() => void signOutAuth()}
+            onChangeLanguage={(language) => void updateLanguage(language)}
+          />
+        }
+      />
     </NavigationProvider>
   );
 };
 
 export default App;
+

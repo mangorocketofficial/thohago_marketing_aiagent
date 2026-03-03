@@ -5,7 +5,9 @@ import { useNavigation } from "../context/NavigationContext";
 import type { PageId } from "../types/navigation";
 
 type MainLayoutProps = {
-  children: ReactNode;
+  dashboardPage: ReactNode;
+  agentChatPage: ReactNode;
+  settingsPage: ReactNode;
 };
 
 const PLACEHOLDER_TITLES: Record<Exclude<PageId, "dashboard">, string> = {
@@ -18,7 +20,7 @@ const PLACEHOLDER_TITLES: Record<Exclude<PageId, "dashboard">, string> = {
   settings: "Settings"
 };
 
-export const MainLayout = ({ children }: MainLayoutProps) => {
+export const MainLayout = ({ dashboardPage, agentChatPage, settingsPage }: MainLayoutProps) => {
   const {
     activePage,
     navigate,
@@ -34,7 +36,11 @@ export const MainLayout = ({ children }: MainLayoutProps) => {
 
       <main className="ui-main-content">
         {activePage === "dashboard" ? (
-          children
+          dashboardPage
+        ) : activePage === "agent-chat" ? (
+          agentChatPage
+        ) : activePage === "settings" ? (
+          settingsPage
         ) : (
           <div className="app-shell ui-dashboard-shell">
             <section className="panel ui-page-placeholder">
