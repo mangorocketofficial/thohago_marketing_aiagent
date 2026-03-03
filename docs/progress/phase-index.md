@@ -22,4 +22,5 @@
 | 2-3c | Channel-Aware Tier-2 Content Retrieval Patch | Done | 2026-03-02 | [phase-2-3c-channel-aware-retrieval-completion.md](./phase-2-3c-channel-aware-retrieval-completion.md) |
 | 2-4 | Local File Indexing Pipeline | Done | 2026-03-02 | [phase-2-4-completion.md](./phase-2-4-completion.md) |
 | 2-5a | Content Feedback Loop (Core) | Done | 2026-03-02 | [phase-2-5a-completion.md](./phase-2-5a-completion.md) |
+| 2-5a Validation | Onboarding + RAG 4-Type End-to-End Validation | Done | 2026-03-03 | [phase-2-5a-validation-completion.md](./phase-2-5a-validation-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |
