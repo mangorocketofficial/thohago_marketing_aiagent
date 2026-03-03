@@ -38,6 +38,8 @@ const requiredTables = [
   "pipeline_triggers",
   "campaigns",
   "orchestrator_sessions",
+  "workflow_items",
+  "workflow_events",
   "org_brand_settings",
   "org_subscriptions"
 ] as const;
@@ -51,7 +53,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260302200000_phase_2_3_subscription_entitlement.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260303120000_phase_3_1_workflow_state_machine.sql on the connected project.`
       );
       continue;
     }

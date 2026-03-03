@@ -71,8 +71,10 @@ export type SessionState = {
   file_type: TriggerFileType;
   user_message: string | null;
   campaign_id: string | null;
+  campaign_workflow_item_id: string | null;
   campaign_plan: CampaignPlan | null;
   content_id: string | null;
+  content_workflow_item_id: string | null;
   content_draft: string | null;
   rag_context: RagContextMeta | null;
   forbidden_check: ForbiddenCheckMeta | null;

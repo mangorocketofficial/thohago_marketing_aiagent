@@ -149,8 +149,10 @@ export type OrchestratorState = {
   file_type: FileType;
   user_message: string | null;
   campaign_id: string | null;
+  campaign_workflow_item_id: string | null;
   campaign_plan: CampaignPlan | null;
   content_id: string | null;
+  content_workflow_item_id: string | null;
   content_draft: string | null;
   processed_event_ids: string[];
   last_error: string | null;
@@ -319,6 +321,47 @@ export type RagEmbeddingProfile = {
 };
 
 export type RagSourceType = "brand_profile" | "content" | "local_doc" | "chat_pattern";
+
+export type WorkflowItemType =
+  | "campaign_plan"
+  | "content_draft"
+  | "content_generation_request"
+  | "generic_approval";
+
+export type WorkflowStatus = "proposed" | "revision_requested" | "approved" | "rejected";
+export type WorkflowAction = "proposed" | "request_revision" | "resubmitted" | "approved" | "rejected";
+export type WorkflowActorType = "user" | "assistant" | "system";
+
+export type WorkflowItem = {
+  id: string;
+  org_id: string;
+  type: WorkflowItemType;
+  status: WorkflowStatus;
+  payload: Record<string, unknown>;
+  origin_chat_message_id: string | null;
+  source_campaign_id: string | null;
+  source_content_id: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkflowEvent = {
+  id: string;
+  org_id: string;
+  workflow_item_id: string;
+  action: WorkflowAction;
+  actor_type: WorkflowActorType;
+  actor_user_id: string | null;
+  from_status: WorkflowStatus | null;
+  to_status: WorkflowStatus;
+  payload: Record<string, unknown>;
+  expected_version: number | null;
+  idempotency_key: string;
+  created_at: string;
+};
 
 export type RagChunk = {
   content: string;
