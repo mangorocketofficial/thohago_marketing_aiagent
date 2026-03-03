@@ -2,6 +2,7 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import { MainLayout } from "./layouts/MainLayout";
 import type {
   Campaign,
   ChatMessage,
@@ -2015,7 +2016,8 @@ const App = () => {
   const campaignToReview = draftCampaigns[0] ?? null;
 
   return (
-    <main className="app-shell">
+    <MainLayout>
+      <div className="app-shell ui-dashboard-shell">
       <section className="panel">
         <p className="eyebrow">Phase 1-5b Runtime</p>
         <h1>Watcher, Chat, and Approval Queue</h1>
@@ -2204,7 +2206,8 @@ const App = () => {
           </table>
         </div>
       </section>
-    </main>
+      </div>
+    </MainLayout>
   );
 };
 
