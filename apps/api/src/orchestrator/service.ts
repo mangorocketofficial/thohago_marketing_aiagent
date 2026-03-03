@@ -5,7 +5,18 @@ import { supabaseAdmin } from "../lib/supabase-admin";
 import { onContentEdited } from "../rag/ingest-edit-pattern";
 import { onContentPublished } from "../rag/ingest-content";
 import { invalidateMemoryCache } from "../rag/memory-service";
-import { applyWorkflowAction, ensureCampaignWorkflowItem, ensureContentWorkflowItem } from "../workflow/service";
+import {
+  buildCampaignPlanProjectionMetadata,
+  buildContentDraftProjectionMetadata,
+  buildProjectionKey,
+  patchActionCardMetadataStatus
+} from "../workflow/projection";
+import {
+  applyWorkflowAction,
+  ensureCampaignWorkflowItem,
+  ensureContentWorkflowItem,
+  linkWorkflowItemOriginChatMessage
+} from "../workflow/service";
 import type { WorkflowItemRow, WorkflowStatus } from "../workflow/types";
 import { generateCampaignPlan, generateContentDraft, generateDetectMessage } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
@@ -25,6 +36,7 @@ import type {
 
 const ACTIVE_SESSION_STATUSES: SessionStatus[] = ["running", "paused"];
 const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const DEFAULT_CHAT_CHANNEL = "dashboard";
 
 const lockQueueByKey = new Map<string, Promise<void>>();
 
@@ -340,19 +352,135 @@ const updateSession = async (
   }
 };
 
-const insertChatMessage = async (orgId: string, role: "user" | "assistant", content: string): Promise<string> => {
+type ChatMessageType = "text" | "action_card" | "system";
+type ChatChannel = "dashboard" | "telegram";
+
+type InsertChatMessageInput = {
+  orgId: string;
+  role: "user" | "assistant";
+  content: string;
+  channel?: ChatChannel;
+  messageType?: ChatMessageType;
+  metadata?: Record<string, unknown>;
+  workflowItemId?: string | null;
+  projectionKey?: string | null;
+};
+
+const readChatMessageIdByProjectionKey = async (orgId: string, projectionKey: string): Promise<string | null> => {
+  const { data, error } = await supabaseAdmin
+    .from("chat_messages")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("projection_key", projectionKey)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(
+      500,
+      "db_error",
+      `Failed to read chat message by projection key: ${error.message}`
+    );
+  }
+
+  if (!data) {
+    return null;
+  }
+  const id = asString((data as Record<string, unknown>).id, "");
+  return id || null;
+};
+
+const insertChatMessage = async (input: InsertChatMessageInput): Promise<string> => {
   const payload = {
-    org_id: orgId,
-    role,
-    content,
-    channel: "dashboard"
+    org_id: input.orgId,
+    role: input.role,
+    content: input.content,
+    channel: input.channel ?? DEFAULT_CHAT_CHANNEL,
+    message_type: input.messageType ?? "text",
+    metadata: input.metadata ?? {},
+    workflow_item_id: input.workflowItemId ?? null,
+    projection_key: input.projectionKey ?? null
   };
+
+  if (input.projectionKey) {
+    const { data, error } = await supabaseAdmin
+      .from("chat_messages")
+      .upsert(payload, {
+        onConflict: "org_id,projection_key",
+        ignoreDuplicates: true
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw new HttpError(500, "db_error", `Failed to upsert chat projection message: ${error.message}`);
+    }
+
+    if (data) {
+      const insertedId = asString((data as Record<string, unknown>).id, "");
+      if (insertedId) {
+        return insertedId;
+      }
+    }
+
+    const existingId = await readChatMessageIdByProjectionKey(input.orgId, input.projectionKey);
+    if (existingId) {
+      return existingId;
+    }
+    throw new HttpError(500, "db_error", "Failed to resolve chat projection message id after upsert.");
+  }
 
   const { data, error } = await supabaseAdmin.from("chat_messages").insert(payload).select("id").single();
   if (error || !data) {
     throw new HttpError(500, "db_error", `Failed to insert chat message: ${error?.message ?? "unknown"}`);
   }
   return asString((data as Record<string, unknown>).id, "");
+};
+
+const updateLatestActionCardProjectionStatus = async (params: {
+  orgId: string;
+  workflowItem: WorkflowItemRow;
+  sessionId: string;
+}): Promise<void> => {
+  const { data, error } = await supabaseAdmin
+    .from("chat_messages")
+    .select("id, metadata")
+    .eq("org_id", params.orgId)
+    .eq("workflow_item_id", params.workflowItem.id)
+    .eq("message_type", "action_card")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to query action-card projection: ${error.message}`);
+  }
+  if (!data) {
+    return;
+  }
+
+  const row = data as Record<string, unknown>;
+  const messageId = asString(row.id, "");
+  if (!messageId) {
+    return;
+  }
+
+  const nextMetadata = patchActionCardMetadataStatus({
+    metadata: row.metadata,
+    workflowStatus: params.workflowItem.status,
+    expectedVersion: params.workflowItem.version,
+    workflowItemId: params.workflowItem.id,
+    sessionId: params.sessionId
+  });
+
+  const { error: updateError } = await supabaseAdmin
+    .from("chat_messages")
+    .update({ metadata: nextMetadata })
+    .eq("org_id", params.orgId)
+    .eq("id", messageId);
+
+  if (updateError) {
+    throw new HttpError(500, "db_error", `Failed to update action-card projection status: ${updateError.message}`);
+  }
 };
 
 const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<string> => {
@@ -389,7 +517,11 @@ const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<stri
     await updateTrigger(trigger.id, { status: "processing", processed_at: now });
 
     const detectMessage = await generateDetectMessage(trigger.activity_folder, trigger.file_name);
-    await insertChatMessage(trigger.org_id, "assistant", detectMessage);
+    await insertChatMessage({
+      orgId: trigger.org_id,
+      role: "assistant",
+      content: detectMessage
+    });
 
     await updateSession(session.id, {
       state,
@@ -594,7 +726,11 @@ const applyUserMessageStep = async (
     throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
   }
 
-  await insertChatMessage(session.org_id, "user", userMessage);
+  await insertChatMessage({
+    orgId: session.org_id,
+    role: "user",
+    content: userMessage
+  });
 
   const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, userMessage);
   const { data: campaign, error: campaignError } = await supabaseAdmin
@@ -620,7 +756,6 @@ const applyUserMessageStep = async (
     `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
     "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
   ].join("\n");
-  const summaryMessageId = await insertChatMessage(session.org_id, "assistant", summary);
   const campaignId = campaign.id as string;
   const campaignWorkflowItem = await ensureCampaignWorkflowItem({
     orgId: session.org_id,
@@ -631,8 +766,33 @@ const applyUserMessageStep = async (
       user_message: userMessage,
       plan
     },
-    originChatMessageId: summaryMessageId,
     idempotencyKey: buildWorkflowCreateIdempotencyKey(session.id, "campaign_plan", campaignId, eventIdempotencyKey)
+  });
+  const campaignProjectionKey = buildProjectionKey({
+    channel: DEFAULT_CHAT_CHANNEL,
+    workflowItemId: campaignWorkflowItem.id,
+    eventType: "campaign_proposed",
+    expectedVersion: campaignWorkflowItem.version
+  });
+  const summaryMessageId = await insertChatMessage({
+    orgId: session.org_id,
+    role: "assistant",
+    content: summary,
+    channel: DEFAULT_CHAT_CHANNEL,
+    messageType: "action_card",
+    metadata: buildCampaignPlanProjectionMetadata({
+      workflowItem: campaignWorkflowItem,
+      sessionId: session.id,
+      activityFolder: state.activity_folder,
+      plan
+    }),
+    workflowItemId: campaignWorkflowItem.id,
+    projectionKey: campaignProjectionKey
+  });
+  await linkWorkflowItemOriginChatMessage({
+    orgId: session.org_id,
+    itemId: campaignWorkflowItem.id,
+    chatMessageId: summaryMessageId
   });
 
   return {
@@ -693,6 +853,11 @@ const applyCampaignApprovedStep = async (
     )
   });
   await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignApproval.item.status);
+  await updateLatestActionCardProjectionStatus({
+    orgId: session.org_id,
+    workflowItem: campaignApproval.item,
+    sessionId: session.id
+  });
 
   const firstSchedule = state.campaign_plan?.suggested_schedule?.[0];
   const firstChannel = normalizeChannel(firstSchedule?.channel);
@@ -748,13 +913,6 @@ const applyCampaignApprovedStep = async (
     throw new HttpError(500, "db_error", `Failed to create content draft: ${contentError?.message ?? "unknown"}`);
   }
 
-  const contentMessageId = await insertChatMessage(
-    session.org_id,
-    "assistant",
-    forbiddenCheck.passed
-      ? `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
-      : `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`
-  );
   const contentId = content.id as string;
   const contentWorkflowItem = await ensureContentWorkflowItemForState({
     session,
@@ -767,8 +925,38 @@ const applyCampaignApprovedStep = async (
       forbidden_check: forbiddenCheck
     },
     contentId,
-    originChatMessageId: contentMessageId,
     eventIdempotencyKey
+  });
+  const contentSummary = forbiddenCheck.passed
+    ? `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 승인 큐에서 확인해 주세요.`
+    : `첫 번째 ${firstChannel} 콘텐츠 초안이 생성되었습니다. 금지 표현 감지(${forbiddenCheck.violations.join(", ")})가 있어 검토가 필요합니다.`;
+  const contentProjectionKey = buildProjectionKey({
+    channel: DEFAULT_CHAT_CHANNEL,
+    workflowItemId: contentWorkflowItem.id,
+    eventType: "content_proposed",
+    expectedVersion: contentWorkflowItem.version
+  });
+  const contentMessageId = await insertChatMessage({
+    orgId: session.org_id,
+    role: "assistant",
+    content: contentSummary,
+    channel: DEFAULT_CHAT_CHANNEL,
+    messageType: "action_card",
+    metadata: buildContentDraftProjectionMetadata({
+      workflowItem: contentWorkflowItem,
+      sessionId: session.id,
+      activityFolder: state.activity_folder,
+      channel: firstChannel,
+      draft,
+      forbiddenCheck
+    }),
+    workflowItemId: contentWorkflowItem.id,
+    projectionKey: contentProjectionKey
+  });
+  await linkWorkflowItemOriginChatMessage({
+    orgId: session.org_id,
+    itemId: contentWorkflowItem.id,
+    chatMessageId: contentMessageId
   });
 
   return {
@@ -831,6 +1019,11 @@ const applyContentApprovedStep = async (
       eventIdempotencyKey
     )
   });
+  await updateLatestActionCardProjectionStatus({
+    orgId: session.org_id,
+    workflowItem: contentApproval.item,
+    sessionId: session.id
+  });
   await mirrorContentStatusFromWorkflow({
     orgId: session.org_id,
     contentId,
@@ -851,7 +1044,11 @@ const applyContentApprovedStep = async (
     }
   }
 
-  await insertChatMessage(session.org_id, "assistant", "콘텐츠 게시가 완료되었습니다(시뮬레이션).");
+  await insertChatMessage({
+    orgId: session.org_id,
+    role: "assistant",
+    content: "콘텐츠 게시가 완료되었습니다(시뮬레이션)."
+  });
 
   void onContentPublished(session.org_id, contentId).catch((error) => {
     console.warn(
@@ -927,6 +1124,11 @@ const applyRejectStep = async (
         eventIdempotencyKey
       )
     });
+    await updateLatestActionCardProjectionStatus({
+      orgId: session.org_id,
+      workflowItem: campaignRejection.item,
+      sessionId: session.id
+    });
     await mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignRejection.item.status);
     nextCampaignWorkflowId = campaignRejection.item.id;
   } else {
@@ -951,6 +1153,11 @@ const applyRejectStep = async (
         eventIdempotencyKey
       )
     });
+    await updateLatestActionCardProjectionStatus({
+      orgId: session.org_id,
+      workflowItem: contentRejection.item,
+      sessionId: session.id
+    });
     await mirrorContentStatusFromWorkflow({
       orgId: session.org_id,
       contentId,
@@ -959,13 +1166,13 @@ const applyRejectStep = async (
     nextContentWorkflowId = contentRejection.item.id;
   }
 
-  await insertChatMessage(
-    session.org_id,
-    "assistant",
-    reason
+  await insertChatMessage({
+    orgId: session.org_id,
+    role: "assistant",
+    content: reason
       ? `요청을 반영했습니다. 세션을 종료합니다. 사유: ${reason}`
       : "요청을 반영했습니다. 세션을 종료합니다."
-  );
+  });
   await updateTrigger(state.trigger_id, { status: "failed" });
 
   return {

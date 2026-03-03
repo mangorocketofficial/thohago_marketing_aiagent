@@ -194,6 +194,32 @@ export const updateWorkflowItemWithVersion = async (input: UpdateWorkflowItemInp
   return data ? parseWorkflowItem(data) : null;
 };
 
+type UpdateWorkflowItemOriginChatMessageInput = {
+  orgId: string;
+  itemId: string;
+  originChatMessageId: string;
+};
+
+export const updateWorkflowItemOriginChatMessage = async (
+  input: UpdateWorkflowItemOriginChatMessageInput
+): Promise<WorkflowItemRow | null> => {
+  const { data, error } = await supabaseAdmin
+    .from("workflow_items")
+    .update({
+      origin_chat_message_id: input.originChatMessageId
+    })
+    .eq("org_id", input.orgId)
+    .eq("id", input.itemId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw toRepositoryError("Failed to update workflow item origin chat message", error);
+  }
+
+  return data ? parseWorkflowItem(data) : null;
+};
+
 export const deleteWorkflowItemById = async (orgId: string, itemId: string): Promise<void> => {
   const { error } = await supabaseAdmin.from("workflow_items").delete().eq("org_id", orgId).eq("id", itemId);
 

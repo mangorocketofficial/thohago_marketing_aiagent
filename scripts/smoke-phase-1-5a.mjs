@@ -167,6 +167,9 @@ const main = async () => {
   const fileName = "photo01.jpg";
   const relativePath = `${activityFolder}/${fileName}`;
   const sourceEventId = `smoke-${now}-event`;
+  const userEventKey = `smoke-${now}-user`;
+  const campaignApprovedEventKey = `smoke-${now}-campaign-approved`;
+  const contentApprovedEventKey = `smoke-${now}-content-approved`;
   const userMessage = "네, 인스타그램 중심으로 진행해줘.";
 
   const apiLogs = [];
@@ -273,7 +276,7 @@ const main = async () => {
       },
       body: JSON.stringify({
         event_type: "user_message",
-        idempotency_key: `smoke-${now}-user`,
+        idempotency_key: userEventKey,
         payload: { content: userMessage }
       })
     });
@@ -289,7 +292,9 @@ const main = async () => {
       headers: { "x-api-token": API_SECRET }
     });
     campaignId = sessionAfterUserReq.body?.session?.state?.campaign_id;
+    const campaignWorkflowItemId = sessionAfterUserReq.body?.session?.state?.campaign_workflow_item_id;
     assert(campaignId, "campaign_id missing in session state after user_message.");
+    assert(campaignWorkflowItemId, "campaign_workflow_item_id missing in session state after user_message.");
 
     const { data: campaignRow, error: campaignError } = await supabaseAdmin
       .from("campaigns")
@@ -300,6 +305,61 @@ const main = async () => {
     assert(campaignRow.status === "draft", `Expected campaign status=draft, got ${campaignRow.status}`);
     console.log("PASS - campaign draft created");
 
+    const { data: campaignCards, error: campaignCardsError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id, message_type, projection_key, workflow_item_id, metadata, channel")
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", campaignWorkflowItemId)
+      .eq("message_type", "action_card")
+      .order("created_at", { ascending: true });
+    assert(!campaignCardsError, `Failed to read campaign action-card rows: ${campaignCardsError?.message}`);
+    assert(
+      Array.isArray(campaignCards) && campaignCards.length === 1,
+      `Expected exactly 1 campaign action-card row, got ${campaignCards?.length ?? 0}`
+    );
+    const campaignCard = campaignCards[0];
+    const campaignMeta = campaignCard?.metadata ?? {};
+    assert(campaignCard?.channel === "dashboard", `Expected campaign card channel=dashboard, got ${campaignCard?.channel}`);
+    assert(
+      typeof campaignCard?.projection_key === "string" && campaignCard.projection_key.includes(":campaign_proposed:v"),
+      `Invalid campaign projection_key: ${campaignCard?.projection_key}`
+    );
+    assert(campaignMeta?.projection_type === "workflow_action_card", "campaign card metadata.projection_type mismatch");
+    assert(campaignMeta?.card_type === "campaign_plan", "campaign card metadata.card_type mismatch");
+    assert(Array.isArray(campaignMeta?.card_data?.channels), "campaign card metadata.card_data.channels must be array");
+    assert(
+      typeof campaignMeta?.card_data?.post_count === "number",
+      "campaign card metadata.card_data.post_count must be number"
+    );
+    console.log("PASS - campaign action-card projection row created with expected metadata");
+
+    const replayUserReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "user_message",
+        idempotency_key: userEventKey,
+        payload: { content: userMessage }
+      })
+    });
+    assert(replayUserReq.response.ok, `user_message replay failed: ${JSON.stringify(replayUserReq.body)}`);
+    assert(replayUserReq.body?.idempotent === true, "Expected idempotent=true on user_message replay.");
+    const { count: campaignCardCountAfterReplay, error: campaignReplayCountError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", campaignWorkflowItemId)
+      .eq("message_type", "action_card");
+    assert(!campaignReplayCountError, `Failed to count campaign action-card rows: ${campaignReplayCountError?.message}`);
+    assert(
+      (campaignCardCountAfterReplay ?? 0) === 1,
+      `Expected campaign action-card row count to stay 1 after replay, got ${campaignCardCountAfterReplay}`
+    );
+    console.log("PASS - campaign action-card projection is idempotent on replay");
+
     const resumeCampaignReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: "POST",
       headers: {
@@ -308,7 +368,7 @@ const main = async () => {
       },
       body: JSON.stringify({
         event_type: "campaign_approved",
-        idempotency_key: `smoke-${now}-campaign-approved`,
+        idempotency_key: campaignApprovedEventKey,
         payload: { campaign_id: campaignId }
       })
     });
@@ -327,7 +387,9 @@ const main = async () => {
       headers: { "x-api-token": API_SECRET }
     });
     contentId = sessionAfterCampaignReq.body?.session?.state?.content_id;
+    const contentWorkflowItemId = sessionAfterCampaignReq.body?.session?.state?.content_workflow_item_id;
     assert(contentId, "content_id missing in session state after campaign_approved.");
+    assert(contentWorkflowItemId, "content_workflow_item_id missing in session state after campaign_approved.");
 
     const { data: contentBeforePublish, error: contentBeforePublishError } = await supabaseAdmin
       .from("contents")
@@ -341,6 +403,60 @@ const main = async () => {
     );
     console.log("PASS - content draft inserted with pending_approval");
 
+    const { data: contentCards, error: contentCardsError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id, message_type, projection_key, workflow_item_id, metadata, channel")
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", contentWorkflowItemId)
+      .eq("message_type", "action_card")
+      .order("created_at", { ascending: true });
+    assert(!contentCardsError, `Failed to read content action-card rows: ${contentCardsError?.message}`);
+    assert(
+      Array.isArray(contentCards) && contentCards.length === 1,
+      `Expected exactly 1 content action-card row, got ${contentCards?.length ?? 0}`
+    );
+    const contentCard = contentCards[0];
+    const contentMeta = contentCard?.metadata ?? {};
+    assert(contentCard?.channel === "dashboard", `Expected content card channel=dashboard, got ${contentCard?.channel}`);
+    assert(
+      typeof contentCard?.projection_key === "string" && contentCard.projection_key.includes(":content_proposed:v"),
+      `Invalid content projection_key: ${contentCard?.projection_key}`
+    );
+    assert(contentMeta?.projection_type === "workflow_action_card", "content card metadata.projection_type mismatch");
+    assert(contentMeta?.card_type === "content_draft", "content card metadata.card_type mismatch");
+    assert(
+      typeof contentMeta?.card_data?.body_preview === "string" && contentMeta.card_data.body_preview.length > 0,
+      "content card metadata.card_data.body_preview must be non-empty string"
+    );
+    console.log("PASS - content action-card projection row created with expected metadata");
+
+    const replayCampaignReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-token": API_SECRET
+      },
+      body: JSON.stringify({
+        event_type: "campaign_approved",
+        idempotency_key: campaignApprovedEventKey,
+        payload: { campaign_id: campaignId }
+      })
+    });
+    assert(replayCampaignReq.response.ok, `campaign_approved replay failed: ${JSON.stringify(replayCampaignReq.body)}`);
+    assert(replayCampaignReq.body?.idempotent === true, "Expected idempotent=true on campaign_approved replay.");
+    const { count: contentCardCountAfterReplay, error: contentReplayCountError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
+      .eq("workflow_item_id", contentWorkflowItemId)
+      .eq("message_type", "action_card");
+    assert(!contentReplayCountError, `Failed to count content action-card rows: ${contentReplayCountError?.message}`);
+    assert(
+      (contentCardCountAfterReplay ?? 0) === 1,
+      `Expected content action-card row count to stay 1 after replay, got ${contentCardCountAfterReplay}`
+    );
+    console.log("PASS - content action-card projection is idempotent on replay");
+
     const resumeContentReq = await fetchJson(`${API_BASE}/sessions/${sessionId}/resume`, {
       method: "POST",
       headers: {
@@ -349,7 +465,7 @@ const main = async () => {
       },
       body: JSON.stringify({
         event_type: "content_approved",
-        idempotency_key: `smoke-${now}-content-approved`,
+        idempotency_key: contentApprovedEventKey,
         payload: { content_id: contentId }
       })
     });
@@ -387,9 +503,26 @@ const main = async () => {
     assert(finalSession.current_step === "done", `Expected session step=done, got ${finalSession.current_step}`);
     console.log("PASS - final DB statuses are done/published");
 
+    const { data: resolvedCards, error: resolvedCardsError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("workflow_item_id, metadata")
+      .eq("org_id", orgId)
+      .eq("message_type", "action_card")
+      .in("workflow_item_id", [campaignWorkflowItemId, contentWorkflowItemId]);
+    assert(!resolvedCardsError, `Failed to read resolved action-card rows: ${resolvedCardsError?.message}`);
+    const campaignResolved = (resolvedCards ?? []).find((row) => row.workflow_item_id === campaignWorkflowItemId);
+    const contentResolved = (resolvedCards ?? []).find((row) => row.workflow_item_id === contentWorkflowItemId);
+    assert(campaignResolved?.metadata?.workflow_status === "approved", "campaign card workflow_status should be approved");
+    assert(contentResolved?.metadata?.workflow_status === "approved", "content card workflow_status should be approved");
+    assert(
+      Number.isFinite(contentResolved?.metadata?.expected_version),
+      "content card expected_version should be present after resolution"
+    );
+    console.log("PASS - action-card metadata reflects resolved workflow status");
+
     const { data: chatMessages, error: chatError } = await supabaseAdmin
       .from("chat_messages")
-      .select("id, role, content, created_at")
+      .select("id, role, content, message_type, projection_key, workflow_item_id, metadata, created_at")
       .eq("org_id", orgId)
       .order("created_at", { ascending: false })
       .limit(30);

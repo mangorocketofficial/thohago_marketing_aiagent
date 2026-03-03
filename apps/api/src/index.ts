@@ -37,6 +37,7 @@ app.use((_req, res) => {
 const requiredTables = [
   "pipeline_triggers",
   "campaigns",
+  "chat_messages",
   "orchestrator_sessions",
   "workflow_items",
   "workflow_events",
@@ -53,13 +54,33 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260303120000_phase_3_1_workflow_state_machine.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260303143000_phase_3_2_chat_action_card_projection.sql on the connected project.`
       );
       continue;
     }
 
     console.warn(`[API] Schema probe failed for ${table}: ${error.message}`);
   }
+};
+
+const verifyPhase32ProjectionColumns = async () => {
+  const { error } = await supabaseAdmin
+    .from("chat_messages")
+    .select("id,message_type,metadata,workflow_item_id,projection_key")
+    .limit(1);
+
+  if (!error) {
+    return;
+  }
+
+  if (/column .+ does not exist/i.test(error.message) || /Could not find the column/i.test(error.message)) {
+    console.warn(
+      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260303143000_phase_3_2_chat_action_card_projection.sql on the connected project.`
+    );
+    return;
+  }
+
+  console.warn(`[API] Projection schema probe failed for chat_messages: ${error.message}`);
 };
 
 app.listen(env.apiPort, () => {
@@ -74,5 +95,6 @@ app.listen(env.apiPort, () => {
   console.log(`[API] Listening on http://localhost:${env.apiPort}`);
   console.log(`[API] Supabase host: ${supabaseHost}`);
   void verifyRequiredTables();
+  void verifyPhase32ProjectionColumns();
   startRagIngestionWorker();
 });

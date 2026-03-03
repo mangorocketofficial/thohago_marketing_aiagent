@@ -122,6 +122,52 @@ export type Campaign = {
 
 export type ChatChannel = "dashboard" | "telegram";
 export type ChatRole = "user" | "assistant";
+export type ChatMessageType = "text" | "action_card" | "system";
+
+export type ChatActionCardEventType =
+  | "campaign_approved"
+  | "campaign_rejected"
+  | "content_approved"
+  | "content_rejected";
+
+export type ChatActionCardAction = {
+  id: "approve" | "request_revision" | "reject";
+  label: string;
+  event_type: ChatActionCardEventType;
+  mode?: "revision";
+  disabled?: boolean;
+};
+
+export type CampaignPlanActionCardData = {
+  title: string;
+  channels: string[];
+  post_count: number;
+  date_range: {
+    start: string;
+    end: string;
+  };
+};
+
+export type ContentDraftActionCardData = {
+  title: string;
+  channel: string;
+  body_preview: string;
+  media_urls: string[];
+};
+
+export type WorkflowActionCardMetadata = {
+  projection_type: "workflow_action_card";
+  card_type: "campaign_plan" | "content_draft" | "content_generation_request";
+  workflow_item_id: string;
+  workflow_status: WorkflowStatus;
+  expected_version: number;
+  session_id: string;
+  actions: ChatActionCardAction[];
+  card_data: CampaignPlanActionCardData | ContentDraftActionCardData | Record<string, unknown>;
+  resolved_at?: string;
+};
+
+export type ChatMessageMetadata = Record<string, unknown> | WorkflowActionCardMetadata;
 
 export type ChatMessage = {
   id: string;
@@ -129,6 +175,10 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   channel: ChatChannel;
+  message_type: ChatMessageType;
+  metadata: ChatMessageMetadata;
+  workflow_item_id: string | null;
+  projection_key: string | null;
   created_at: string;
 };
 

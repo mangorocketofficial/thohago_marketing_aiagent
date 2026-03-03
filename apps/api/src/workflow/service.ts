@@ -10,6 +10,7 @@ import {
   insertWorkflowEvent,
   insertWorkflowItem,
   listWorkflowItemsByStatuses,
+  updateWorkflowItemOriginChatMessage,
   updateWorkflowItemWithVersion
 } from "./repository";
 import type {
@@ -296,5 +297,28 @@ export const getPendingWorkflowItems = async (orgId: string): Promise<WorkflowIt
     return await listWorkflowItemsByStatuses(orgId, ["proposed", "revision_requested"]);
   } catch (error) {
     throw toHttpDbError(error, "Failed to query pending workflow items");
+  }
+};
+
+export const linkWorkflowItemOriginChatMessage = async (params: {
+  orgId: string;
+  itemId: string;
+  chatMessageId: string;
+}): Promise<WorkflowItemRow | null> => {
+  try {
+    const existing = await getWorkflowItemById(params.orgId, params.itemId);
+    if (!existing) {
+      return null;
+    }
+    if (existing.origin_chat_message_id === params.chatMessageId) {
+      return existing;
+    }
+    return await updateWorkflowItemOriginChatMessage({
+      orgId: params.orgId,
+      itemId: params.itemId,
+      originChatMessageId: params.chatMessageId
+    });
+  } catch (error) {
+    throw toHttpDbError(error, "Failed to link workflow item origin chat message");
   }
 };

@@ -24,4 +24,5 @@
 | 2-5a | Content Feedback Loop (Core) | Done | 2026-03-02 | [phase-2-5a-completion.md](./phase-2-5a-completion.md) |
 | 2-5a Validation | Onboarding + RAG 4-Type End-to-End Validation | Done | 2026-03-03 | [phase-2-5a-validation-completion.md](./phase-2-5a-validation-completion.md) |
 | 3-1 | Workflow Item State Machine (Source of Truth) Foundation | Done | 2026-03-03 | [phase-3-1-completion.md](./phase-3-1-completion.md) |
+| 3-2 | Orchestrator Workflow Creation + Chat Action-Card Projection | Done | 2026-03-03 | [phase-3-2-completion.md](./phase-3-2-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |
