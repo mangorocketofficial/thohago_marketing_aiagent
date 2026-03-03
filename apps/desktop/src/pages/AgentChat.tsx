@@ -1,5 +1,11 @@
-import { useMemo, useState } from "react";
-import { isActionCardMessage, type ChatActionCardDispatchInput, type ChatMessage } from "@repo/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  isActionCardMessage,
+  type ChatActionCardDispatchInput,
+  type ChatMessage,
+  type WorkflowActionCardMetadata
+} from "@repo/types";
+import { useNavigation } from "../context/NavigationContext";
 
 type AgentChatPageProps = {
   messages: ChatMessage[];
@@ -83,11 +89,15 @@ export const AgentChatPage = ({
   onSendMessage,
   onDispatchCardAction
 }: AgentChatPageProps) => {
+  const { activePage, agentChatHandoff, clearAgentChatHandoff } = useNavigation();
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [reasonByCard, setReasonByCard] = useState<Record<string, string>>({});
   const [editByCard, setEditByCard] = useState<Record<string, string>>({});
   const [editOpenByCard, setEditOpenByCard] = useState<Record<string, boolean>>({});
   const [cardNoticeByCard, setCardNoticeByCard] = useState<Record<string, string>>({});
+  const [highlightedCardMessageId, setHighlightedCardMessageId] = useState<string | null>(null);
+  const cardElementByMessageIdRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const latestVersionByWorkflowItem = useMemo(() => {
     const map = new Map<string, number>();
@@ -104,6 +114,80 @@ export const AgentChatPage = ({
     }
     return map;
   }, [messages]);
+
+  const latestActionCardMessageByWorkflowItem = useMemo(() => {
+    const map = new Map<
+      string,
+      ChatMessage & { message_type: "action_card"; metadata: WorkflowActionCardMetadata }
+    >();
+    for (const message of messages) {
+      if (!isActionCardMessage(message)) {
+        continue;
+      }
+      const itemId = message.metadata.workflow_item_id;
+      const candidateVersion = Math.max(1, Math.floor(message.metadata.expected_version));
+      const existing = map.get(itemId);
+      if (!existing) {
+        map.set(itemId, message);
+        continue;
+      }
+      const existingVersion = Math.max(1, Math.floor(existing.metadata.expected_version));
+      if (candidateVersion > existingVersion) {
+        map.set(itemId, message);
+      } else if (candidateVersion === existingVersion && message.created_at > existing.created_at) {
+        map.set(itemId, message);
+      }
+    }
+    return map;
+  }, [messages]);
+
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (activePage !== "agent-chat" || !agentChatHandoff) {
+      return;
+    }
+
+    const focusWorkflowItemId = agentChatHandoff.focusWorkflowItemId?.trim();
+    if (!focusWorkflowItemId) {
+      clearAgentChatHandoff();
+      return;
+    }
+
+    const targetMessage = latestActionCardMessageByWorkflowItem.get(focusWorkflowItemId);
+    if (!targetMessage) {
+      return;
+    }
+
+    setCollapsedCards((prev) => ({
+      ...prev,
+      [targetMessage.id]: false
+    }));
+
+    const targetNode = cardElementByMessageIdRef.current[targetMessage.id];
+    if (targetNode) {
+      targetNode.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    setHighlightedCardMessageId(targetMessage.id);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedCardMessageId((current) => (current === targetMessage.id ? null : current));
+      highlightTimerRef.current = null;
+    }, 2400);
+
+    clearAgentChatHandoff();
+  }, [activePage, agentChatHandoff, clearAgentChatHandoff, latestActionCardMessageByWorkflowItem]);
 
   const toggleCard = (messageId: string) => {
     setCollapsedCards((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
@@ -155,6 +239,7 @@ export const AgentChatPage = ({
                 const editedBody = editByCard[message.id] ?? contentBodyFromCard;
                 const isEditOpen = editOpenByCard[message.id] ?? false;
                 const cardNotice = cardNoticeByCard[message.id] ?? "";
+                const isHandoffTarget = highlightedCardMessageId === message.id;
 
                 const onActionClick = (params: {
                   actionId: "approve" | "request_revision" | "reject";
@@ -192,7 +277,13 @@ export const AgentChatPage = ({
                 };
 
                 return (
-                  <div key={message.id} className={`chat-item chat-action-card ${isResolved ? "is-resolved" : ""}`}>
+                  <div
+                    key={message.id}
+                    ref={(node) => {
+                      cardElementByMessageIdRef.current[message.id] = node;
+                    }}
+                    className={`chat-item chat-action-card ${isResolved ? "is-resolved" : ""}${isHandoffTarget ? " is-handoff-target" : ""}`}
+                  >
                     <div className="chat-head">
                       <strong>assistant</strong>
                       <span>{formatDateTime(message.created_at)}</span>

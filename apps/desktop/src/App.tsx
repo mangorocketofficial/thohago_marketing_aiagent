@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { NavigationProvider } from "./context/NavigationContext";
 import { useChat } from "./hooks/useChat";
-import { usePendingApprovals } from "./hooks/usePendingApprovals";
 import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
 import { AgentChatPage } from "./pages/AgentChat";
@@ -19,7 +18,8 @@ import type {
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
   OrgEntitlement,
-  OrchestratorSession
+  OrchestratorSession,
+  WorkflowStatus
 } from "@repo/types";
 
 type UiMode = "loading" | "onboarding" | "dashboard";
@@ -33,6 +33,18 @@ type OnboardingStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type AuthMode = "sign_in" | "sign_up";
 type OnboardingSynthesisResult = Awaited<ReturnType<Runtime["onboarding"]["synthesize"]>>;
 type EntitlementResponse = Awaited<ReturnType<Runtime["billing"]["getEntitlement"]>>;
+type WorkflowItemLinkRow = {
+  id: string;
+  source_campaign_id: string | null;
+  source_content_id: string | null;
+  status: WorkflowStatus;
+  version: number | string;
+};
+type WorkflowLinkHint = {
+  workflowItemId: string;
+  workflowStatus: WorkflowStatus;
+  version: number;
+};
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 const ONBOARDING_STEPS: OnboardingStep[] = [0, 1, 2, 3, 4, 5, 6, 7];
 const FALLBACK_ENTITLEMENT: OrgEntitlement = {
@@ -156,6 +168,18 @@ const formatDateTime = (iso: string | null | undefined): string => {
     return iso;
   }
   return parsed.toLocaleString();
+};
+
+const isWorkflowStatus = (value: unknown): value is WorkflowStatus =>
+  value === "proposed" || value === "revision_requested" || value === "approved" || value === "rejected";
+
+const toPositiveIntOrDefault = (value: unknown, fallback: number): number => {
+  const normalized =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(normalized)) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(normalized));
 };
 
 type RuntimeActionError = Error & {
@@ -349,12 +373,19 @@ const App = () => {
   const [activeSession, setActiveSession] = useState<OrchestratorSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
+  const [campaignWorkflowHints, setCampaignWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
   const [pendingContents, setPendingContents] = useState<Content[]>([]);
+  const [pendingContentWorkflowHints, setPendingContentWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
   const [chatNotice, setChatNotice] = useState("");
   const [isActionPending, setIsActionPending] = useState(false);
   const refreshActiveSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { chatInput, setChatInput, clearChatInput, campaignToReview } = useChat(draftCampaigns);
-  const { contentEdits, updateContentEdit, removeContentEdit } = usePendingApprovals(pendingContents);
+  const campaignWorkflowHint = useMemo<WorkflowLinkHint | null>(() => {
+    if (!campaignToReview) {
+      return null;
+    }
+    return campaignWorkflowHints[campaignToReview.id] ?? null;
+  }, [campaignToReview, campaignWorkflowHints]);
 
   const sortedFiles = useMemo(
     () =>
@@ -465,6 +496,7 @@ const App = () => {
   const refreshDraftCampaigns = useCallback(async () => {
     if (!supabase || !chatConfig) {
       setDraftCampaigns([]);
+      setCampaignWorkflowHints({});
       return;
     }
 
@@ -481,12 +513,53 @@ const App = () => {
       return;
     }
 
-    setDraftCampaigns((data ?? []) as Campaign[]);
+    const campaigns = (data ?? []) as Campaign[];
+    setDraftCampaigns(campaigns);
+
+    const campaignIds = campaigns
+      .map((campaign) => campaign.id)
+      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
+    if (campaignIds.length === 0) {
+      setCampaignWorkflowHints({});
+      return;
+    }
+
+    const { data: workflowRows, error: workflowError } = await supabase
+      .from("workflow_items")
+      .select("id,source_campaign_id,status,version")
+      .eq("org_id", chatConfig.orgId)
+      .eq("type", "campaign_plan")
+      .in("source_campaign_id", campaignIds);
+
+    if (workflowError || !workflowRows) {
+      setCampaignWorkflowHints({});
+      return;
+    }
+
+    const nextHints: Record<string, WorkflowLinkHint> = {};
+    for (const row of workflowRows as WorkflowItemLinkRow[]) {
+      const sourceCampaignId =
+        typeof row.source_campaign_id === "string" && row.source_campaign_id.trim()
+          ? row.source_campaign_id.trim()
+          : "";
+      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
+      if (!sourceCampaignId || !workflowItemId || !isWorkflowStatus(row.status)) {
+        continue;
+      }
+      nextHints[sourceCampaignId] = {
+        workflowItemId,
+        workflowStatus: row.status,
+        version: toPositiveIntOrDefault(row.version, 1)
+      };
+    }
+
+    setCampaignWorkflowHints(nextHints);
   }, [chatConfig, supabase]);
 
   const refreshPendingContents = useCallback(async () => {
     if (!supabase || !chatConfig) {
       setPendingContents([]);
+      setPendingContentWorkflowHints({});
       return;
     }
 
@@ -503,7 +576,47 @@ const App = () => {
       return;
     }
 
-    setPendingContents((data ?? []) as Content[]);
+    const contents = (data ?? []) as Content[];
+    setPendingContents(contents);
+
+    const contentIds = contents
+      .map((content) => content.id)
+      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
+    if (contentIds.length === 0) {
+      setPendingContentWorkflowHints({});
+      return;
+    }
+
+    const { data: workflowRows, error: workflowError } = await supabase
+      .from("workflow_items")
+      .select("id,source_content_id,status,version")
+      .eq("org_id", chatConfig.orgId)
+      .eq("type", "content_draft")
+      .in("source_content_id", contentIds);
+
+    if (workflowError || !workflowRows) {
+      setPendingContentWorkflowHints({});
+      return;
+    }
+
+    const nextHints: Record<string, WorkflowLinkHint> = {};
+    for (const row of workflowRows as WorkflowItemLinkRow[]) {
+      const sourceContentId =
+        typeof row.source_content_id === "string" && row.source_content_id.trim()
+          ? row.source_content_id.trim()
+          : "";
+      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
+      if (!sourceContentId || !workflowItemId || !isWorkflowStatus(row.status)) {
+        continue;
+      }
+      nextHints[sourceContentId] = {
+        workflowItemId,
+        workflowStatus: row.status,
+        version: toPositiveIntOrDefault(row.version, 1)
+      };
+    }
+
+    setPendingContentWorkflowHints(nextHints);
   }, [chatConfig, supabase]);
 
   useEffect(() => {
@@ -1549,67 +1662,6 @@ const App = () => {
     });
   };
 
-  const approveCampaign = async (campaignId: string) => {
-    const sessionId = await ensureActiveSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.approveCampaign({
-        sessionId,
-        campaignId
-      });
-    });
-  };
-
-  const approveContent = async (contentId: string, editedBody?: string) => {
-    const sessionId = await ensureActiveSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    const normalizedEditedBody = typeof editedBody === "string" ? editedBody.trim() : "";
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.approveContent({
-        sessionId,
-        contentId,
-        ...(normalizedEditedBody ? { editedBody: normalizedEditedBody } : {})
-      });
-      removeContentEdit(contentId);
-    });
-  };
-
-  const rejectCampaign = async (campaignId: string) => {
-    const sessionId = await ensureActiveSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.reject({
-        sessionId,
-        type: "campaign",
-        id: campaignId
-      });
-    });
-  };
-
-  const rejectContent = async (contentId: string) => {
-    const sessionId = await ensureActiveSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.reject({
-        sessionId,
-        type: "content",
-        id: contentId
-      });
-    });
-  };
-
   const dispatchCardAction = async (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => {
     const sessionId = payload.sessionId.trim();
     if (!sessionId) {
@@ -1637,10 +1689,6 @@ const App = () => {
         ...(isCampaignEvent ? { campaignId: activeCampaignId } : {}),
         ...(isContentEvent ? { contentId: activeContentId } : {})
       });
-
-      if (payload.eventType === "content_approved" && activeContentId) {
-        removeContentEdit(activeContentId);
-      }
     });
   };
 
@@ -2098,19 +2146,15 @@ const App = () => {
             notice={notice}
             sortedFiles={sortedFiles}
             pendingContents={pendingContents}
+            pendingContentWorkflowHints={pendingContentWorkflowHints}
             campaignToReview={campaignToReview}
-            contentEdits={contentEdits}
+            campaignWorkflowHint={campaignWorkflowHint}
             isActionPending={isActionPending}
             isAuthPending={isAuthPending}
             formatDateTime={formatDateTime}
             onOpenWatchFolder={() => void openWatchFolder()}
             onRefreshActiveSession={() => void refreshActiveSession()}
             onSignOut={() => void signOutAuth()}
-            onApproveCampaign={(campaignId) => void approveCampaign(campaignId)}
-            onRejectCampaign={(campaignId) => void rejectCampaign(campaignId)}
-            onUpdateContentEdit={updateContentEdit}
-            onApproveContent={(contentId, editedBody) => void approveContent(contentId, editedBody)}
-            onRejectContent={(contentId) => void rejectContent(contentId)}
           />
         }
         agentChatPage={

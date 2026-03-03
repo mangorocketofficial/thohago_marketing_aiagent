@@ -351,6 +351,11 @@ button.primary {
   border-color: #d7ddea;
 }
 
+.chat-action-card.is-handoff-target {
+  border-color: #2b6cb0;
+  box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.2);
+}
+
 .chat-card-top {
   display: flex;
   justify-content: space-between;
@@ -481,6 +486,49 @@ button.primary {
   color: #111827;
   line-height: 1.42;
   font-size: 14px;
+}
+
+.queue-item-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid #d0d5dd;
+  background: #f9fafb;
+  color: #344054;
+  font-size: 12px;
+  line-height: 1;
+  width: fit-content;
+  padding: 5px 10px;
+}
+
+.queue-badge.is-proposed {
+  border-color: #9ac5ff;
+  background: #edf5ff;
+  color: #17408b;
+}
+
+.queue-badge.is-revision_requested {
+  border-color: #f7cc7a;
+  background: #fff7e8;
+  color: #8a4b00;
+}
+
+.queue-badge.is-approved {
+  border-color: #a7e2b8;
+  background: #eefbf1;
+  color: #166534;
+}
+
+.queue-badge.is-rejected {
+  border-color: #f2b5bc;
+  background: #fff0f2;
+  color: #9f1239;
 }
 
 .queue-editor {

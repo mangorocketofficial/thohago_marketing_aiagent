@@ -10,14 +10,22 @@ export type PageId =
 
 export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
 
+export type AgentChatHandoff = {
+  focusWorkflowItemId?: string;
+  focusContentId?: string;
+  focusCampaignId?: string;
+};
+
 export type NavigateOptions = {
   contextPanelMode?: ContextPanelMode;
+  agentChatHandoff?: AgentChatHandoff | null;
 };
 
 export type NavigationState = {
   activePage: PageId;
   contextPanelMode: ContextPanelMode;
   contextPanelCollapsed: boolean;
+  agentChatHandoff: AgentChatHandoff | null;
 };
 
 export type NavItem = {

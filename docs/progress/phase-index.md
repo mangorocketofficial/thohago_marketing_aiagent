@@ -26,4 +26,5 @@
 | 3-1 | Workflow Item State Machine (Source of Truth) Foundation | Done | 2026-03-03 | [phase-3-1-completion.md](./phase-3-1-completion.md) |
 | 3-2 | Orchestrator Workflow Creation + Chat Action-Card Projection | Done | 2026-03-03 | [phase-3-2-completion.md](./phase-3-2-completion.md) |
 | 3-3 | Inline Chat Approve / Revise / Reject Actions | Done | 2026-03-03 | [phase-3-3-completion.md](./phase-3-3-completion.md) |
+| 3-4 | Dashboard Read-Only Pending View + Chat-Only Decision Path | Done | 2026-03-03 | [phase-3-4-completion.md](./phase-3-4-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |
