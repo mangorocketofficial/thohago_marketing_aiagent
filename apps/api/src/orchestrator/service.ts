@@ -868,10 +868,34 @@ const applyUserMessageStep = async (
     throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
   }
 
+  const rawUiContext =
+    payload?.ui_context && typeof payload.ui_context === "object" && !Array.isArray(payload.ui_context)
+      ? (payload.ui_context as Record<string, unknown>)
+      : null;
+  const source = asString(rawUiContext?.source, "").trim();
+  const pageId = asString(rawUiContext?.pageId, "").trim();
+  const contextPanelMode = asString(rawUiContext?.contextPanelMode, "").trim();
+  const focusWorkflowItemId = asString(rawUiContext?.focusWorkflowItemId, "").trim();
+  const focusContentId = asString(rawUiContext?.focusContentId, "").trim();
+  const focusCampaignId = asString(rawUiContext?.focusCampaignId, "").trim();
+
+  const uiContextMetadata =
+    source && pageId
+      ? {
+          source,
+          page_id: pageId,
+          ...(contextPanelMode ? { context_panel_mode: contextPanelMode } : {}),
+          ...(focusWorkflowItemId ? { focus_workflow_item_id: focusWorkflowItemId } : {}),
+          ...(focusContentId ? { focus_content_id: focusContentId } : {}),
+          ...(focusCampaignId ? { focus_campaign_id: focusCampaignId } : {})
+        }
+      : null;
+
   await insertChatMessage({
     orgId: session.org_id,
     role: "user",
-    content: userMessage
+    content: userMessage,
+    ...(uiContextMetadata ? { metadata: { ui_context: uiContextMetadata } } : {})
   });
 
   const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, userMessage);

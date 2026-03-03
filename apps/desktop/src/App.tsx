@@ -1,22 +1,20 @@
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChatProvider } from "./context/ChatContext";
 import { NavigationProvider } from "./context/NavigationContext";
-import { useChat } from "./hooks/useChat";
 import { OnboardingLayout, resolveOnboardingEntryStep, type OnboardingStep } from "./layouts/OnboardingLayout";
 import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
 import { AgentChatPage } from "./pages/AgentChat";
+import { AnalyticsPage } from "./pages/Analytics";
+import { BrandReviewPage } from "./pages/BrandReview";
+import { CampaignPlanPage } from "./pages/CampaignPlan";
+import { ContentCreatePage } from "./pages/ContentCreate";
 import { DashboardPage } from "./pages/Dashboard";
+import { EmailAutomationPage } from "./pages/EmailAutomation";
 import { SettingsPage } from "./pages/Settings";
-import type {
-  Campaign,
-  ChatActionCardDispatchInput,
-  ChatMessage,
-  Content,
-  OrchestratorSession,
-  WorkflowStatus
-} from "@repo/types";
+import type { OrchestratorSession } from "@repo/types";
 
 type UiMode = "loading" | "onboarding" | "dashboard";
 type Runtime = Window["desktopRuntime"];
@@ -24,18 +22,6 @@ type WatcherStatus = Awaited<ReturnType<Runtime["watcher"]["getStatus"]>>;
 type RendererFileEntry = Awaited<ReturnType<Runtime["watcher"]["getFiles"]>>[number];
 type ChatConfig = Awaited<ReturnType<Runtime["chat"]["getConfig"]>>;
 type DesktopAppConfig = Awaited<ReturnType<Runtime["app"]["getConfig"]>>;
-type WorkflowItemLinkRow = {
-  id: string;
-  source_campaign_id: string | null;
-  source_content_id: string | null;
-  status: WorkflowStatus;
-  version: number | string;
-};
-type WorkflowLinkHint = {
-  workflowItemId: string;
-  workflowStatus: WorkflowStatus;
-  version: number;
-};
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 
 const formatSessionStatus = (session: OrchestratorSession | null): string => {
@@ -69,63 +55,6 @@ const formatDateTime = (iso: string | null | undefined): string => {
   return parsed.toLocaleString();
 };
 
-const isWorkflowStatus = (value: unknown): value is WorkflowStatus =>
-  value === "proposed" || value === "revision_requested" || value === "approved" || value === "rejected";
-
-const toPositiveIntOrDefault = (value: unknown, fallback: number): number => {
-  const normalized =
-    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
-  if (!Number.isFinite(normalized)) {
-    return fallback;
-  }
-  return Math.max(1, Math.floor(normalized));
-};
-
-type RuntimeActionError = Error & {
-  code?: string;
-  status?: number;
-  details?: Record<string, unknown>;
-};
-
-const toRuntimeActionError = (error: unknown, fallbackMessage: string): RuntimeActionError => {
-  const message = error instanceof Error ? error.message : fallbackMessage;
-  const next = new Error(message) as RuntimeActionError;
-
-  if (error && typeof error === "object") {
-    const row = error as Record<string, unknown>;
-    if (typeof row.code === "string") {
-      next.code = row.code;
-    }
-    if (typeof row.status === "number" && Number.isFinite(row.status)) {
-      next.status = Math.floor(row.status);
-    }
-    if (row.details && typeof row.details === "object" && !Array.isArray(row.details)) {
-      next.details = row.details as Record<string, unknown>;
-    }
-  }
-
-  return next;
-};
-
-const buildVersionConflictNotice = (error: RuntimeActionError): string => {
-  const details = error.details ?? {};
-  const currentVersion =
-    typeof details.current_version === "number" && Number.isFinite(details.current_version)
-      ? Math.floor(details.current_version)
-      : null;
-  const expectedVersion =
-    typeof details.expected_version === "number" && Number.isFinite(details.expected_version)
-      ? Math.floor(details.expected_version)
-      : null;
-
-  if (currentVersion && expectedVersion) {
-    return `Action failed due to stale card version (expected v${expectedVersion}, current v${currentVersion}). Refreshed latest timeline.`;
-  }
-  if (currentVersion) {
-    return `Action failed due to stale card version (current v${currentVersion}). Refreshed latest timeline.`;
-  }
-  return "Action failed due to stale card version. Refreshed latest timeline.";
-};
 
 const parseJwtExpiration = (token: string): number | null => {
   const parts = token.split(".");
@@ -141,14 +70,6 @@ const parseJwtExpiration = (token: string): number | null => {
   } catch {
     return null;
   }
-};
-
-const sortMessages = (messages: ChatMessage[]): ChatMessage[] =>
-  [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at));
-
-const upsertMessage = (messages: ChatMessage[], next: ChatMessage): ChatMessage[] => {
-  const withoutOld = messages.filter((item) => item.id !== next.id);
-  return sortMessages([...withoutOld, next]);
 };
 
 let cachedSupabaseClient: SupabaseClient | null = null;
@@ -240,21 +161,7 @@ const App = () => {
 
   const [chatConfig, setChatConfig] = useState<ChatConfig | null>(null);
   const [activeSession, setActiveSession] = useState<OrchestratorSession | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
-  const [campaignWorkflowHints, setCampaignWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
-  const [pendingContents, setPendingContents] = useState<Content[]>([]);
-  const [pendingContentWorkflowHints, setPendingContentWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
-  const [chatNotice, setChatNotice] = useState("");
-  const [isActionPending, setIsActionPending] = useState(false);
   const refreshActiveSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { chatInput, setChatInput, clearChatInput, campaignToReview } = useChat(draftCampaigns);
-  const campaignWorkflowHint = useMemo<WorkflowLinkHint | null>(() => {
-    if (!campaignToReview) {
-      return null;
-    }
-    return campaignWorkflowHints[campaignToReview.id] ?? null;
-  }, [campaignToReview, campaignWorkflowHints]);
 
   const sortedFiles = useMemo(
     () =>
@@ -291,7 +198,7 @@ const App = () => {
 
     const response = await runtime.chat.getActiveSession();
     if (!response.ok) {
-      setChatNotice(response.message ?? "Failed to load active session.");
+      setNotice(response.message ?? "Failed to load active session.");
       return null;
     }
 
@@ -323,156 +230,9 @@ const App = () => {
     []
   );
 
-  const refreshMessages = useCallback(async () => {
-    if (!supabase || !chatConfig) {
-      setMessages([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .order("created_at", { ascending: true })
-      .limit(200);
-
-    if (error) {
-      setChatNotice(`Failed to load chat messages: ${error.message}`);
-      return;
-    }
-
-    setMessages(sortMessages((data ?? []) as ChatMessage[]));
-  }, [chatConfig, supabase]);
-
-  const refreshDraftCampaigns = useCallback(async () => {
-    if (!supabase || !chatConfig) {
-      setDraftCampaigns([]);
-      setCampaignWorkflowHints({});
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .eq("status", "draft")
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (error) {
-      setChatNotice(`Failed to load campaigns: ${error.message}`);
-      return;
-    }
-
-    const campaigns = (data ?? []) as Campaign[];
-    setDraftCampaigns(campaigns);
-
-    const campaignIds = campaigns
-      .map((campaign) => campaign.id)
-      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
-    if (campaignIds.length === 0) {
-      setCampaignWorkflowHints({});
-      return;
-    }
-
-    const { data: workflowRows, error: workflowError } = await supabase
-      .from("workflow_items")
-      .select("id,source_campaign_id,status,version")
-      .eq("org_id", chatConfig.orgId)
-      .eq("type", "campaign_plan")
-      .in("source_campaign_id", campaignIds);
-
-    if (workflowError || !workflowRows) {
-      setCampaignWorkflowHints({});
-      return;
-    }
-
-    const nextHints: Record<string, WorkflowLinkHint> = {};
-    for (const row of workflowRows as WorkflowItemLinkRow[]) {
-      const sourceCampaignId =
-        typeof row.source_campaign_id === "string" && row.source_campaign_id.trim()
-          ? row.source_campaign_id.trim()
-          : "";
-      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
-      if (!sourceCampaignId || !workflowItemId || !isWorkflowStatus(row.status)) {
-        continue;
-      }
-      nextHints[sourceCampaignId] = {
-        workflowItemId,
-        workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1)
-      };
-    }
-
-    setCampaignWorkflowHints(nextHints);
-  }, [chatConfig, supabase]);
-
-  const refreshPendingContents = useCallback(async () => {
-    if (!supabase || !chatConfig) {
-      setPendingContents([]);
-      setPendingContentWorkflowHints({});
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("contents")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .eq("status", "pending_approval")
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) {
-      setChatNotice(`Failed to load pending contents: ${error.message}`);
-      return;
-    }
-
-    const contents = (data ?? []) as Content[];
-    setPendingContents(contents);
-
-    const contentIds = contents
-      .map((content) => content.id)
-      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
-    if (contentIds.length === 0) {
-      setPendingContentWorkflowHints({});
-      return;
-    }
-
-    const { data: workflowRows, error: workflowError } = await supabase
-      .from("workflow_items")
-      .select("id,source_content_id,status,version")
-      .eq("org_id", chatConfig.orgId)
-      .eq("type", "content_draft")
-      .in("source_content_id", contentIds);
-
-    if (workflowError || !workflowRows) {
-      setPendingContentWorkflowHints({});
-      return;
-    }
-
-    const nextHints: Record<string, WorkflowLinkHint> = {};
-    for (const row of workflowRows as WorkflowItemLinkRow[]) {
-      const sourceContentId =
-        typeof row.source_content_id === "string" && row.source_content_id.trim()
-          ? row.source_content_id.trim()
-          : "";
-      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
-      if (!sourceContentId || !workflowItemId || !isWorkflowStatus(row.status)) {
-        continue;
-      }
-      nextHints[sourceContentId] = {
-        workflowItemId,
-        workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1)
-      };
-    }
-
-    setPendingContentWorkflowHints(nextHints);
-  }, [chatConfig, supabase]);
-
   useEffect(() => {
     if (!runtime) {
-      setChatNotice(
+      setNotice(
         "desktopRuntime bridge is unavailable. Check preload script loading and restart the desktop app."
       );
       setMode("dashboard");
@@ -503,8 +263,8 @@ const App = () => {
 
       const config = await runtime.chat.getConfig();
       setChatConfig(config);
-      if (!config.enabled && config.message) {
-        setChatNotice(config.message);
+      if (config.message) {
+        setNotice(config.message);
       }
 
       await refreshActiveSession();
@@ -549,110 +309,14 @@ const App = () => {
       enterOnboarding(watchPathAtBootstrap);
     });
 
-    const offActionResult = runtime.chat.onActionResult((payload) => {
-      setChatNotice(`Action succeeded: ${payload.action}`);
-    });
-
-    const offActionError = runtime.chat.onActionError((payload) => {
-      setChatNotice(`Action failed (${payload.action}): ${payload.message}`);
-    });
-
     return () => {
       offIndexed();
       offDeleted();
       offScan();
       offStatus();
       offShowOnboarding();
-      offActionResult();
-      offActionError();
     };
   }, [enterOnboarding, i18n, refreshActiveSession, runtime, scheduleRefreshActiveSession]);
-
-  useEffect(() => {
-    if (!supabase || !chatConfig) {
-      return;
-    }
-
-    void refreshMessages();
-    void refreshDraftCampaigns();
-    void refreshPendingContents();
-
-    const chatChannel = supabase
-      .channel(`desktop-chat-${chatConfig.orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "chat_messages",
-          filter: `org_id=eq.${chatConfig.orgId}`
-        },
-        (payload) => {
-          const nextRow = (payload.new ?? null) as ChatMessage | null;
-          const oldRow = (payload.old ?? null) as ChatMessage | null;
-
-          setMessages((prev) => {
-            if (nextRow && typeof nextRow.id === "string") {
-              return upsertMessage(prev, nextRow);
-            }
-            if (oldRow && typeof oldRow.id === "string") {
-              return prev.filter((item) => item.id !== oldRow.id);
-            }
-            return prev;
-          });
-          scheduleRefreshActiveSession();
-        }
-      )
-      .subscribe();
-
-    const contentsChannel = supabase
-      .channel(`desktop-contents-${chatConfig.orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "contents",
-          filter: `org_id=eq.${chatConfig.orgId}`
-        },
-        () => {
-          void refreshPendingContents();
-          scheduleRefreshActiveSession();
-        }
-      )
-      .subscribe();
-
-    const campaignsChannel = supabase
-      .channel(`desktop-campaigns-${chatConfig.orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "campaigns",
-          filter: `org_id=eq.${chatConfig.orgId}`
-        },
-        () => {
-          void refreshDraftCampaigns();
-          scheduleRefreshActiveSession();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(chatChannel);
-      void supabase.removeChannel(contentsChannel);
-      void supabase.removeChannel(campaignsChannel);
-    };
-  }, [
-    chatConfig,
-    refreshActiveSession,
-    refreshDraftCampaigns,
-    refreshMessages,
-    refreshPendingContents,
-    scheduleRefreshActiveSession,
-    supabase
-  ]);
 
   useEffect(() => {
     if (!authSupabase || !runtime) {
@@ -709,20 +373,6 @@ const App = () => {
     };
   }, [authSupabase, runtime]);
 
-  const ensureActiveSessionId = useCallback(async (): Promise<string | null> => {
-    if (activeSession?.id) {
-      return activeSession.id;
-    }
-
-    const session = await refreshActiveSession();
-    if (!session?.id) {
-      setChatNotice("No active session yet. Wait for trigger processing, then retry.");
-      return null;
-    }
-
-    return session.id;
-  }, [activeSession, refreshActiveSession]);
-
   const updateLanguage = useCallback(
     async (language: "ko" | "en") => {
       if (!runtime) {
@@ -747,10 +397,10 @@ const App = () => {
       }
       await runtime.auth.clearSession();
       setAuthSession(null);
-      setChatNotice("Signed out.");
+      setNotice("Signed out.");
       enterOnboarding(status?.watchPath ?? selectedPath, 1);
     } catch (error) {
-      setChatNotice(error instanceof Error ? error.message : "Sign-out failed.");
+      setNotice(error instanceof Error ? error.message : "Sign-out failed.");
     } finally {
       setIsAuthPending(false);
     }
@@ -761,77 +411,6 @@ const App = () => {
     if (!result.ok) {
       setNotice(result.message ?? "Failed to open watch folder.");
     }
-  };
-
-  const runChatAction = async (action: () => Promise<void>) => {
-    setIsActionPending(true);
-    setChatNotice("");
-    try {
-      await action();
-      await refreshMessages();
-      await refreshActiveSession();
-      await Promise.all([refreshDraftCampaigns(), refreshPendingContents()]);
-    } catch (error) {
-      const runtimeError = toRuntimeActionError(error, "Action failed.");
-      if (runtimeError.code === "version_conflict") {
-        setChatNotice(buildVersionConflictNotice(runtimeError));
-        await Promise.all([refreshMessages(), refreshActiveSession(), refreshDraftCampaigns(), refreshPendingContents()]);
-      } else {
-        setChatNotice(runtimeError.message);
-      }
-    } finally {
-      setIsActionPending(false);
-    }
-  };
-
-  const sendMessage = async () => {
-    const content = chatInput.trim();
-    if (!content) {
-      return;
-    }
-
-    const sessionId = await ensureActiveSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.sendMessage({
-        sessionId,
-        content
-      });
-      clearChatInput();
-    });
-  };
-
-  const dispatchCardAction = async (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => {
-    const sessionId = payload.sessionId.trim();
-    if (!sessionId) {
-      setChatNotice("sessionId is required for action card dispatch.");
-      return;
-    }
-
-    const activeCampaignId = typeof activeSession?.state?.campaign_id === "string" ? activeSession.state.campaign_id.trim() : "";
-    const activeContentId = typeof activeSession?.state?.content_id === "string" ? activeSession.state.content_id.trim() : "";
-
-    const isCampaignEvent = payload.eventType.startsWith("campaign_");
-    const isContentEvent = payload.eventType.startsWith("content_");
-    if (isCampaignEvent && !activeCampaignId) {
-      setChatNotice("Active session campaign_id is missing. Refresh session and retry.");
-      return;
-    }
-    if (isContentEvent && !activeContentId) {
-      setChatNotice("Active session content_id is missing. Refresh session and retry.");
-      return;
-    }
-
-    await runChatAction(async () => {
-      await window.desktopRuntime.chat.dispatchAction({
-        ...payload,
-        ...(isCampaignEvent ? { campaignId: activeCampaignId } : {}),
-        ...(isContentEvent ? { contentId: activeContentId } : {})
-      });
-    });
   };
 
   if (!runtime) {
@@ -890,53 +469,54 @@ const App = () => {
 
   return (
     <NavigationProvider>
-      <MainLayout
-        dashboardPage={
-          <DashboardPage
-            runtimeSummary={runtimeSummary}
-            notice={notice}
-            sortedFiles={sortedFiles}
-            pendingContents={pendingContents}
-            pendingContentWorkflowHints={pendingContentWorkflowHints}
-            campaignToReview={campaignToReview}
-            campaignWorkflowHint={campaignWorkflowHint}
-            isActionPending={isActionPending}
-            isAuthPending={isAuthPending}
-            formatDateTime={formatDateTime}
-            onOpenWatchFolder={() => void openWatchFolder()}
-            onRefreshActiveSession={() => void refreshActiveSession()}
-            onSignOut={() => void signOutAuth()}
-          />
-        }
-        agentChatPage={
-          <AgentChatPage
-            messages={messages}
-            chatInput={chatInput}
-            chatNotice={chatNotice}
-            chatConfigMessage={chatConfig?.message ?? ""}
-            activeSessionId={activeSession?.id ?? null}
-            isActionPending={isActionPending}
-            formatDateTime={formatDateTime}
-            onChatInputChange={setChatInput}
-            onSendMessage={() => void sendMessage()}
-            onDispatchCardAction={(payload) => void dispatchCardAction(payload)}
-          />
-        }
-        settingsPage={
-          <SettingsPage
-            orgId={desktopConfig?.orgId ?? "-"}
-            watchPath={selectedPath || status?.watchPath || "-"}
-            language={i18n.language}
-            userEmail={authSession?.user?.email ?? "-"}
-            runtimeSummary={runtimeSummary}
-            isActionPending={isActionPending}
-            isAuthPending={isAuthPending}
-            onOpenWatchFolder={() => void openWatchFolder()}
-            onSignOut={() => void signOutAuth()}
-            onChangeLanguage={(language) => void updateLanguage(language)}
-          />
-        }
-      />
+      <ChatProvider
+        runtime={runtime}
+        supabase={supabase}
+        chatConfig={chatConfig}
+        activeSession={activeSession}
+        refreshActiveSession={refreshActiveSession}
+      >
+        <MainLayout
+          dashboardPage={
+            <DashboardPage
+              runtimeSummary={runtimeSummary}
+              notice={notice}
+              sortedFiles={sortedFiles}
+              isAuthPending={isAuthPending}
+              formatDateTime={formatDateTime}
+              onOpenWatchFolder={() => void openWatchFolder()}
+              onRefreshActiveSession={() => void refreshActiveSession()}
+              onSignOut={() => void signOutAuth()}
+            />
+          }
+          brandReviewPage={
+            <BrandReviewPage
+              supabase={supabase}
+              orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
+              dataAccessMessage={chatConfig?.message ?? ""}
+              formatDateTime={formatDateTime}
+            />
+          }
+          campaignPlanPage={<CampaignPlanPage />}
+          contentCreatePage={<ContentCreatePage />}
+          analyticsPage={<AnalyticsPage />}
+          emailAutomationPage={<EmailAutomationPage />}
+          agentChatPage={<AgentChatPage formatDateTime={formatDateTime} />}
+          settingsPage={
+            <SettingsPage
+              orgId={desktopConfig?.orgId ?? "-"}
+              watchPath={selectedPath || status?.watchPath || "-"}
+              language={i18n.language}
+              userEmail={authSession?.user?.email ?? "-"}
+              runtimeSummary={runtimeSummary}
+              isAuthPending={isAuthPending}
+              onOpenWatchFolder={() => void openWatchFolder()}
+              onSignOut={() => void signOutAuth()}
+              onChangeLanguage={(language) => void updateLanguage(language)}
+            />
+          }
+        />
+      </ChatProvider>
     </NavigationProvider>
   );
 };

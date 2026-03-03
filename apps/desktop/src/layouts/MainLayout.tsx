@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 import { ContextPanel } from "../components/ContextPanel";
 import { Sidebar } from "../components/Sidebar";
 import { useNavigation } from "../context/NavigationContext";
@@ -6,60 +6,60 @@ import type { PageId } from "../types/navigation";
 
 type MainLayoutProps = {
   dashboardPage: ReactNode;
+  brandReviewPage: ReactNode;
+  campaignPlanPage: ReactNode;
+  contentCreatePage: ReactNode;
+  analyticsPage: ReactNode;
+  emailAutomationPage: ReactNode;
   agentChatPage: ReactNode;
   settingsPage: ReactNode;
 };
 
-const PLACEHOLDER_TITLES: Record<Exclude<PageId, "dashboard">, string> = {
-  "brand-review": "Brand Review",
-  "campaign-plan": "Campaign Plan",
-  "content-create": "Content Create",
-  analytics: "Analytics",
-  "email-automation": "Email Automation",
-  "agent-chat": "Agent Chat",
-  settings: "Settings"
+const resolvePageNode = (props: MainLayoutProps, pageId: PageId): ReactNode => {
+  switch (pageId) {
+    case "dashboard":
+      return props.dashboardPage;
+    case "brand-review":
+      return props.brandReviewPage;
+    case "campaign-plan":
+      return props.campaignPlanPage;
+    case "content-create":
+      return props.contentCreatePage;
+    case "analytics":
+      return props.analyticsPage;
+    case "email-automation":
+      return props.emailAutomationPage;
+    case "agent-chat":
+      return props.agentChatPage;
+    case "settings":
+      return props.settingsPage;
+    default:
+      return props.dashboardPage;
+  }
 };
 
-export const MainLayout = ({ dashboardPage, agentChatPage, settingsPage }: MainLayoutProps) => {
+export const MainLayout = (props: MainLayoutProps) => {
   const {
     activePage,
-    navigate,
     contextPanelMode,
     contextPanelCollapsed,
     isContextPanelHidden,
+    setContextPanelMode,
     toggleContextPanelCollapsed
   } = useNavigation();
 
   return (
     <div className="ui-main-layout">
-      <Sidebar activePage={activePage} onSelectPage={navigate} />
+      <Sidebar activePage={activePage} />
 
-      <main className="ui-main-content">
-        {activePage === "dashboard" ? (
-          dashboardPage
-        ) : activePage === "agent-chat" ? (
-          agentChatPage
-        ) : activePage === "settings" ? (
-          settingsPage
-        ) : (
-          <div className="app-shell ui-dashboard-shell">
-            <section className="panel ui-page-placeholder">
-              <p className="eyebrow">UI-1 Shell</p>
-              <h1>{PLACEHOLDER_TITLES[activePage]}</h1>
-              <p className="description">
-                This page is intentionally a placeholder in UI-1. Functional page migration will be delivered in later
-                UI phases.
-              </p>
-            </section>
-          </div>
-        )}
-      </main>
+      <main className="ui-main-content">{resolvePageNode(props, activePage)}</main>
 
       {!isContextPanelHidden ? (
         <ContextPanel
           activePage={activePage}
           mode={contextPanelMode}
           isCollapsed={contextPanelCollapsed}
+          onModeChange={setContextPanelMode}
           onToggleCollapsed={toggleContextPanelCollapsed}
         />
       ) : null}

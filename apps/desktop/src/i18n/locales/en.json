@@ -1,4 +1,4 @@
-{
+﻿{
   "onboarding": {
     "steps": {
       "0": "Intro",
@@ -35,8 +35,8 @@
       "instagram": "Instagram URL",
       "facebook": "Facebook URL",
       "threads": "Threads URL",
-      "next": "Continue to Brand Review",
-      "youtube": "YouTube URL"
+      "youtube": "YouTube URL",
+      "next": "Continue to Brand Review"
     },
     "review": {
       "title": "Preparing brand review",
@@ -73,5 +73,121 @@
     "language": "Language",
     "back": "Back",
     "error": "Something went wrong."
+  },
+  "ui": {
+    "common": {
+      "refresh": "Refresh",
+      "todo": "TODO: later phase",
+      "notAvailable": "-"
+    },
+    "sidebar": {
+      "productEyebrow": "Ddohago",
+      "productTitle": "Marketing Agent",
+      "primaryNavAria": "Primary navigation",
+      "secondaryNavAria": "Secondary navigation",
+      "userLabel": "Local User",
+      "orgLabel": "Desktop Organization"
+    },
+    "nav": {
+      "dashboard": "Dashboard",
+      "brand-review": "Brand Review",
+      "campaign-plan": "Campaign Plan",
+      "content-create": "Content Create",
+      "analytics": "Analytics",
+      "email-automation": "Email Automation",
+      "agent-chat": "Agent Chat",
+      "settings": "Settings"
+    },
+    "contextPanel": {
+      "titleByPage": {
+        "dashboard": "Dashboard Context",
+        "brand-review": "Brand Review Context",
+        "campaign-plan": "Campaign Context",
+        "content-create": "Content Context",
+        "analytics": "Analytics Context",
+        "email-automation": "Email Context",
+        "agent-chat": "Agent Chat Context",
+        "settings": "Settings Context"
+      },
+      "modeLabel": "Mode",
+      "modePageContext": "page context",
+      "modeMiniChat": "mini chat",
+      "description": "Context cards and mini-chat are now page-aware.",
+      "openMiniChat": "Open Mini Chat",
+      "closeMiniChat": "Close Mini Chat"
+    },
+    "pages": {
+      "dashboard": {
+        "eyebrow": "Runtime",
+        "title": "Dashboard",
+        "description": "Live runtime status, pending visibility, and indexed files."
+      },
+      "agentChat": {
+        "eyebrow": "Agent Chat",
+        "title": "Conversation",
+        "description": "Realtime assistant conversation and action approvals."
+      },
+      "settings": {
+        "eyebrow": "Settings",
+        "title": "Workspace Settings",
+        "description": "Current organization, watch folder, language, and runtime status."
+      },
+      "brandReview": {
+        "eyebrow": "Brand Review",
+        "title": "Brand Review",
+        "description": "Read the latest review markdown from organization brand settings.",
+        "documentTitle": "Review Markdown",
+        "lastUpdated": "Last Updated",
+        "loading": "Loading brand review...",
+        "empty": "No review markdown is available yet.",
+        "dataAccessUnavailable": "Brand review data is unavailable in the current runtime session.",
+        "loadFailed": "Failed to load brand review."
+      },
+      "contentCreate": {
+        "eyebrow": "Content Create",
+        "title": "Content Create",
+        "description": "Plan and draft channel-ready content artifacts.",
+        "briefTitle": "Content Brief",
+        "briefDescription": "Brief builder and template mapping will be connected in a later phase.",
+        "previewTitle": "Preview Surface",
+        "previewDescription": "Multi-channel preview and validation summary will be wired in a later phase."
+      },
+      "campaignPlan": {
+        "eyebrow": "Campaign Plan",
+        "title": "Campaign Plan",
+        "description": "Assemble campaign objectives, channels, and schedule skeleton.",
+        "objectiveTitle": "Campaign Objective",
+        "objectiveDescription": "Structured campaign objective editor will be connected in a later phase.",
+        "scheduleTitle": "Schedule Preview",
+        "scheduleDescription": "Calendar and posting cadence visualization will be connected in a later phase."
+      },
+      "analytics": {
+        "eyebrow": "Analytics",
+        "title": "Analytics",
+        "description": "Placeholder-only analytics surfaces until chart dependency phase is approved.",
+        "cardReach": "Reach Overview",
+        "cardEngagement": "Engagement Overview",
+        "cardConversion": "Conversion Overview",
+        "chartPlaceholderTitle": "Performance Trend Placeholder",
+        "chartPlaceholderDescription": "Charts are intentionally disabled in this phase."
+      },
+      "emailAutomation": {
+        "eyebrow": "Email Automation",
+        "title": "Email Automation",
+        "description": "Draft automation and audience flow placeholders for next delivery phases.",
+        "sequenceTitle": "Sequence Builder",
+        "sequenceDescription": "Automated email step orchestration will be integrated in a later phase.",
+        "audienceTitle": "Audience Segment",
+        "audienceDescription": "Segment targeting and eligibility logic will be integrated in a later phase."
+      },
+      "agentWidget": {
+        "title": "Mini Agent Chat",
+        "description": "Shared chat session with full Agent Chat page.",
+        "inputPlaceholder": "Ask the agent from current page context...",
+        "send": "Send",
+        "empty": "No chat messages yet.",
+        "noActiveSession": "No active session."
+      }
+    }
   }
 }

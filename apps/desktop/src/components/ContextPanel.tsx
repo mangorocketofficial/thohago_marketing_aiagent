@@ -1,24 +1,19 @@
+﻿import { useTranslation } from "react-i18next";
+import { AgentChatWidget } from "./AgentChatWidget";
 import type { ContextPanelMode, PageId } from "../types/navigation";
 
 type ContextPanelProps = {
   activePage: PageId;
   mode: ContextPanelMode;
   isCollapsed: boolean;
+  onModeChange: (mode: ContextPanelMode) => void;
   onToggleCollapsed: () => void;
 };
 
-const PAGE_CONTEXT_LABELS: Record<PageId, string> = {
-  dashboard: "Dashboard Context",
-  "brand-review": "Brand Profile Context",
-  "campaign-plan": "Campaign Context",
-  "content-create": "Content Preview Context",
-  analytics: "Analytics Context",
-  "email-automation": "Email Context",
-  "agent-chat": "Agent Chat Context",
-  settings: "Settings Context"
-};
+export const ContextPanel = ({ activePage, mode, isCollapsed, onModeChange, onToggleCollapsed }: ContextPanelProps) => {
+  const { t } = useTranslation();
+  const contextTitle = t(`ui.contextPanel.titleByPage.${activePage}`);
 
-export const ContextPanel = ({ activePage, mode, isCollapsed, onToggleCollapsed }: ContextPanelProps) => {
   return (
     <aside className={`ui-context-panel ${isCollapsed ? "is-collapsed" : ""}`}>
       <button
@@ -32,12 +27,26 @@ export const ContextPanel = ({ activePage, mode, isCollapsed, onToggleCollapsed 
 
       {!isCollapsed ? (
         <div className="ui-context-inner">
-          <h3>{PAGE_CONTEXT_LABELS[activePage]}</h3>
-          <p className="ui-context-mode">Mode: {mode}</p>
-          <p>
-            UI-1 provides the shell only. Page-specific context cards and mini agent chat will be delivered in later UI
-            phases.
+          <h3>{contextTitle}</h3>
+          <p className="ui-context-mode">
+            {t("ui.contextPanel.modeLabel")}: {mode === "agent-chat" ? t("ui.contextPanel.modeMiniChat") : t("ui.contextPanel.modePageContext")}
           </p>
+
+          {mode === "agent-chat" ? (
+            <>
+              <button type="button" onClick={() => onModeChange("page-context")}> 
+                {t("ui.contextPanel.closeMiniChat")}
+              </button>
+              <AgentChatWidget pageId={activePage} />
+            </>
+          ) : (
+            <>
+              <p>{t("ui.contextPanel.description")}</p>
+              <button type="button" onClick={() => onModeChange("agent-chat")}> 
+                {t("ui.contextPanel.openMiniChat")}
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </aside>

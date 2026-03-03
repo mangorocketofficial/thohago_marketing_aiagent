@@ -1,23 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import {
   isActionCardMessage,
   type ChatActionCardDispatchInput,
-  type ChatMessage,
   type WorkflowActionCardMetadata
 } from "@repo/types";
+import { useTranslation } from "react-i18next";
+import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
 
 type AgentChatPageProps = {
-  messages: ChatMessage[];
-  chatInput: string;
-  chatNotice: string;
-  chatConfigMessage: string;
-  activeSessionId: string | null;
-  isActionPending: boolean;
   formatDateTime: (iso: string | null | undefined) => string;
-  onChatInputChange: (value: string) => void;
-  onSendMessage: () => void;
-  onDispatchCardAction: (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => void;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -77,18 +69,20 @@ const renderContentDetails = (cardData: Record<string, unknown>) => {
   );
 };
 
-export const AgentChatPage = ({
-  messages,
-  chatInput,
-  chatNotice,
-  chatConfigMessage,
-  activeSessionId,
-  isActionPending,
-  formatDateTime,
-  onChatInputChange,
-  onSendMessage,
-  onDispatchCardAction
-}: AgentChatPageProps) => {
+export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
+  const { t } = useTranslation();
+  const {
+    messages,
+    chatInput,
+    setChatInput,
+    chatNotice,
+    chatConfigMessage,
+    activeSessionId,
+    isActionPending,
+    sendMessage,
+    dispatchCardAction
+  } = useChatContext();
+
   const { activePage, agentChatHandoff, clearAgentChatHandoff } = useNavigation();
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [reasonByCard, setReasonByCard] = useState<Record<string, string>>({});
@@ -118,7 +112,7 @@ export const AgentChatPage = ({
   const latestActionCardMessageByWorkflowItem = useMemo(() => {
     const map = new Map<
       string,
-      ChatMessage & { message_type: "action_card"; metadata: WorkflowActionCardMetadata }
+      (typeof messages)[number] & { message_type: "action_card"; metadata: WorkflowActionCardMetadata }
     >();
     for (const message of messages) {
       if (!isActionCardMessage(message)) {
@@ -196,9 +190,9 @@ export const AgentChatPage = ({
   return (
     <div className="app-shell ui-dashboard-shell">
       <section className="panel">
-        <p className="eyebrow">Agent Chat</p>
-        <h1>Conversation</h1>
-        <p className="description">Realtime assistant conversation and action approvals.</p>
+        <p className="eyebrow">{t("ui.pages.agentChat.eyebrow")}</p>
+        <h1>{t("ui.pages.agentChat.title")}</h1>
+        <p className="description">{t("ui.pages.agentChat.description")}</p>
       </section>
 
       <section className="panel">
@@ -264,7 +258,7 @@ export const AgentChatPage = ({
                       : undefined;
 
                   setCardNoticeByCard((prev) => ({ ...prev, [message.id]: "" }));
-                  onDispatchCardAction({
+                  void dispatchCardAction({
                     sessionId: message.metadata.session_id,
                     workflowItemId: message.metadata.workflow_item_id,
                     expectedVersion: currentVersion,
@@ -389,11 +383,22 @@ export const AgentChatPage = ({
           <div className="chat-input-row">
             <input
               value={chatInput}
-              onChange={(event) => onChatInputChange(event.target.value)}
+              onChange={(event) => setChatInput(event.target.value)}
               placeholder="Type a reply for the assistant..."
               disabled={isActionPending}
             />
-            <button className="primary" disabled={isActionPending || !chatInput.trim()} onClick={onSendMessage}>
+            <button
+              className="primary"
+              disabled={isActionPending || !chatInput.trim()}
+              onClick={() =>
+                void sendMessage({
+                  uiContext: {
+                    source: "agent-chat-page",
+                    pageId: "agent-chat"
+                  }
+                })
+              }
+            >
               Send
             </button>
           </div>

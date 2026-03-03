@@ -31,4 +31,8 @@
 | UI-2 | Navigation Contract (Router-Ready) | Done | 2026-03-03 | [ui-2-completion.md](./ui-2-completion.md) |
 | UI-3 | Page Migration Batch A (Dashboard, Agent Chat, Settings) | Done | 2026-03-03 | [ui-3-completion.md](./ui-3-completion.md) |
 | UI-3.5 | Onboarding Extraction from App.tsx | Done | 2026-03-03 | [ui-3.5-completion.md](./ui-3.5-completion.md) |
+| UI-4 | Page Skeleton Batch B (Brand Review, Content Create, Campaign, Analytics, Email) | Done | 2026-03-03 | [ui-4-completion.md](./ui-4-completion.md) |
+| UI-5 | Context Panel Agent Widget Integration | Done | 2026-03-03 | [ui-5-completion.md](./ui-5-completion.md) |
+| UI-6 | Styling Tokens and Coexistence Cleanup | Done | 2026-03-03 | [ui-6-completion.md](./ui-6-completion.md) |
+| UI-7 | Hardening, Regression Validation, and Release Gate | Done | 2026-03-03 | [ui-7-completion.md](./ui-7-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |

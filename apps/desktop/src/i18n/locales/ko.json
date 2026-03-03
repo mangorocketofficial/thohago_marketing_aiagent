@@ -1,4 +1,4 @@
-{
+﻿{
   "onboarding": {
     "steps": {
       "0": "소개",
@@ -12,8 +12,8 @@
     },
     "intro": {
       "greeting": "안녕하세요!",
-      "intro": "저는 또대리,\n마케팅 업무를 함께하는 AI 동료입니다.",
-      "promise": "온보딩 과정을 순서대로 안내해 드릴게요.",
+      "intro": "저는 또대리입니다.\n마케팅 업무를 함께하는 AI 동료예요.",
+      "promise": "온보딩 과정을 순서대로 안내해드릴게요.",
       "cta": "시작하기"
     },
     "auth": {
@@ -22,39 +22,39 @@
       "name": "이름",
       "email": "이메일",
       "password": "비밀번호",
-      "signIn": "이메일 로그인",
-      "signUp": "이메일 회원가입",
+      "signIn": "이메일로 로그인",
+      "signUp": "이메일로 회원가입",
       "google": "Google로 계속하기",
-      "continue": "다음 단계로"
+      "continue": "계속"
     },
     "urls": {
       "title": "브랜드 채널 URL을 입력해 주세요",
-      "description": "웹사이트/SNS URL은 모두 선택 입력입니다. 보유한 채널만 입력하세요.",
+      "description": "웹사이트/SNS URL은 선택 입력입니다. 보유한 채널만 입력하세요.",
       "website": "웹사이트 URL",
       "naverBlog": "네이버 블로그 URL",
       "instagram": "인스타그램 URL",
       "facebook": "페이스북 URL",
-      "threads": "쓰레드 URL",
+      "threads": "스레드 URL",
       "youtube": "유튜브 URL",
       "next": "브랜드 리뷰로 이동"
     },
     "review": {
-      "title": "브랜드 리뷰 진행 중",
-      "description": "웹사이트 + 네이버 블로그 크롤링을 백그라운드에서 진행합니다. 일부 실패는 허용됩니다.",
+      "title": "브랜드 리뷰 준비 중",
+      "description": "웹사이트와 네이버 블로그 크롤링을 백그라운드에서 진행합니다.",
       "next": "인터뷰 시작"
     },
     "interview": {
       "title": "4문항 인터뷰",
-      "description": "크롤링이 진행되는 동안 4개 인터뷰 문항에 모두 답변해 주세요.",
+      "description": "크롤링이 진행되는 동안 4개 질문에 답변해 주세요.",
       "q1": "Q1. 현재 브랜드 톤을 어떻게 설명하시겠어요?",
       "q2": "Q2. 주요 타깃 고객은 누구인가요?",
       "q3": "Q3. 사용하면 안 되는 단어/주제가 있나요?",
-      "q4": "Q4. 캠페인 집중 시즌이나 시기가 있나요?",
+      "q4": "Q4. 중요한 캠페인 시즌이나 시기가 있나요?",
       "next": "결과 문서 보기"
     },
     "result": {
       "title": "결과 문서 미리보기",
-      "description": "크롤링 결과와 인터뷰 답변을 합성해 결과 문서를 생성합니다.",
+      "description": "크롤링 결과와 인터뷰 답변으로 브랜드 프로필을 생성합니다.",
       "next": "마케팅 폴더 설정"
     },
     "folder": {
@@ -67,11 +67,127 @@
     },
     "summary": {
       "title": "준비가 완료되었습니다",
-      "description": "합성된 브랜드 프로필을 확인한 뒤 시작하기를 눌러 대시보드로 이동하세요.",
+      "description": "생성된 브랜드 프로필을 확인하고 시작하기를 눌러 대시보드로 이동하세요.",
       "cta": "시작하기"
     },
     "language": "언어",
     "back": "이전",
     "error": "문제가 발생했습니다."
+  },
+  "ui": {
+    "common": {
+      "refresh": "새로고침",
+      "todo": "TODO: 다음 단계에서 구현",
+      "notAvailable": "-"
+    },
+    "sidebar": {
+      "productEyebrow": "Ddohago",
+      "productTitle": "Marketing Agent",
+      "primaryNavAria": "주요 내비게이션",
+      "secondaryNavAria": "보조 내비게이션",
+      "userLabel": "로컬 사용자",
+      "orgLabel": "데스크톱 조직"
+    },
+    "nav": {
+      "dashboard": "대시보드",
+      "brand-review": "브랜드 리뷰",
+      "campaign-plan": "캠페인 기획",
+      "content-create": "콘텐츠 제작",
+      "analytics": "분석",
+      "email-automation": "이메일 자동화",
+      "agent-chat": "에이전트 채팅",
+      "settings": "설정"
+    },
+    "contextPanel": {
+      "titleByPage": {
+        "dashboard": "대시보드 컨텍스트",
+        "brand-review": "브랜드 리뷰 컨텍스트",
+        "campaign-plan": "캠페인 컨텍스트",
+        "content-create": "콘텐츠 컨텍스트",
+        "analytics": "분석 컨텍스트",
+        "email-automation": "이메일 컨텍스트",
+        "agent-chat": "에이전트 채팅 컨텍스트",
+        "settings": "설정 컨텍스트"
+      },
+      "modeLabel": "모드",
+      "modePageContext": "페이지 컨텍스트",
+      "modeMiniChat": "미니 채팅",
+      "description": "컨텍스트 카드와 미니 채팅이 현재 페이지를 기준으로 동작합니다.",
+      "openMiniChat": "미니 채팅 열기",
+      "closeMiniChat": "미니 채팅 닫기"
+    },
+    "pages": {
+      "dashboard": {
+        "eyebrow": "런타임",
+        "title": "대시보드",
+        "description": "실시간 런타임 상태, 승인 대기 현황, 인덱싱 파일을 확인합니다."
+      },
+      "agentChat": {
+        "eyebrow": "에이전트 채팅",
+        "title": "대화",
+        "description": "실시간 어시스턴트 대화와 승인 액션을 처리합니다."
+      },
+      "settings": {
+        "eyebrow": "설정",
+        "title": "워크스페이스 설정",
+        "description": "현재 조직, 감시 폴더, 언어, 런타임 상태를 확인합니다."
+      },
+      "brandReview": {
+        "eyebrow": "브랜드 리뷰",
+        "title": "브랜드 리뷰",
+        "description": "조직 브랜드 설정의 최신 리뷰 마크다운을 확인합니다.",
+        "documentTitle": "리뷰 마크다운",
+        "lastUpdated": "최종 갱신",
+        "loading": "브랜드 리뷰를 불러오는 중입니다...",
+        "empty": "아직 리뷰 마크다운이 없습니다.",
+        "dataAccessUnavailable": "현재 런타임 세션에서 브랜드 리뷰 데이터에 접근할 수 없습니다.",
+        "loadFailed": "브랜드 리뷰를 불러오지 못했습니다."
+      },
+      "contentCreate": {
+        "eyebrow": "콘텐츠 제작",
+        "title": "콘텐츠 제작",
+        "description": "채널별 콘텐츠 아티팩트를 기획하고 초안을 구성합니다.",
+        "briefTitle": "콘텐츠 브리프",
+        "briefDescription": "브리프 작성기와 템플릿 매핑은 다음 단계에서 연결됩니다.",
+        "previewTitle": "미리보기 화면",
+        "previewDescription": "채널별 미리보기와 검증 요약은 다음 단계에서 연결됩니다."
+      },
+      "campaignPlan": {
+        "eyebrow": "캠페인 기획",
+        "title": "캠페인 기획",
+        "description": "캠페인 목표, 채널, 일정 스켈레톤을 구성합니다.",
+        "objectiveTitle": "캠페인 목표",
+        "objectiveDescription": "구조화된 캠페인 목표 편집기는 다음 단계에서 연결됩니다.",
+        "scheduleTitle": "일정 미리보기",
+        "scheduleDescription": "캘린더와 발행 주기 시각화는 다음 단계에서 연결됩니다."
+      },
+      "analytics": {
+        "eyebrow": "분석",
+        "title": "분석",
+        "description": "차트 의존성 단계 전까지는 플레이스홀더만 제공합니다.",
+        "cardReach": "도달 요약",
+        "cardEngagement": "참여 요약",
+        "cardConversion": "전환 요약",
+        "chartPlaceholderTitle": "성과 추이 플레이스홀더",
+        "chartPlaceholderDescription": "이 단계에서는 차트 렌더링을 의도적으로 비활성화합니다."
+      },
+      "emailAutomation": {
+        "eyebrow": "이메일 자동화",
+        "title": "이메일 자동화",
+        "description": "다음 단계 구현을 위한 자동화/오디언스 흐름 플레이스홀더입니다.",
+        "sequenceTitle": "시퀀스 빌더",
+        "sequenceDescription": "자동 이메일 단계 오케스트레이션은 다음 단계에서 연결됩니다.",
+        "audienceTitle": "오디언스 세그먼트",
+        "audienceDescription": "세그먼트 타게팅과 자격 조건 로직은 다음 단계에서 연결됩니다."
+      },
+      "agentWidget": {
+        "title": "미니 에이전트 채팅",
+        "description": "전체 에이전트 채팅 페이지와 동일한 세션을 사용합니다.",
+        "inputPlaceholder": "현재 페이지 컨텍스트로 에이전트에게 질문하세요...",
+        "send": "전송",
+        "empty": "아직 채팅 메시지가 없습니다.",
+        "noActiveSession": "활성 세션이 없습니다."
+      }
+    }
   }
 }

@@ -1672,6 +1672,7 @@ const registerIpcHandlers = () => {
   ipcMain.handle("chat:send-message", async (_, payload) => {
     const sessionId = (payload?.sessionId ?? "").trim();
     const content = (payload?.content ?? "").trim();
+    const uiContext = payload?.uiContext && typeof payload.uiContext === "object" ? payload.uiContext : null;
     if (!sessionId) {
       throw new Error("sessionId is required.");
     }
@@ -1684,7 +1685,10 @@ const registerIpcHandlers = () => {
         method: "POST",
         body: JSON.stringify({
           event_type: "user_message",
-          payload: { content },
+          payload: {
+            content,
+            ...(uiContext ? { ui_context: uiContext } : {})
+          },
           idempotency_key: buildIdempotencyKey("user_message", [sessionId, content])
         })
       });

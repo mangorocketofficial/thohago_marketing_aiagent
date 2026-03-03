@@ -111,6 +111,15 @@ type ChatDispatchActionPayload = {
   editedBody?: string;
 };
 
+type ChatSendUiContext = {
+  source: "agent-chat-page" | "context-panel-widget";
+  pageId: string;
+  contextPanelMode?: "agent-chat" | "page-context";
+  focusWorkflowItemId?: string;
+  focusContentId?: string;
+  focusCampaignId?: string;
+};
+
 type SecureAuthSession = {
   accessToken: string;
   refreshToken: string;
@@ -238,7 +247,11 @@ declare global {
         onActionError: (cb: (payload: ChatActionError) => void) => () => void;
         getConfig: () => Promise<ChatConfig>;
         getActiveSession: () => Promise<ChatActiveSessionResult>;
-        sendMessage: (payload: { sessionId: string; content: string }) => Promise<ChatResumeResult>;
+        sendMessage: (payload: {
+          sessionId: string;
+          content: string;
+          uiContext?: ChatSendUiContext;
+        }) => Promise<ChatResumeResult>;
         approveCampaign: (payload: { sessionId: string; campaignId: string }) => Promise<ChatResumeResult>;
         approveContent: (payload: { sessionId: string; contentId: string; editedBody?: string }) => Promise<ChatResumeResult>;
         reject: (payload: {

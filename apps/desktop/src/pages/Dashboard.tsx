@@ -1,4 +1,6 @@
-import type { Campaign, Content, WorkflowStatus } from "@repo/types";
+﻿import type { WorkflowStatus } from "@repo/types";
+import { useTranslation } from "react-i18next";
+import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
 
 type RuntimeSummary = {
@@ -20,21 +22,10 @@ type IndexedFile = {
   fileSize: number;
 };
 
-type WorkflowLinkHint = {
-  workflowItemId: string;
-  workflowStatus: WorkflowStatus;
-  version: number;
-};
-
 type DashboardPageProps = {
   runtimeSummary: RuntimeSummary;
   notice: string;
   sortedFiles: IndexedFile[];
-  pendingContents: Content[];
-  pendingContentWorkflowHints: Record<string, WorkflowLinkHint | undefined>;
-  campaignToReview: Campaign | null;
-  campaignWorkflowHint: WorkflowLinkHint | null;
-  isActionPending: boolean;
   isAuthPending: boolean;
   formatDateTime: (iso: string | null | undefined) => string;
   onOpenWatchFolder: () => void;
@@ -49,13 +40,20 @@ const WORKFLOW_STATUS_LABEL: Record<WorkflowStatus, string> = {
   rejected: "Rejected"
 };
 
-const WorkflowHintBadge = ({ hint }: { hint: WorkflowLinkHint | null | undefined }) => {
+const WorkflowHintBadge = ({
+  hint
+}: {
+  hint:
+    | {
+        workflowItemId: string;
+        workflowStatus: WorkflowStatus;
+        version: number;
+      }
+    | null
+    | undefined;
+}) => {
   if (!hint) {
-    return (
-      <span className="queue-badge">
-        Workflow: unavailable
-      </span>
-    );
+    return <span className="queue-badge">Workflow: unavailable</span>;
   }
 
   return (
@@ -69,25 +67,30 @@ export const DashboardPage = ({
   runtimeSummary,
   notice,
   sortedFiles,
-  pendingContents,
-  pendingContentWorkflowHints,
-  campaignToReview,
-  campaignWorkflowHint,
-  isActionPending,
   isAuthPending,
   formatDateTime,
   onOpenWatchFolder,
   onRefreshActiveSession,
   onSignOut
 }: DashboardPageProps) => {
+  const { t } = useTranslation();
+  const {
+    pendingContents,
+    pendingContentWorkflowHints,
+    campaignToReview,
+    campaignWorkflowHints,
+    isActionPending
+  } = useChatContext();
   const { navigate } = useNavigation();
+
+  const campaignWorkflowHint = campaignToReview ? campaignWorkflowHints[campaignToReview.id] ?? null : null;
 
   return (
     <div className="app-shell ui-dashboard-shell">
       <section className="panel">
-        <p className="eyebrow">Runtime</p>
-        <h1>Dashboard</h1>
-        <p className="description">Live runtime status, pending visibility, and indexed files.</p>
+        <p className="eyebrow">{t("ui.pages.dashboard.eyebrow")}</p>
+        <h1>{t("ui.pages.dashboard.title")}</h1>
+        <p className="description">{t("ui.pages.dashboard.description")}</p>
         <div className="meta-grid">
           <p>
             Platform: <strong>{runtimeSummary.platform}</strong>
@@ -127,9 +130,7 @@ export const DashboardPage = ({
       <section className="panel panel-split">
         <article className="subpanel">
           <h2>Campaign Pending View</h2>
-          <p className="sub-description">
-            Read-only status view. Approval decisions execute in Agent Chat action-cards.
-          </p>
+          <p className="sub-description">Read-only status view. Approval decisions execute in Agent Chat action-cards.</p>
           {campaignToReview ? (
             <div className="campaign-card">
               <p>
@@ -241,4 +242,3 @@ export const DashboardPage = ({
     </div>
   );
 };
-

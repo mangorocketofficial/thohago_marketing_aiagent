@@ -41,7 +41,7 @@ Run integration hardening for the full UI track and lock release readiness with 
    - full page
    - mini widget
    - shared message continuity
-6. Pending approvals query/action from dashboard.
+6. Dashboard pending view remains read-only and supports `Open in Chat` handoff (no duplicate approve/reject action path).
 7. Brand review data display.
 8. Settings runtime data visibility.
 9. Type-check and build.
@@ -62,4 +62,3 @@ Run integration hardening for the full UI track and lock release readiness with 
 2. No critical navigation/panel state defects.
 3. Build and type-check succeed.
 4. Remaining issues are non-blocking and documented.
-
