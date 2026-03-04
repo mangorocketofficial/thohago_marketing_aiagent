@@ -8,6 +8,7 @@ import type {
   InsertChatMessageInput,
   UpdateLatestWorkflowProjectionStatusInput
 } from "../chat-projection";
+import { buildCampaignPlanSummary } from "../service-helpers";
 import { generateCampaignPlan } from "../ai";
 import type { CampaignPlanChainData } from "../skills/campaign-plan/chain-types";
 import type {
@@ -64,32 +65,6 @@ const parseRerunFromStep = (value: unknown): "step_a" | "step_b" | "step_c" | "s
     return normalized;
   }
   return undefined;
-};
-
-const buildPlanSummaryPayload = (params: {
-  plan: SessionState["campaign_plan"] | null;
-  chainData?: CampaignPlanChainData | null;
-}): Record<string, unknown> | null => {
-  if (!params.plan) {
-    return null;
-  }
-  const weekCount =
-    Array.isArray(params.chainData?.calendar?.weeks) && params.chainData?.calendar?.weeks
-      ? params.chainData.calendar.weeks.length
-      : null;
-
-  return {
-    channels: Array.isArray(params.plan.channels) ? params.plan.channels : [],
-    duration_days:
-      typeof params.plan.duration_days === "number" && Number.isFinite(params.plan.duration_days)
-        ? Math.max(1, Math.floor(params.plan.duration_days))
-        : null,
-    post_count:
-      typeof params.plan.post_count === "number" && Number.isFinite(params.plan.post_count)
-        ? Math.max(1, Math.floor(params.plan.post_count))
-        : null,
-    week_count: typeof weekCount === "number" && Number.isFinite(weekCount) ? Math.max(0, Math.floor(weekCount)) : null
-  };
 };
 
 export type CampaignStepResult = {
@@ -513,7 +488,7 @@ export const applyCampaignRevisionStep = async (
       ...(rerunFromStep ? { rerun_from_step: rerunFromStep } : {}),
       plan,
       plan_document: planDocument,
-      plan_summary: buildPlanSummaryPayload({ plan, chainData })
+      plan_summary: buildCampaignPlanSummary({ plan, planChainData: chainData })
     },
     expectedVersion: revisionRequested.item.version,
     idempotencyKey: deps.buildWorkflowActionIdempotencyKey(

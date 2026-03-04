@@ -2,27 +2,46 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { generateContentDraft, generateGeneralAssistantReply } from "./ai";
 import {
   emitCampaignActionCardProjection,
   emitContentActionCardProjection,
   insertChatMessage,
   updateLatestWorkflowProjectionStatus
 } from "./chat-projection";
+import { checkForbiddenWords } from "./forbidden-check";
+import {
+  asRecord,
+  asString,
+  buildCampaignDisplayTitle,
+  buildCampaignPlanSummary,
+  buildContentDisplayTitle,
+  buildManualSessionState,
+  buildWorkspaceKey,
+  DEFAULT_SCOPE_ID,
+  DEFAULT_WORKSPACE_TYPE,
+  isContextLabelColumnMissingError,
+  isWorkspaceKeyColumnMissingError,
+  messageFromError,
+  normalizeChannel,
+  normalizeScopeId,
+  normalizeStep,
+  normalizeWorkspaceType,
+  parseState
+} from "./service-helpers";
 import { runContentApprovalSideEffects } from "./side-effects";
 import { applyContentApprovedStep, applyContentRejectStep } from "./steps/content";
 import type { CampaignStepDeps } from "./steps/campaign";
 import type { ContentStepDeps } from "./steps/content";
 import { routeSkill } from "./skills/router";
 import type { SkillDeps, SkillOutcome, SkillRouteDecision } from "./skills/types";
+export { listWorkspaceInboxItemsForOrg, type WorkspaceInboxItem } from "./workspace-inbox";
 import {
   ensureCampaignWorkflowItem,
   ensureContentWorkflowItem
 } from "../workflow/service";
 import type { WorkflowItemRow, WorkflowStatus } from "../workflow/types";
-import { generateContentDraft, generateGeneralAssistantReply } from "./ai";
-import { checkForbiddenWords } from "./forbidden-check";
 import type {
-  CampaignPlan,
   CreateSessionParams,
   CreateSessionResult,
   ForbiddenCheckMeta,
@@ -39,9 +58,6 @@ import type {
 } from "./types";
 
 const ACTIVE_SESSION_STATUSES: SessionStatus[] = ["running", "paused"];
-const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
-const DEFAULT_WORKSPACE_TYPE = "general";
-const DEFAULT_SCOPE_ID = "default";
 const MAX_PENDING_TRIGGER_SCAN = 1000;
 
 const lockQueueByKey = new Map<string, Promise<void>>();
@@ -68,449 +84,66 @@ const withLock = async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
   }
 };
 
-const asString = (value: unknown, fallback = ""): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  return fallback;
-};
+const queryWorkspaceSessionWithFallback = async (params: {
+  orgId: string;
+  workspaceType: string;
+  scopeId: string;
+  activeOnly: boolean;
+  errorContext: string;
+}): Promise<OrchestratorSessionRow | null> => {
+  const workspaceKey = buildWorkspaceKey(params.workspaceType, params.scopeId);
 
-const normalizeWorkspaceType = (value: unknown, fallback = DEFAULT_WORKSPACE_TYPE): string => {
-  const normalized = asString(value, fallback).trim().toLowerCase();
-  return normalized || fallback;
-};
-
-const normalizeScopeId = (value: unknown): string | null => {
-  const normalized = asString(value, "").trim();
-  return normalized ? normalized : null;
-};
-
-const buildWorkspaceKey = (workspaceType: string, scopeId?: string | null): string => {
-  const normalizedType = normalizeWorkspaceType(workspaceType);
-  const normalizedScope = normalizeScopeId(scopeId) ?? DEFAULT_SCOPE_ID;
-  return `${normalizedType}:${normalizedScope}`;
-};
-
-const isWorkspaceKeyColumnMissingError = (error: unknown): boolean => {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
-  return message.includes("workspace_key") && message.includes("does not exist");
-};
-
-const isContextLabelColumnMissingError = (error: unknown): boolean => {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
-  return message.includes("context_label") && message.includes("does not exist");
-};
-
-const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-
-const asStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter((entry): entry is string => typeof entry === "string");
-};
-
-const normalizeStep = (value: unknown): OrchestratorStep => {
-  const step = asString(value);
-  switch (step) {
-    case "detect":
-    case "await_user_input":
-    case "await_campaign_approval":
-    case "generate_content":
-    case "await_content_approval":
-    case "publish":
-    case "done":
-      return step;
-    default:
-      return "detect";
-  }
-};
-
-const parseCampaignPlan = (value: unknown): CampaignPlan | null => {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const row = value as Record<string, unknown>;
-  if (!Array.isArray(row.channels) || !Array.isArray(row.content_types)) {
-    return null;
-  }
-
-  const schedule = Array.isArray(row.suggested_schedule)
-    ? row.suggested_schedule
-        .map((entry) => {
-          if (!entry || typeof entry !== "object") {
-            return null;
-          }
-
-          const item = entry as Record<string, unknown>;
-          const dayRaw = item.day;
-          const day = typeof dayRaw === "number" && Number.isFinite(dayRaw) ? Math.max(1, Math.floor(dayRaw)) : 1;
-          return {
-            day,
-            channel: asString(item.channel, "instagram").toLowerCase(),
-            type: asString(item.type, "text")
-          };
-        })
-        .filter((entry): entry is { day: number; channel: string; type: string } => !!entry)
-    : [];
-
-  return {
-    objective: asString(row.objective, ""),
-    channels: asStringArray(row.channels).map((entry) => entry.toLowerCase()),
-    duration_days:
-      typeof row.duration_days === "number" && Number.isFinite(row.duration_days)
-        ? Math.max(1, Math.floor(row.duration_days))
-        : 7,
-    post_count:
-      typeof row.post_count === "number" && Number.isFinite(row.post_count)
-        ? Math.max(1, Math.floor(row.post_count))
-        : 1,
-    content_types: asStringArray(row.content_types),
-    suggested_schedule: schedule
-  };
-};
-
-const parseContextLevel = (value: unknown): RagContextMeta["context_level"] => {
-  const level = asString(value, "");
-  if (level === "full" || level === "partial" || level === "minimal") {
-    return level;
-  }
-  if (level === "tier1_only") {
-    return "partial";
-  }
-  if (level === "no_context") {
-    return "minimal";
-  }
-  return "minimal";
-};
-
-const buildCampaignPlanSummary = (params: {
-  plan: SessionState["campaign_plan"] | null;
-  planChainData?: unknown;
-}): Record<string, unknown> | null => {
-  if (!params.plan) {
-    return null;
-  }
-  const planChainData = asRecord(params.planChainData);
-  const calendar = asRecord(planChainData.calendar);
-  const weeks = Array.isArray(calendar.weeks) ? calendar.weeks : [];
-
-  return {
-    channels: Array.isArray(params.plan.channels) ? params.plan.channels : [],
-    duration_days:
-      typeof params.plan.duration_days === "number" && Number.isFinite(params.plan.duration_days)
-        ? Math.max(1, Math.floor(params.plan.duration_days))
-        : null,
-    post_count:
-      typeof params.plan.post_count === "number" && Number.isFinite(params.plan.post_count)
-        ? Math.max(1, Math.floor(params.plan.post_count))
-        : null,
-    week_count: Math.max(0, weeks.length)
-  };
-};
-
-const parseRagContextMeta = (value: unknown): RagContextMeta | null => {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const row = value as Record<string, unknown>;
-  const memoryGeneratedAt =
-    row.memory_md_generated_at === null
-      ? null
-      : typeof row.memory_md_generated_at === "string" && row.memory_md_generated_at.trim()
-        ? row.memory_md_generated_at.trim()
-        : null;
-  const tier2Sources = Array.isArray(row.tier2_sources)
-    ? row.tier2_sources
-        .map((entry) => {
-          if (!entry || typeof entry !== "object") {
-            return null;
-          }
-          const source = entry as Record<string, unknown>;
-          return {
-            id: asString(source.id, ""),
-            source_type: asString(source.source_type, ""),
-            source_id: asString(source.source_id, ""),
-            similarity:
-              typeof source.similarity === "number" && Number.isFinite(source.similarity) ? source.similarity : 0
-          };
-        })
-        .filter((entry): entry is NonNullable<typeof entry> => !!entry && !!entry.id)
-    : [];
-
-  return {
-    context_level: parseContextLevel(row.context_level),
-    memory_md_generated_at: memoryGeneratedAt,
-    tier2_sources: tier2Sources,
-    total_context_tokens:
-      typeof row.total_context_tokens === "number" && Number.isFinite(row.total_context_tokens)
-        ? Math.max(0, Math.floor(row.total_context_tokens))
-        : 0,
-    retrieval_avg_similarity:
-      typeof row.retrieval_avg_similarity === "number" && Number.isFinite(row.retrieval_avg_similarity)
-        ? row.retrieval_avg_similarity
-        : null
-  };
-};
-
-const parseForbiddenCheckMeta = (value: unknown): ForbiddenCheckMeta | null => {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const row = value as Record<string, unknown>;
-  return {
-    passed: row.passed === true,
-    violations: asStringArray(row.violations),
-    regenerated: row.regenerated === true
-  };
-};
-
-const parseSkillConfidence = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.max(0, Math.min(1, value));
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number.parseFloat(value.trim());
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, Math.min(1, parsed));
-    }
-  }
-  return null;
-};
-
-const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
-  trigger_id: trigger.id,
-  activity_folder: trigger.activity_folder,
-  file_name: trigger.file_name,
-  file_type: trigger.file_type,
-  active_skill: null,
-  active_skill_started_at: null,
-  active_skill_version: null,
-  active_skill_confidence: null,
-  user_message: null,
-  campaign_id: null,
-  campaign_survey: null,
-  campaign_draft_version: 0,
-  campaign_chain_data: null,
-  campaign_plan_document: null,
-  campaign_workflow_item_id: null,
-  campaign_plan: null,
-  content_id: null,
-  content_workflow_item_id: null,
-  content_draft: null,
-  rag_context: null,
-  forbidden_check: null,
-  processed_event_ids: [],
-  last_error: null
-});
-
-const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): SessionState => {
-  if (!raw || typeof raw !== "object") {
-    if (!trigger) {
-      throw new HttpError(500, "invalid_state", "Session state is missing trigger context.");
-    }
-    return emptyStateFromTrigger(trigger);
-  }
-
-  const row = raw as Record<string, unknown>;
-  return {
-    trigger_id: asString(row.trigger_id, trigger?.id ?? ""),
-    activity_folder: asString(row.activity_folder, trigger?.activity_folder ?? ""),
-    file_name: asString(row.file_name, trigger?.file_name ?? ""),
-    file_type:
-      asString(row.file_type, trigger?.file_type ?? "document") === "video"
-        ? "video"
-        : asString(row.file_type, trigger?.file_type ?? "document") === "image"
-          ? "image"
-          : "document",
-    active_skill:
-      typeof row.active_skill === "string" && row.active_skill.trim() ? row.active_skill.trim() : null,
-    active_skill_started_at:
-      typeof row.active_skill_started_at === "string" && row.active_skill_started_at.trim()
-        ? row.active_skill_started_at.trim()
-        : null,
-    active_skill_version:
-      typeof row.active_skill_version === "string" && row.active_skill_version.trim()
-        ? row.active_skill_version.trim()
-        : null,
-    active_skill_confidence: row.active_skill_confidence === null ? null : parseSkillConfidence(row.active_skill_confidence),
-    user_message: row.user_message === null ? null : asString(row.user_message, ""),
-    campaign_id: row.campaign_id === null ? null : asString(row.campaign_id, ""),
-    campaign_survey:
-      row.campaign_survey && typeof row.campaign_survey === "object" && !Array.isArray(row.campaign_survey)
-        ? (row.campaign_survey as SessionState["campaign_survey"])
-        : null,
-    campaign_draft_version:
-      typeof row.campaign_draft_version === "number" && Number.isFinite(row.campaign_draft_version)
-        ? Math.max(0, Math.floor(row.campaign_draft_version))
-        : 0,
-    campaign_chain_data:
-      row.campaign_chain_data && typeof row.campaign_chain_data === "object" && !Array.isArray(row.campaign_chain_data)
-        ? (row.campaign_chain_data as Record<string, unknown>)
-        : null,
-    campaign_plan_document:
-      typeof row.campaign_plan_document === "string" && row.campaign_plan_document.trim()
-        ? row.campaign_plan_document
-        : null,
-    campaign_workflow_item_id:
-      typeof row.campaign_workflow_item_id === "string" && row.campaign_workflow_item_id.trim()
-        ? row.campaign_workflow_item_id.trim()
-        : null,
-    campaign_plan: row.campaign_plan === null ? null : parseCampaignPlan(row.campaign_plan),
-    content_id: row.content_id === null ? null : asString(row.content_id, ""),
-    content_workflow_item_id:
-      typeof row.content_workflow_item_id === "string" && row.content_workflow_item_id.trim()
-        ? row.content_workflow_item_id.trim()
-        : null,
-    content_draft: row.content_draft === null ? null : asString(row.content_draft, ""),
-    rag_context: row.rag_context === null ? null : parseRagContextMeta(row.rag_context),
-    forbidden_check: row.forbidden_check === null ? null : parseForbiddenCheckMeta(row.forbidden_check),
-    processed_event_ids: asStringArray(row.processed_event_ids),
-    last_error: row.last_error === null ? null : asString(row.last_error, "")
-  };
-};
-
-const normalizeChannel = (value: unknown): string => {
-  const candidate = asString(value, "instagram").trim().toLowerCase();
-  return CHANNEL_SET.has(candidate) ? candidate : "instagram";
-};
-
-const truncateDisplayTitle = (value: string, maxLength = 50): string => {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return normalized.slice(0, maxLength).trimEnd();
-};
-
-const buildCampaignDisplayTitle = (activityFolder: string, userMessage: string | null): string => {
-  const folder = activityFolder.trim();
-  if (folder) {
-    return folder;
-  }
-  return truncateDisplayTitle(userMessage ?? "") || "Campaign plan";
-};
-
-const buildContentDisplayTitle = (activityFolder: string, channel: string, userMessage: string | null): string => {
-  const folder = activityFolder.trim();
-  const normalizedChannel = normalizeChannel(channel);
-  if (folder) {
-    return `${folder} - ${normalizedChannel}`;
-  }
-  return truncateDisplayTitle(userMessage ?? "") || `Content draft - ${normalizedChannel}`;
-};
-
-const messageFromError = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "Unknown orchestration error";
-};
-
-const buildManualSessionState = (workspaceType: string, scopeId: string | null, title: string | null): SessionState => {
-  const preferredScope = normalizeScopeId(scopeId);
-  const titleValue = title ? title.trim() : "";
-  const activityFolder = preferredScope ?? (titleValue || workspaceType || DEFAULT_WORKSPACE_TYPE);
-  return {
-    trigger_id: "",
-    activity_folder: activityFolder,
-    file_name: "",
-    file_type: "document",
-    active_skill: null,
-    active_skill_started_at: null,
-    active_skill_version: null,
-    active_skill_confidence: null,
-    user_message: null,
-    campaign_id: null,
-    campaign_survey: null,
-    campaign_draft_version: 0,
-    campaign_chain_data: null,
-    campaign_plan_document: null,
-    campaign_workflow_item_id: null,
-    campaign_plan: null,
-    content_id: null,
-    content_workflow_item_id: null,
-    content_draft: null,
-    rag_context: null,
-    forbidden_check: null,
-    processed_event_ids: [],
-    last_error: null
-  };
-};
-
-const getActiveSessionByOrg = async (orgId: string): Promise<OrchestratorSessionRow | null> => {
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("orchestrator_sessions")
     .select("*")
-    .eq("org_id", orgId)
-    .in("status", ACTIVE_SESSION_STATUSES)
-    .is("archived_at", null)
+    .eq("org_id", params.orgId)
+    .eq("workspace_key", workspaceKey)
+    .is("archived_at", null);
+  if (params.activeOnly) {
+    query = query.in("status", ACTIVE_SESSION_STATUSES);
+  }
+  const { data, error } = await query.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+
+  if (error && !isWorkspaceKeyColumnMissingError(error)) {
+    throw new HttpError(500, "db_error", `${params.errorContext}: ${error.message}`);
+  }
+  if (!error) {
+    return (data as OrchestratorSessionRow | null) ?? null;
+  }
+
+  let fallbackQuery = supabaseAdmin
+    .from("orchestrator_sessions")
+    .select("*")
+    .eq("org_id", params.orgId)
+    .eq("workspace_type", params.workspaceType)
+    .eq("scope_id", params.scopeId)
+    .is("archived_at", null);
+  if (params.activeOnly) {
+    fallbackQuery = fallbackQuery.in("status", ACTIVE_SESSION_STATUSES);
+  }
+  const { data: fallbackData, error: fallbackError } = await fallbackQuery
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (error) {
-    throw new HttpError(500, "db_error", `Failed to query active session: ${error.message}`);
+  if (fallbackError) {
+    throw new HttpError(500, "db_error", `${params.errorContext}: ${fallbackError.message}`);
   }
-
-  return (data as OrchestratorSessionRow | null) ?? null;
+  return (fallbackData as OrchestratorSessionRow | null) ?? null;
 };
 
 const getActiveSessionByWorkspace = async (
   orgId: string,
   workspaceType: string,
   scopeId: string
-): Promise<OrchestratorSessionRow | null> => {
-  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
-  const { data, error } = await supabaseAdmin
-    .from("orchestrator_sessions")
-    .select("*")
-    .eq("org_id", orgId)
-    .eq("workspace_key", workspaceKey)
-    .in("status", ACTIVE_SESSION_STATUSES)
-    .is("archived_at", null)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error && !isWorkspaceKeyColumnMissingError(error)) {
-    throw new HttpError(500, "db_error", `Failed to query workspace active session: ${error.message}`);
-  }
-  if (error && isWorkspaceKeyColumnMissingError(error)) {
-    const { data: fallbackData, error: fallbackError } = await supabaseAdmin
-      .from("orchestrator_sessions")
-      .select("*")
-      .eq("org_id", orgId)
-      .eq("workspace_type", workspaceType)
-      .eq("scope_id", scopeId)
-      .in("status", ACTIVE_SESSION_STATUSES)
-      .is("archived_at", null)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (fallbackError) {
-      throw new HttpError(500, "db_error", `Failed to query workspace active session: ${fallbackError.message}`);
-    }
-    return (fallbackData as OrchestratorSessionRow | null) ?? null;
-  }
-
-  return (data as OrchestratorSessionRow | null) ?? null;
-};
+): Promise<OrchestratorSessionRow | null> =>
+  queryWorkspaceSessionWithFallback({
+    orgId,
+    workspaceType,
+    scopeId,
+    activeOnly: true,
+    errorContext: "Failed to query workspace active session"
+  });
 
 export const getSessionById = async (sessionId: string): Promise<OrchestratorSessionRow | null> => {
   const { data, error } = await supabaseAdmin
@@ -667,45 +300,19 @@ export const getRecommendedSessionForWorkspace = async (params: {
 }): Promise<OrchestratorSessionRow | null> => {
   const workspaceType = normalizeWorkspaceType(params.workspaceType);
   const scopeId = normalizeScopeId(params.scopeId) ?? DEFAULT_SCOPE_ID;
-  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
 
   const active = await getActiveSessionByWorkspace(params.orgId, workspaceType, scopeId);
   if (active) {
     return active;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("orchestrator_sessions")
-    .select("*")
-    .eq("org_id", params.orgId)
-    .eq("workspace_key", workspaceKey)
-    .is("archived_at", null)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error && !isWorkspaceKeyColumnMissingError(error)) {
-    throw new HttpError(500, "db_error", `Failed to query recommended session: ${error.message}`);
-  }
-  if (error && isWorkspaceKeyColumnMissingError(error)) {
-    const { data: fallbackData, error: fallbackError } = await supabaseAdmin
-      .from("orchestrator_sessions")
-      .select("*")
-      .eq("org_id", params.orgId)
-      .eq("workspace_type", workspaceType)
-      .eq("scope_id", scopeId)
-      .is("archived_at", null)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (fallbackError) {
-      throw new HttpError(500, "db_error", `Failed to query recommended session: ${fallbackError.message}`);
-    }
-    return (fallbackData as OrchestratorSessionRow | null) ?? null;
-  }
-
-  return (data as OrchestratorSessionRow | null) ?? null;
+  return queryWorkspaceSessionWithFallback({
+    orgId: params.orgId,
+    workspaceType,
+    scopeId,
+    activeOnly: false,
+    errorContext: "Failed to query recommended session"
+  });
 };
 
 export const listPendingFolderUpdatesForOrg = async (params: {
@@ -779,238 +386,6 @@ export const listPendingFolderUpdatesForOrg = async (params: {
       return right.last_detected_at.localeCompare(left.last_detected_at);
     })
     .slice(0, safeLimit);
-};
-
-type WorkspaceInboxItemType = "campaign_plan" | "content_draft";
-
-type WorkspaceInboxCampaign = {
-  id: string;
-  org_id: string;
-  title: string;
-  activity_folder: string;
-  status: string;
-  channels: string[];
-  plan: CampaignPlan;
-  plan_chain_data: unknown;
-  plan_document: string | null;
-  created_at: string;
-  updated_at: string;
-  plan_summary: Record<string, unknown> | null;
-};
-
-type WorkspaceInboxContent = {
-  id: string;
-  org_id: string;
-  campaign_id: string | null;
-  channel: string;
-  content_type: string;
-  status: string;
-  body: string | null;
-  metadata: Record<string, unknown>;
-  scheduled_at: string | null;
-  published_at: string | null;
-  embedded_at: string | null;
-  created_by: string;
-  approved_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type WorkspaceInboxItem = {
-  workflow_item_id: string;
-  type: WorkspaceInboxItemType;
-  status: WorkflowStatus;
-  expected_version: number;
-  session_id: string | null;
-  display_title: string | null;
-  created_at: string;
-  campaign: WorkspaceInboxCampaign | null;
-  content: WorkspaceInboxContent | null;
-};
-
-const toSafeCampaignPlan = (value: unknown): CampaignPlan => {
-  const parsed = parseCampaignPlan(value);
-  if (parsed) {
-    return parsed;
-  }
-  return {
-    objective: "",
-    channels: [],
-    duration_days: 7,
-    post_count: 1,
-    content_types: [],
-    suggested_schedule: []
-  };
-};
-
-export const listWorkspaceInboxItemsForOrg = async (params: {
-  orgId: string;
-  limit?: number;
-}): Promise<WorkspaceInboxItem[]> => {
-  const safeLimit =
-    typeof params.limit === "number" && Number.isFinite(params.limit)
-      ? Math.max(1, Math.min(100, Math.floor(params.limit)))
-      : 50;
-
-  const { data: workflowRowsRaw, error: workflowError } = await supabaseAdmin
-    .from("workflow_items")
-    .select("id,type,status,version,session_id,display_title,source_campaign_id,source_content_id,created_at,payload")
-    .eq("org_id", params.orgId)
-    .eq("status", "proposed")
-    .in("type", ["campaign_plan", "content_draft"])
-    .order("created_at", { ascending: false })
-    .limit(safeLimit);
-
-  if (workflowError) {
-    throw new HttpError(500, "db_error", `Failed to query workspace inbox workflow items: ${workflowError.message}`);
-  }
-
-  const workflowRows = Array.isArray(workflowRowsRaw) ? (workflowRowsRaw as Record<string, unknown>[]) : [];
-  const campaignIds = [
-    ...new Set(
-      workflowRows
-        .map((row) => asString(row.source_campaign_id, "").trim())
-        .filter((entry): entry is string => !!entry)
-    )
-  ];
-  const contentIds = [
-    ...new Set(
-      workflowRows
-        .map((row) => asString(row.source_content_id, "").trim())
-        .filter((entry): entry is string => !!entry)
-    )
-  ];
-
-  const campaignById = new Map<string, WorkspaceInboxCampaign>();
-  if (campaignIds.length > 0) {
-    const { data: campaignsRaw, error: campaignsError } = await supabaseAdmin
-      .from("campaigns")
-      .select("id,org_id,title,activity_folder,status,channels,plan,plan_chain_data,plan_document,created_at,updated_at")
-      .eq("org_id", params.orgId)
-      .in("id", campaignIds);
-
-    if (campaignsError) {
-      throw new HttpError(500, "db_error", `Failed to query workspace inbox campaigns: ${campaignsError.message}`);
-    }
-
-    for (const row of (campaignsRaw as Record<string, unknown>[] | null) ?? []) {
-      const id = asString(row.id, "").trim();
-      if (!id) {
-        continue;
-      }
-      const plan = toSafeCampaignPlan(row.plan);
-      campaignById.set(id, {
-        id,
-        org_id: asString(row.org_id, params.orgId),
-        title: asString(row.title, ""),
-        activity_folder: asString(row.activity_folder, ""),
-        status: asString(row.status, "draft"),
-        channels: asStringArray(row.channels).map((entry) => entry.toLowerCase()),
-        plan,
-        plan_chain_data: row.plan_chain_data ?? null,
-        plan_document: typeof row.plan_document === "string" ? row.plan_document : null,
-        created_at: asString(row.created_at, ""),
-        updated_at: asString(row.updated_at, ""),
-        plan_summary: buildCampaignPlanSummary({ plan, planChainData: row.plan_chain_data })
-      });
-    }
-  }
-
-  const contentById = new Map<string, WorkspaceInboxContent>();
-  if (contentIds.length > 0) {
-    const { data: contentsRaw, error: contentsError } = await supabaseAdmin
-      .from("contents")
-      .select(
-        "id,org_id,campaign_id,channel,content_type,status,body,metadata,scheduled_at,published_at,embedded_at,created_by,approved_by,created_at,updated_at"
-      )
-      .eq("org_id", params.orgId)
-      .in("id", contentIds);
-
-    if (contentsError) {
-      throw new HttpError(500, "db_error", `Failed to query workspace inbox contents: ${contentsError.message}`);
-    }
-
-    for (const row of (contentsRaw as Record<string, unknown>[] | null) ?? []) {
-      const id = asString(row.id, "").trim();
-      if (!id) {
-        continue;
-      }
-      contentById.set(id, {
-        id,
-        org_id: asString(row.org_id, params.orgId),
-        campaign_id: asString(row.campaign_id, "").trim() || null,
-        channel: asString(row.channel, ""),
-        content_type: asString(row.content_type, ""),
-        status: asString(row.status, ""),
-        body: typeof row.body === "string" ? row.body : null,
-        metadata: asRecord(row.metadata),
-        scheduled_at: asString(row.scheduled_at, "").trim() || null,
-        published_at: asString(row.published_at, "").trim() || null,
-        embedded_at: asString(row.embedded_at, "").trim() || null,
-        created_by: asString(row.created_by, "ai"),
-        approved_by: asString(row.approved_by, "").trim() || null,
-        created_at: asString(row.created_at, ""),
-        updated_at: asString(row.updated_at, "")
-      });
-    }
-  }
-
-  const items: WorkspaceInboxItem[] = [];
-  for (const row of workflowRows) {
-    const typeRaw = asString(row.type, "").trim();
-    if (typeRaw !== "campaign_plan" && typeRaw !== "content_draft") {
-      continue;
-    }
-    const workflowItemId = asString(row.id, "").trim();
-    if (!workflowItemId) {
-      continue;
-    }
-    const payload = asRecord(row.payload);
-    const sourceCampaignId = asString(row.source_campaign_id, "").trim();
-    const sourceContentId = asString(row.source_content_id, "").trim();
-    const campaignFromDb = sourceCampaignId ? campaignById.get(sourceCampaignId) ?? null : null;
-    const contentFromDb = sourceContentId ? contentById.get(sourceContentId) ?? null : null;
-
-    const fallbackPlan = toSafeCampaignPlan(payload.plan);
-    const fallbackPlanSummary =
-      payload.plan_summary && typeof payload.plan_summary === "object" && !Array.isArray(payload.plan_summary)
-        ? (payload.plan_summary as Record<string, unknown>)
-        : null;
-    const campaign =
-      typeRaw === "campaign_plan" && sourceCampaignId
-        ? (campaignFromDb ?? {
-            id: sourceCampaignId,
-            org_id: params.orgId,
-            title: asString(payload.display_title, asString(row.display_title, "")),
-            activity_folder: asString(payload.activity_folder, ""),
-            status: "draft",
-            channels: fallbackPlan.channels,
-            plan: fallbackPlan,
-            plan_chain_data: payload.plan_chain_data ?? null,
-            plan_document: typeof payload.plan_document === "string" ? payload.plan_document : null,
-            created_at: asString(row.created_at, ""),
-            updated_at: asString(row.created_at, ""),
-            plan_summary: fallbackPlanSummary ?? buildCampaignPlanSummary({ plan: fallbackPlan, planChainData: payload.plan_chain_data })
-          })
-        : null;
-
-    items.push({
-      workflow_item_id: workflowItemId,
-      type: typeRaw,
-      status: asString(row.status, "proposed") as WorkflowStatus,
-      expected_version:
-        typeof row.version === "number" && Number.isFinite(row.version)
-          ? Math.max(1, Math.floor(row.version))
-          : 1,
-      session_id: asString(row.session_id, "").trim() || null,
-      display_title: asString(row.display_title, "").trim() || null,
-      created_at: asString(row.created_at, ""),
-      campaign,
-      content: typeRaw === "content_draft" ? contentFromDb : null
-    });
-  }
-
-  return items;
 };
 
 export const acknowledgePendingFolderUpdatesForFolder = async (params: {
