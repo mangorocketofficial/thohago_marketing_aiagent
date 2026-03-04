@@ -136,8 +136,12 @@ export const SessionRailPanel = ({ onHide }: SessionRailPanelProps) => {
         ) : (
           <div className="ui-session-rail-list">
             {recentSelectableSessions.map((session) => {
+              const contextLabelRaw = (session as Record<string, unknown>).context_label;
+              const contextLabel = typeof contextLabelRaw === "string" && contextLabelRaw.trim() ? contextLabelRaw.trim() : "";
               const title =
-                session.title?.trim() || selectedWorkspaceLabel(session.workspace_type, session.scope_id);
+                contextLabel ||
+                session.title?.trim() ||
+                selectedWorkspaceLabel(session.workspace_type, session.scope_id);
               const preview = buildSessionPreview(session as { current_step?: string; state?: Record<string, unknown> });
               const isSelected = session.id === selectedSessionId;
               return (

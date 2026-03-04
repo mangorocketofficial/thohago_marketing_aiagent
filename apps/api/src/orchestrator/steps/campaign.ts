@@ -6,7 +6,7 @@ import type {
   EmitCampaignActionCardProjectionInput,
   EmitContentActionCardProjectionInput,
   InsertChatMessageInput,
-  UpdateLatestActionCardProjectionStatusInput
+  UpdateLatestWorkflowProjectionStatusInput
 } from "../chat-projection";
 import { generateCampaignPlan } from "../ai";
 import type {
@@ -78,7 +78,7 @@ export type CampaignStepDeps = {
   ensureContentWorkflowItemForState: (params: EnsureContentWorkflowItemForStateInput) => Promise<WorkflowItemRow>;
   emitCampaignActionCardProjection: (params: EmitCampaignActionCardProjectionInput) => Promise<string>;
   emitContentActionCardProjection: (params: EmitContentActionCardProjectionInput) => Promise<string>;
-  updateLatestActionCardProjectionStatus: (params: UpdateLatestActionCardProjectionStatusInput) => Promise<void>;
+  updateLatestWorkflowProjectionStatus: (params: UpdateLatestWorkflowProjectionStatusInput) => Promise<void>;
   mirrorCampaignStatusFromWorkflow: (orgId: string, campaignId: string, workflowStatus: WorkflowStatus) => Promise<void>;
   generateContentDraftWithForbiddenCheck: (
     params: GenerateContentDraftWithForbiddenCheckInput
@@ -237,7 +237,7 @@ export const applyCampaignApprovedStep = async (
     )
   });
   await deps.mirrorCampaignStatusFromWorkflow(session.org_id, campaignId, campaignApproval.item.status);
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: campaignApproval.item,
     sessionId: session.id
@@ -369,7 +369,7 @@ export const applyCampaignRevisionStep = async (
       "request_revision"
     )
   });
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: revisionRequested.item,
     sessionId: session.id
@@ -468,7 +468,7 @@ const applyCampaignTerminalRejectStep = async (
       "rejected"
     )
   });
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: campaignRejection.item,
     sessionId: session.id

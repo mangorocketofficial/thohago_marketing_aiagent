@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { OrchestratorSession } from "@repo/types";
+import type { ChatMessage, OrchestratorSession } from "@repo/types";
 import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
 import { useSessionSelector } from "../context/SessionSelectorContext";
@@ -59,6 +59,29 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
     () => messages.filter((message) => message.message_type !== "action_card").slice(-20),
     [messages]
   );
+
+  const readWorkflowNotification = (
+    message: ChatMessage
+  ): { workflowItemId: string; sessionId: string | null } | null => {
+    if (message.message_type !== "system") {
+      return null;
+    }
+    const metadata = message.metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return null;
+    }
+    const row = metadata as Record<string, unknown>;
+    if (row.notification_type !== "workflow_proposed") {
+      return null;
+    }
+    const workflowItemId =
+      typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
+    if (!workflowItemId) {
+      return null;
+    }
+    const sessionId = typeof message.session_id === "string" && message.session_id.trim() ? message.session_id.trim() : null;
+    return { workflowItemId, sessionId };
+  };
 
   const recentSelectableSessions = useMemo(() => {
     if (selectedSession && !recentSessions.some((entry) => entry.id === selectedSession.id)) {
@@ -174,12 +197,31 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
         {recentMessages.length === 0 ? (
           <p className="empty">{t("ui.pages.agentWidget.empty")}</p>
         ) : (
-          recentMessages.map((message) => (
-            <div key={message.id} className={`ui-agent-widget-item is-${message.role}`}>
-              <strong>{message.role}</strong>
-              <p>{message.content || "-"}</p>
-            </div>
-          ))
+          recentMessages.map((message) => {
+            const workflowNotice = readWorkflowNotification(message);
+            return (
+              <div key={message.id} className={`ui-agent-widget-item is-${message.role}`}>
+                <strong>{message.role}</strong>
+                <p>{message.content || "-"}</p>
+                {workflowNotice ? (
+                  <button
+                    type="button"
+                    className="ui-system-notice-link"
+                    onClick={() =>
+                      navigate("workspace", {
+                        workspaceHandoff: {
+                          focusWorkflowItemId: workflowNotice.workflowItemId,
+                          focusSessionId: workflowNotice.sessionId ?? undefined
+                        }
+                      })
+                    }
+                  >
+                    View in Inbox
+                  </button>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </div>
 

@@ -6,7 +6,7 @@ import {
   emitCampaignActionCardProjection,
   emitContentActionCardProjection,
   insertChatMessage,
-  updateLatestActionCardProjectionStatus
+  updateLatestWorkflowProjectionStatus
 } from "./chat-projection";
 import { runContentApprovalSideEffects } from "./side-effects";
 import {
@@ -97,6 +97,14 @@ const isWorkspaceKeyColumnMissingError = (error: unknown): boolean => {
   }
   const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
   return message.includes("workspace_key") && message.includes("does not exist");
+};
+
+const isContextLabelColumnMissingError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
+  return message.includes("context_label") && message.includes("does not exist");
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -297,6 +305,34 @@ const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): SessionSt
 const normalizeChannel = (value: unknown): string => {
   const candidate = asString(value, "instagram").trim().toLowerCase();
   return CHANNEL_SET.has(candidate) ? candidate : "instagram";
+};
+
+const truncateDisplayTitle = (value: string, maxLength = 50): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return normalized.slice(0, maxLength).trimEnd();
+};
+
+const buildCampaignDisplayTitle = (activityFolder: string, userMessage: string | null): string => {
+  const folder = activityFolder.trim();
+  if (folder) {
+    return folder;
+  }
+  return truncateDisplayTitle(userMessage ?? "") || "Campaign plan";
+};
+
+const buildContentDisplayTitle = (activityFolder: string, channel: string, userMessage: string | null): string => {
+  const folder = activityFolder.trim();
+  const normalizedChannel = normalizeChannel(channel);
+  if (folder) {
+    return `${folder} - ${normalizedChannel}`;
+  }
+  return truncateDisplayTitle(userMessage ?? "") || `Content draft - ${normalizedChannel}`;
 };
 
 const messageFromError = (error: unknown): string => {
@@ -900,14 +936,33 @@ const mirrorContentStatusFromWorkflow = async (params: {
   }
 };
 
+const bindSessionContextLabelIfEmpty = async (sessionId: string, activityFolder: string): Promise<void> => {
+  const nextLabel = activityFolder.trim();
+  if (!nextLabel) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("orchestrator_sessions")
+    .update({ context_label: nextLabel })
+    .eq("id", sessionId)
+    .is("context_label", null);
+
+  if (error && !isContextLabelColumnMissingError(error)) {
+    throw new HttpError(500, "db_error", `Failed to bind session context label: ${error.message}`);
+  }
+};
+
 const ensureCampaignWorkflowItemForState = async (params: {
   session: OrchestratorSessionRow;
   state: SessionState;
   campaignId: string;
   eventIdempotencyKey: string | null;
 }): Promise<WorkflowItemRow> => {
-  return ensureCampaignWorkflowItem({
+  const workflowItem = await ensureCampaignWorkflowItem({
     orgId: params.session.org_id,
+    sessionId: params.session.id,
+    displayTitle: buildCampaignDisplayTitle(params.state.activity_folder, params.state.user_message),
     campaignId: params.campaignId,
     payload: {
       campaign_id: params.campaignId,
@@ -922,6 +977,9 @@ const ensureCampaignWorkflowItemForState = async (params: {
       params.eventIdempotencyKey
     )
   });
+
+  await bindSessionContextLabelIfEmpty(params.session.id, params.state.activity_folder);
+  return workflowItem;
 };
 
 const ensureContentWorkflowItemForState = async (params: {
@@ -931,14 +989,17 @@ const ensureContentWorkflowItemForState = async (params: {
   originChatMessageId?: string | null;
   eventIdempotencyKey: string | null;
 }): Promise<WorkflowItemRow> => {
-  return ensureContentWorkflowItem({
+  const channel = normalizeChannel(params.state.campaign_plan?.suggested_schedule?.[0]?.channel);
+  const workflowItem = await ensureContentWorkflowItem({
     orgId: params.session.org_id,
+    sessionId: params.session.id,
+    displayTitle: buildContentDisplayTitle(params.state.activity_folder, channel, params.state.user_message),
     contentId: params.contentId,
     payload: {
       content_id: params.contentId,
       campaign_id: params.state.campaign_id,
       activity_folder: params.state.activity_folder,
-      channel: normalizeChannel(params.state.campaign_plan?.suggested_schedule?.[0]?.channel),
+      channel,
       draft: params.state.content_draft,
       rag_context: params.state.rag_context,
       forbidden_check: params.state.forbidden_check
@@ -951,6 +1012,9 @@ const ensureContentWorkflowItemForState = async (params: {
       params.eventIdempotencyKey
     )
   });
+
+  await bindSessionContextLabelIfEmpty(params.session.id, params.state.activity_folder);
+  return workflowItem;
 };
 
 const acceptUserMessageDuringApprovalStep = async (params: {
@@ -1013,7 +1077,7 @@ const processResumeEvent = async (
     ensureContentWorkflowItemForState,
     emitCampaignActionCardProjection,
     emitContentActionCardProjection,
-    updateLatestActionCardProjectionStatus,
+    updateLatestWorkflowProjectionStatus,
     mirrorCampaignStatusFromWorkflow,
     generateContentDraftWithForbiddenCheck,
     insertChatMessage,
@@ -1028,7 +1092,7 @@ const processResumeEvent = async (
     resolveExpectedVersion,
     buildWorkflowActionIdempotencyKey,
     ensureContentWorkflowItemForState,
-    updateLatestActionCardProjectionStatus,
+    updateLatestWorkflowProjectionStatus,
     mirrorContentStatusFromWorkflow,
     emitContentActionCardProjection,
     generateContentDraftWithForbiddenCheck,

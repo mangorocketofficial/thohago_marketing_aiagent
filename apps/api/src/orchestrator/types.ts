@@ -91,6 +91,7 @@ export type OrchestratorSessionRow = {
   scope_id: string | null;
   workspace_key?: string | null;
   title: string | null;
+  context_label?: string | null;
   created_by_user_id: string | null;
   archived_at: string | null;
   state: unknown;

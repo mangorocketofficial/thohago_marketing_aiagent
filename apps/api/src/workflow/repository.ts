@@ -49,6 +49,8 @@ const parseWorkflowItem = (value: unknown): WorkflowItemRow => {
   return {
     id: asString(row.id),
     org_id: asString(row.org_id),
+    session_id: asNullableString(row.session_id),
+    display_title: asNullableString(row.display_title),
     type: asString(row.type) as WorkflowItemRow["type"],
     status: asString(row.status) as WorkflowStatus,
     payload: asPayload(row.payload),
@@ -141,6 +143,8 @@ export const getWorkflowItemBySourceContentId = async (
 
 type InsertWorkflowItemInput = {
   org_id: string;
+  session_id: string | null;
+  display_title: string | null;
   type: WorkflowItemRow["type"];
   status: WorkflowStatus;
   payload: WorkflowItemPayload;

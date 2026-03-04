@@ -15,6 +15,8 @@ export type WorkflowItemPayload = Record<string, unknown>;
 export type WorkflowItemRow = {
   id: string;
   org_id: string;
+  session_id: string | null;
+  display_title: string | null;
   type: WorkflowItemType;
   status: WorkflowStatus;
   payload: WorkflowItemPayload;
@@ -45,6 +47,8 @@ export type WorkflowEventRow = {
 
 export type CreateWorkflowItemInput = {
   orgId: string;
+  sessionId?: string | null;
+  displayTitle?: string | null;
   type: WorkflowItemType;
   status?: WorkflowStatus;
   payload?: WorkflowItemPayload;

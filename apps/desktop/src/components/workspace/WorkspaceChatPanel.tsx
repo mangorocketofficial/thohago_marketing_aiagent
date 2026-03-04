@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { ChatMessage } from "@repo/types";
 import { useChatContext } from "../../context/ChatContext";
+import { useNavigation } from "../../context/NavigationContext";
 
 type WorkspaceChatPanelProps = {
   formatDateTime: (iso: string | null | undefined) => string;
@@ -8,6 +10,7 @@ type WorkspaceChatPanelProps = {
 
 export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: WorkspaceChatPanelProps) => {
   const { t } = useTranslation();
+  const { navigate } = useNavigation();
   const {
     messages,
     chatInput,
@@ -24,6 +27,29 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
     [messages]
   );
 
+  const readWorkflowNotification = (
+    message: ChatMessage
+  ): { workflowItemId: string; sessionId: string | null } | null => {
+    if (message.message_type !== "system") {
+      return null;
+    }
+    const metadata = message.metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return null;
+    }
+    const row = metadata as Record<string, unknown>;
+    if (row.notification_type !== "workflow_proposed") {
+      return null;
+    }
+    const workflowItemId =
+      typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
+    if (!workflowItemId) {
+      return null;
+    }
+    const sessionId = typeof message.session_id === "string" && message.session_id.trim() ? message.session_id.trim() : null;
+    return { workflowItemId, sessionId };
+  };
+
   return (
     <article className="ui-workspace-chat subpanel">
       <div className="ui-workspace-panel-head">
@@ -36,11 +62,30 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
         {timelineMessages.length === 0 ? (
           <p className="empty">No chat messages yet.</p>
         ) : (
-          timelineMessages.map((message) => (
-            <div key={message.id} className={`chat-item chat-${message.role}`}>
-              <p>{message.content || "-"}</p>
-            </div>
-          ))
+          timelineMessages.map((message) => {
+            const workflowNotice = readWorkflowNotification(message);
+            return (
+              <div key={message.id} className={`chat-item chat-${message.role}`}>
+                <p>{message.content || "-"}</p>
+                {workflowNotice ? (
+                  <button
+                    type="button"
+                    className="ui-system-notice-link"
+                    onClick={() =>
+                      navigate("workspace", {
+                        workspaceHandoff: {
+                          focusWorkflowItemId: workflowNotice.workflowItemId,
+                          focusSessionId: workflowNotice.sessionId ?? undefined
+                        }
+                      })
+                    }
+                  >
+                    View in Inbox
+                  </button>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </div>
 

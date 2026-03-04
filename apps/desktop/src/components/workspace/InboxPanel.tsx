@@ -3,6 +3,7 @@ import type { Campaign, Content, WorkflowStatus } from "@repo/types";
 import { useTranslation } from "react-i18next";
 import { useChatContext } from "../../context/ChatContext";
 import { useNavigation } from "../../context/NavigationContext";
+import { useSessionSelector } from "../../context/SessionSelectorContext";
 import { getWorkflowStatusLabel } from "../../types/workflow";
 
 type InboxPanelProps = {
@@ -19,6 +20,7 @@ type InboxItem =
       workflowStatus: WorkflowStatus;
       expectedVersion: number;
       sessionId: string | null;
+      displayTitle: string | null;
     }
   | {
       key: string;
@@ -29,6 +31,7 @@ type InboxItem =
       workflowStatus: WorkflowStatus;
       expectedVersion: number;
       sessionId: string | null;
+      displayTitle: string | null;
     };
 
 const compareByCreatedDesc = (left: InboxItem, right: InboxItem): number => right.createdAt.localeCompare(left.createdAt);
@@ -45,6 +48,7 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
     dispatchCardAction
   } = useChatContext();
   const { activePage, workspaceHandoff, clearWorkspaceHandoff } = useNavigation();
+  const { recentSessions, selectSession } = useSessionSelector();
   const [reasonByItem, setReasonByItem] = useState<Record<string, string>>({});
   const [editOpenByItem, setEditOpenByItem] = useState<Record<string, boolean>>({});
   const [editByItem, setEditByItem] = useState<Record<string, string>>({});
@@ -68,7 +72,8 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
           workflowItemId: hint.workflowItemId,
           workflowStatus: hint.workflowStatus,
           expectedVersion: hint.version,
-          sessionId: hint.sessionId
+          sessionId: hint.sessionId,
+          displayTitle: hint.displayTitle
       });
     }
 
@@ -86,7 +91,8 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
           workflowItemId: hint.workflowItemId,
           workflowStatus: hint.workflowStatus,
           expectedVersion: hint.version,
-          sessionId: hint.sessionId
+          sessionId: hint.sessionId,
+          displayTitle: hint.displayTitle
       });
     }
 
@@ -126,6 +132,30 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
     }, 2400);
     clearWorkspaceHandoff();
   }, [activePage, clearWorkspaceHandoff, workspaceHandoff]);
+
+  useEffect(() => {
+    const handoffSessionId =
+      typeof workspaceHandoff?.focusSessionId === "string" && workspaceHandoff.focusSessionId.trim()
+        ? workspaceHandoff.focusSessionId.trim()
+        : "";
+    if (!handoffSessionId) {
+      return;
+    }
+    const nextSession = recentSessions.find((session) => session.id === handoffSessionId);
+    if (nextSession) {
+      selectSession(nextSession);
+    }
+  }, [recentSessions, selectSession, workspaceHandoff]);
+
+  const resolveInboxTitle = (item: InboxItem): string => {
+    if (item.displayTitle && item.displayTitle.trim()) {
+      return item.displayTitle.trim();
+    }
+    if (item.type === "campaign") {
+      return item.campaign.activity_folder?.trim() || item.campaign.title;
+    }
+    return `${item.content.channel} draft`;
+  };
 
   const submitItemAction = async (params: {
     item: InboxItem;
@@ -208,8 +238,9 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                   <>
                     <div className="queue-meta">
                       <p>
-                        <strong>{item.campaign.title}</strong>
+                        <strong>{resolveInboxTitle(item)}</strong>
                       </p>
+                      <p>Session: {item.sessionId ?? "-"}</p>
                       <p>Channels: {item.campaign.channels.join(", ") || "-"}</p>
                       <p>
                         Posts: {item.campaign.plan.post_count} / Days: {item.campaign.plan.duration_days}
@@ -224,8 +255,10 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                   <>
                     <div className="queue-meta">
                       <p>
-                        <strong>{item.content.channel}</strong> | {item.content.content_type}
+                        <strong>{resolveInboxTitle(item)}</strong>
                       </p>
+                      <p>Session: {item.sessionId ?? "-"}</p>
+                      <p>Type: {item.content.channel} | {item.content.content_type}</p>
                       <p>Status: {item.content.status}</p>
                       <p>Campaign: {item.content.campaign_id ?? "-"}</p>
                       <p>Created: {formatDateTime(item.content.created_at)}</p>

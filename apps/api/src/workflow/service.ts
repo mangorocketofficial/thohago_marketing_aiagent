@@ -108,6 +108,8 @@ export const createWorkflowItem = async (input: CreateWorkflowItemInput): Promis
 
     const item = await insertWorkflowItem({
       org_id: input.orgId,
+      session_id: input.sessionId ?? null,
+      display_title: input.displayTitle ?? null,
       type: input.type,
       status,
       payload: normalizePayload(input.payload),
@@ -267,6 +269,8 @@ export const applyWorkflowAction = async (input: ApplyWorkflowActionInput): Prom
 
 export const ensureCampaignWorkflowItem = async (params: {
   orgId: string;
+  sessionId?: string | null;
+  displayTitle?: string | null;
   campaignId: string;
   payload: WorkflowItemPayload;
   originChatMessageId?: string | null;
@@ -280,6 +284,8 @@ export const ensureCampaignWorkflowItem = async (params: {
 
     return await createWorkflowItem({
       orgId: params.orgId,
+      sessionId: params.sessionId ?? null,
+      displayTitle: params.displayTitle ?? null,
       type: "campaign_plan",
       payload: params.payload,
       originChatMessageId: params.originChatMessageId ?? null,
@@ -294,6 +300,8 @@ export const ensureCampaignWorkflowItem = async (params: {
 
 export const ensureContentWorkflowItem = async (params: {
   orgId: string;
+  sessionId?: string | null;
+  displayTitle?: string | null;
   contentId: string;
   payload: WorkflowItemPayload;
   originChatMessageId?: string | null;
@@ -307,6 +315,8 @@ export const ensureContentWorkflowItem = async (params: {
 
     return await createWorkflowItem({
       orgId: params.orgId,
+      sessionId: params.sessionId ?? null,
+      displayTitle: params.displayTitle ?? null,
       type: "content_draft",
       payload: params.payload,
       originChatMessageId: params.originChatMessageId ?? null,

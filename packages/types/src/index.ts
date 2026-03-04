@@ -181,7 +181,17 @@ export type WorkflowActionCardMetadata = {
   resolved_at?: string;
 };
 
-export type ChatMessageMetadata = Record<string, unknown> | WorkflowActionCardMetadata;
+export type SystemNotificationMetadata = {
+  notification_type: "workflow_proposed";
+  workflow_item_id: string;
+  card_type: "campaign_plan" | "content_draft";
+  display_title: string;
+  workflow_status?: WorkflowStatus;
+  expected_version?: number;
+  resolved_at?: string;
+};
+
+export type ChatMessageMetadata = Record<string, unknown> | WorkflowActionCardMetadata | SystemNotificationMetadata;
 
 export type ChatMessage = {
   id: string;
@@ -266,6 +276,7 @@ export type OrchestratorSession = {
   scope_id?: string | null;
   workspace_key?: string;
   title?: string | null;
+  context_label?: string | null;
   created_by_user_id?: string | null;
   archived_at?: string | null;
   state: OrchestratorState;
@@ -441,6 +452,8 @@ export type WorkflowActorType = "user" | "assistant" | "system";
 export type WorkflowItem = {
   id: string;
   org_id: string;
+  session_id: string | null;
+  display_title: string | null;
   type: WorkflowItemType;
   status: WorkflowStatus;
   payload: Record<string, unknown>;

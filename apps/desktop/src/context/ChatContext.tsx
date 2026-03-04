@@ -29,14 +29,10 @@ type WorkflowItemLinkRow = {
   id: string;
   source_campaign_id: string | null;
   source_content_id: string | null;
+  session_id: string | null;
+  display_title: string | null;
   status: WorkflowStatus;
   version: number | string;
-};
-
-type WorkflowItemSessionRow = {
-  workflow_item_id: string | null;
-  session_id?: string | null;
-  created_at: string;
 };
 
 export type WorkflowLinkHint = {
@@ -44,6 +40,7 @@ export type WorkflowLinkHint = {
   workflowStatus: WorkflowStatus;
   version: number;
   sessionId: string | null;
+  displayTitle: string | null;
 };
 
 export type ChatUiContext = {
@@ -148,14 +145,6 @@ const toPositiveIntOrDefault = (value: unknown, fallback: number): number => {
     return fallback;
   }
   return Math.max(1, Math.floor(normalized));
-};
-
-const toOptionalSessionId = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed || null;
 };
 
 const sortMessages = (messages: ChatMessage[]): ChatMessage[] =>
@@ -331,7 +320,7 @@ export const ChatProvider = ({
 
     const { data: workflowRows, error: workflowError } = await supabase
       .from("workflow_items")
-      .select("id,source_campaign_id,status,version")
+      .select("id,source_campaign_id,session_id,display_title,status,version")
       .eq("org_id", chatConfig.orgId)
       .eq("type", "campaign_plan")
       .in("source_campaign_id", campaignIds);
@@ -341,7 +330,6 @@ export const ChatProvider = ({
       return;
     }
 
-    const workflowItemIds: string[] = [];
     const nextHints: Record<string, WorkflowLinkHint> = {};
     for (const row of workflowRows as WorkflowItemLinkRow[]) {
       const sourceCampaignId =
@@ -352,39 +340,16 @@ export const ChatProvider = ({
       if (!sourceCampaignId || !workflowItemId || !isWorkflowStatus(row.status)) {
         continue;
       }
+      const workflowSessionId = typeof row.session_id === "string" && row.session_id.trim() ? row.session_id.trim() : null;
+      const displayTitle =
+        typeof row.display_title === "string" && row.display_title.trim() ? row.display_title.trim() : null;
       nextHints[sourceCampaignId] = {
         workflowItemId,
         workflowStatus: row.status,
         version: toPositiveIntOrDefault(row.version, 1),
-        sessionId: null
+        sessionId: workflowSessionId,
+        displayTitle
       };
-      workflowItemIds.push(workflowItemId);
-    }
-
-    if (workflowItemIds.length > 0) {
-      const { data: actionRows } = await supabase
-        .from("chat_messages")
-        .select("workflow_item_id,session_id,created_at")
-        .eq("org_id", chatConfig.orgId)
-        .eq("message_type", "action_card")
-        .in("workflow_item_id", workflowItemIds)
-        .order("created_at", { ascending: false });
-
-      if (actionRows) {
-        const latestSessionByWorkflowId = new Map<string, string | null>();
-        for (const row of actionRows as WorkflowItemSessionRow[]) {
-          const workflowItemId =
-            typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
-          if (!workflowItemId || latestSessionByWorkflowId.has(workflowItemId)) {
-            continue;
-          }
-          latestSessionByWorkflowId.set(workflowItemId, toOptionalSessionId(row.session_id));
-        }
-
-        for (const hint of Object.values(nextHints)) {
-          hint.sessionId = latestSessionByWorkflowId.get(hint.workflowItemId) ?? null;
-        }
-      }
     }
 
     setCampaignWorkflowHints(nextHints);
@@ -423,7 +388,7 @@ export const ChatProvider = ({
 
     const { data: workflowRows, error: workflowError } = await supabase
       .from("workflow_items")
-      .select("id,source_content_id,status,version")
+      .select("id,source_content_id,session_id,display_title,status,version")
       .eq("org_id", chatConfig.orgId)
       .eq("type", "content_draft")
       .in("source_content_id", contentIds);
@@ -433,7 +398,6 @@ export const ChatProvider = ({
       return;
     }
 
-    const workflowItemIds: string[] = [];
     const nextHints: Record<string, WorkflowLinkHint> = {};
     for (const row of workflowRows as WorkflowItemLinkRow[]) {
       const sourceContentId =
@@ -444,39 +408,16 @@ export const ChatProvider = ({
       if (!sourceContentId || !workflowItemId || !isWorkflowStatus(row.status)) {
         continue;
       }
+      const workflowSessionId = typeof row.session_id === "string" && row.session_id.trim() ? row.session_id.trim() : null;
+      const displayTitle =
+        typeof row.display_title === "string" && row.display_title.trim() ? row.display_title.trim() : null;
       nextHints[sourceContentId] = {
         workflowItemId,
         workflowStatus: row.status,
         version: toPositiveIntOrDefault(row.version, 1),
-        sessionId: null
+        sessionId: workflowSessionId,
+        displayTitle
       };
-      workflowItemIds.push(workflowItemId);
-    }
-
-    if (workflowItemIds.length > 0) {
-      const { data: actionRows } = await supabase
-        .from("chat_messages")
-        .select("workflow_item_id,session_id,created_at")
-        .eq("org_id", chatConfig.orgId)
-        .eq("message_type", "action_card")
-        .in("workflow_item_id", workflowItemIds)
-        .order("created_at", { ascending: false });
-
-      if (actionRows) {
-        const latestSessionByWorkflowId = new Map<string, string | null>();
-        for (const row of actionRows as WorkflowItemSessionRow[]) {
-          const workflowItemId =
-            typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
-          if (!workflowItemId || latestSessionByWorkflowId.has(workflowItemId)) {
-            continue;
-          }
-          latestSessionByWorkflowId.set(workflowItemId, toOptionalSessionId(row.session_id));
-        }
-
-        for (const hint of Object.values(nextHints)) {
-          hint.sessionId = latestSessionByWorkflowId.get(hint.workflowItemId) ?? null;
-        }
-      }
     }
 
     setPendingContentWorkflowHints(nextHints);

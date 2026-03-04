@@ -5,7 +5,7 @@ import type { WorkflowItemRow, WorkflowStatus } from "../../workflow/types";
 import type {
   EmitContentActionCardProjectionInput,
   InsertChatMessageInput,
-  UpdateLatestActionCardProjectionStatusInput
+  UpdateLatestWorkflowProjectionStatusInput
 } from "../chat-projection";
 import type { ContentApprovalSideEffectsInput } from "../side-effects";
 import type {
@@ -63,7 +63,7 @@ export type ContentStepDeps = {
     actionSuffix?: string
   ) => string;
   ensureContentWorkflowItemForState: (params: EnsureContentWorkflowItemForStateInput) => Promise<WorkflowItemRow>;
-  updateLatestActionCardProjectionStatus: (params: UpdateLatestActionCardProjectionStatusInput) => Promise<void>;
+  updateLatestWorkflowProjectionStatus: (params: UpdateLatestWorkflowProjectionStatusInput) => Promise<void>;
   mirrorContentStatusFromWorkflow: (params: {
     orgId: string;
     contentId: string;
@@ -124,7 +124,7 @@ export const applyContentApprovedStep = async (
       "approved"
     )
   });
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: contentApproval.item,
     sessionId: session.id
@@ -222,7 +222,7 @@ export const applyContentRevisionStep = async (
       "request_revision"
     )
   });
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: revisionRequested.item,
     sessionId: session.id
@@ -367,7 +367,7 @@ const applyContentTerminalRejectStep = async (
       "rejected"
     )
   });
-  await deps.updateLatestActionCardProjectionStatus({
+  await deps.updateLatestWorkflowProjectionStatus({
     orgId: session.org_id,
     workflowItem: contentRejection.item,
     sessionId: session.id

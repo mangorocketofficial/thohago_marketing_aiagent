@@ -1,8 +1,6 @@
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import {
-  buildCampaignPlanProjectionMetadata,
-  buildContentDraftProjectionMetadata,
   buildProjectionKey,
   patchActionCardMetadataStatus
 } from "../workflow/projection";
@@ -13,6 +11,17 @@ export const DEFAULT_CHAT_CHANNEL = "dashboard";
 
 export type ChatMessageType = "text" | "action_card" | "system";
 export type ChatChannel = "dashboard" | "telegram";
+type WorkflowNotificationCardType = "campaign_plan" | "content_draft";
+
+type WorkflowSystemNotificationMetadata = {
+  notification_type: "workflow_proposed";
+  workflow_item_id: string;
+  card_type: WorkflowNotificationCardType;
+  display_title: string;
+  workflow_status?: WorkflowItemRow["status"];
+  expected_version?: number;
+  resolved_at?: string;
+};
 
 export type InsertChatMessageInput = {
   orgId: string;
@@ -26,7 +35,7 @@ export type InsertChatMessageInput = {
   projectionKey?: string | null;
 };
 
-export type UpdateLatestActionCardProjectionStatusInput = {
+export type UpdateLatestWorkflowProjectionStatusInput = {
   orgId: string;
   workflowItem: WorkflowItemRow;
   sessionId: string;
@@ -55,6 +64,46 @@ const asString = (value: unknown, fallback = ""): string => {
     return value;
   }
   return fallback;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const buildSystemWorkflowMetadata = (params: {
+  workflowItem: WorkflowItemRow;
+  cardType: WorkflowNotificationCardType;
+  displayTitle: string;
+}): WorkflowSystemNotificationMetadata => ({
+  notification_type: "workflow_proposed",
+  workflow_item_id: params.workflowItem.id,
+  card_type: params.cardType,
+  display_title: params.displayTitle,
+  workflow_status: params.workflowItem.status,
+  expected_version: params.workflowItem.version
+});
+
+const patchSystemWorkflowMetadataStatus = (params: {
+  metadata: unknown;
+  workflowItem: WorkflowItemRow;
+}): WorkflowSystemNotificationMetadata => {
+  const metadata = asRecord(params.metadata);
+  const cardType =
+    metadata.card_type === "campaign_plan" || metadata.card_type === "content_draft"
+      ? metadata.card_type
+      : params.workflowItem.type === "content_draft"
+        ? "content_draft"
+        : "campaign_plan";
+  const displayTitle = asString(metadata.display_title, params.workflowItem.display_title ?? "");
+
+  return {
+    notification_type: "workflow_proposed",
+    workflow_item_id: params.workflowItem.id,
+    card_type: cardType,
+    display_title: displayTitle || params.workflowItem.id,
+    workflow_status: params.workflowItem.status,
+    expected_version: params.workflowItem.version,
+    ...(params.workflowItem.status === "proposed" ? {} : { resolved_at: new Date().toISOString() })
+  };
 };
 
 const buildCampaignSummary = (activityFolder: string, plan: CampaignPlan): string =>
@@ -137,15 +186,15 @@ export const insertChatMessage = async (input: InsertChatMessageInput): Promise<
   return asString((data as Record<string, unknown>).id, "");
 };
 
-export const updateLatestActionCardProjectionStatus = async (
-  params: UpdateLatestActionCardProjectionStatusInput
+export const updateLatestWorkflowProjectionStatus = async (
+  params: UpdateLatestWorkflowProjectionStatusInput
 ): Promise<void> => {
   const { data, error } = await supabaseAdmin
     .from("chat_messages")
-    .select("id, metadata")
+    .select("id, message_type, metadata")
     .eq("org_id", params.orgId)
     .eq("workflow_item_id", params.workflowItem.id)
-    .eq("message_type", "action_card")
+    .in("message_type", ["action_card", "system"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -163,13 +212,20 @@ export const updateLatestActionCardProjectionStatus = async (
     return;
   }
 
-  const nextMetadata = patchActionCardMetadataStatus({
-    metadata: row.metadata,
-    workflowStatus: params.workflowItem.status,
-    expectedVersion: params.workflowItem.version,
-    workflowItemId: params.workflowItem.id,
-    sessionId: params.sessionId
-  });
+  const messageType = asString(row.message_type, "");
+  const nextMetadata =
+    messageType === "system"
+      ? patchSystemWorkflowMetadataStatus({
+          metadata: row.metadata,
+          workflowItem: params.workflowItem
+        })
+      : patchActionCardMetadataStatus({
+          metadata: row.metadata,
+          workflowStatus: params.workflowItem.status,
+          expectedVersion: params.workflowItem.version,
+          workflowItemId: params.workflowItem.id,
+          sessionId: params.sessionId
+        });
 
   const { error: updateError } = await supabaseAdmin
     .from("chat_messages")
@@ -178,7 +234,7 @@ export const updateLatestActionCardProjectionStatus = async (
     .eq("id", messageId);
 
   if (updateError) {
-    throw new HttpError(500, "db_error", `Failed to update action-card projection status: ${updateError.message}`);
+    throw new HttpError(500, "db_error", `Failed to update workflow projection status: ${updateError.message}`);
   }
 };
 
@@ -198,12 +254,11 @@ export const emitCampaignActionCardProjection = async (
     role: "assistant",
     content: buildCampaignSummary(params.activityFolder, params.plan),
     channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildCampaignPlanProjectionMetadata({
+    messageType: "system",
+    metadata: buildSystemWorkflowMetadata({
       workflowItem: params.workflowItem,
-      sessionId: params.sessionId,
-      activityFolder: params.activityFolder,
-      plan: params.plan
+      cardType: "campaign_plan",
+      displayTitle: params.workflowItem.display_title ?? params.activityFolder
     }),
     workflowItemId: params.workflowItem.id,
     projectionKey: campaignProjectionKey
@@ -224,14 +279,11 @@ export const emitContentActionCardProjection = async (params: EmitContentActionC
     role: "assistant",
     content: buildContentSummary(params.channel, params.forbiddenCheck),
     channel: DEFAULT_CHAT_CHANNEL,
-    messageType: "action_card",
-    metadata: buildContentDraftProjectionMetadata({
+    messageType: "system",
+    metadata: buildSystemWorkflowMetadata({
       workflowItem: params.workflowItem,
-      sessionId: params.sessionId,
-      activityFolder: params.activityFolder,
-      channel: params.channel,
-      draft: params.draft,
-      forbiddenCheck: params.forbiddenCheck
+      cardType: "content_draft",
+      displayTitle: params.workflowItem.display_title ?? `${params.activityFolder} - ${params.channel}`
     }),
     workflowItemId: params.workflowItem.id,
     projectionKey: contentProjectionKey
