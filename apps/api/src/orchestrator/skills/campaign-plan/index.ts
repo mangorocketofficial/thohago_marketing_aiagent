@@ -8,7 +8,7 @@ import type { OrchestratorStep, SessionStatus } from "../../types";
 import type { Skill, SkillExecutionContext, SkillIntentInput, SkillOutcome, SkillResult } from "../types";
 
 const SKILL_ID = "campaign_plan";
-const SKILL_VERSION = "5.0.0";
+const SKILL_VERSION = "5.2.0";
 
 const CAMPAIGN_NOUNS = ["\uCEA0\uD398\uC778", "campaign", "\uD504\uB85C\uBAA8\uC158", "promotion"];
 const STRONG_PLAN_PHRASES = [

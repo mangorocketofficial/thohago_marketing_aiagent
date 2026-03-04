@@ -1,8 +1,17 @@
-﻿import { countTokens, truncateToTokenBudget, type RagSearchResult } from "@repo/rag";
+﻿import { countTokens, truncateToTokenBudget, type OrgBrandSettings, type RagSearchResult } from "@repo/rag";
 import { env } from "../lib/env";
 import { getRagEmbedder, ragConfig, ragRetriever } from "../lib/rag";
+import {
+  getDocumentExtractsByFolder,
+  loadOrgBrandSettings,
+  readReviewMarkdown,
+  type FolderDocumentExtract
+} from "../rag/data";
 import { getMemoryMdForOrg } from "../rag/memory-service";
+import type { FolderContext } from "./folder-context";
 import type { ContextLevel, RagContextMeta } from "./types";
+
+type InterviewAnswers = OrgBrandSettings["interview_answers"];
 
 type Tier2SectionType =
   | "brand_profile"
@@ -48,6 +57,31 @@ const SECTION_LABELS: Record<Tier2SectionType, string> = {
   chat_pattern: "User edit patterns"
 };
 
+const CAMPAIGN_CONTEXT_BUDGETS = {
+  memoryMd: 800,
+  brandReview: 1200,
+  interviewAnswers: 200,
+  folderSummary: 200,
+  documentExtracts: 1000
+} as const;
+
+const BRAND_REVIEW_KEYWORDS = [
+  "channel",
+  "tone",
+  "audit",
+  "priority",
+  "improvement",
+  "target",
+  "audience",
+  "채널",
+  "톤",
+  "진단",
+  "개선",
+  "우선",
+  "타겟",
+  "오디언스"
+];
+
 const readString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 const readNumber = (value: unknown): number => {
@@ -64,6 +98,179 @@ const readNumber = (value: unknown): number => {
 };
 
 const normalizeChannel = (value: string): string => value.trim().toLowerCase();
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+const nonEmptyOrNull = (value: string): string | null => {
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+};
+
+const normalizeAnswer = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+const normalizeInterviewAnswers = (value: unknown): InterviewAnswers | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const q1 = normalizeAnswer(value.q1);
+  const q2 = normalizeAnswer(value.q2);
+  const q3 = normalizeAnswer(value.q3);
+  const q4 = normalizeAnswer(value.q4);
+
+  if (!q1 && !q2 && !q3 && !q4) {
+    return null;
+  }
+
+  return { q1, q2, q3, q4 };
+};
+
+const formatInterviewAnswers = (answers: InterviewAnswers | null): string | null => {
+  if (!answers) {
+    return null;
+  }
+
+  const lines = [
+    `Tone and manner: ${answers.q1 || "n/a"}`,
+    `Target audience: ${answers.q2 || "n/a"}`,
+    `Forbidden words/topics: ${answers.q3 || "n/a"}`,
+    `Campaign seasons: ${answers.q4 || "n/a"}`
+  ];
+
+  return nonEmptyOrNull(lines.join("\n"));
+};
+
+const summarizeFileList = (label: string, values: string[]): string => {
+  if (!values.length) {
+    return `- ${label}: 0`;
+  }
+
+  const preview = values.slice(0, 6).join(", ");
+  const extraCount = Math.max(0, values.length - 6);
+  return extraCount > 0
+    ? `- ${label}: ${values.length} (${preview}, +${extraCount} more)`
+    : `- ${label}: ${values.length} (${preview})`;
+};
+
+const formatFolderSummary = (folderContext: FolderContext | null | undefined): string | null => {
+  if (!folderContext) {
+    return null;
+  }
+
+  const activityFolder = readString(folderContext.activity_folder);
+  if (!activityFolder) {
+    return null;
+  }
+
+  const lines = [
+    `Folder: ${activityFolder}`,
+    `Total files: ${Math.max(0, Number(folderContext.total_files) || 0)}`,
+    summarizeFileList("Images", Array.isArray(folderContext.images) ? folderContext.images : []),
+    summarizeFileList("Videos", Array.isArray(folderContext.videos) ? folderContext.videos : []),
+    summarizeFileList("Documents", Array.isArray(folderContext.documents) ? folderContext.documents : [])
+  ];
+
+  return nonEmptyOrNull(lines.join("\n"));
+};
+
+const splitMarkdownSections = (markdown: string): string[] => {
+  const normalized = markdown.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const lines = normalized.split(/\r?\n/);
+  const sections: string[] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    const isHeader = /^#{1,6}\s+/.test(line.trim());
+    if (isHeader && current.length) {
+      sections.push(current.join("\n").trim());
+      current = [line];
+      continue;
+    }
+    current.push(line);
+  }
+
+  if (current.length) {
+    sections.push(current.join("\n").trim());
+  }
+
+  return sections.filter(Boolean);
+};
+
+const pickBrandReviewHighlights = (markdown: string): string => {
+  const sections = splitMarkdownSections(markdown);
+  if (!sections.length) {
+    return "";
+  }
+
+  const matched = sections.filter((section) => {
+    const lower = section.toLowerCase();
+    return BRAND_REVIEW_KEYWORDS.some((keyword) => lower.includes(keyword));
+  });
+
+  if (matched.length) {
+    return matched.join("\n\n");
+  }
+
+  return sections.slice(0, 4).join("\n\n");
+};
+
+const formatDocumentExtractBlock = (extract: FolderDocumentExtract): string => {
+  const title = readString(extract.file_name) || readString(extract.source_id) || "document";
+  return `[${title}]\n${extract.content.trim()}`;
+};
+
+const formatDocumentExtracts = (
+  extracts: FolderDocumentExtract[],
+  tokenBudget: number
+): {
+  text: string | null;
+  sources: RagContextMeta["tier2_sources"];
+} => {
+  if (!extracts.length) {
+    return {
+      text: null,
+      sources: []
+    };
+  }
+
+  const perDocBudget = Math.max(120, Math.floor(tokenBudget / Math.max(1, extracts.length)));
+  const blocks: string[] = [];
+  const sources: RagContextMeta["tier2_sources"] = [];
+
+  for (const extract of extracts) {
+    const block = truncateToTokenBudget(formatDocumentExtractBlock(extract), perDocBudget);
+    if (!block) {
+      continue;
+    }
+
+    blocks.push(block);
+    sources.push({
+      id: `local_doc:${extract.source_id}`,
+      source_type: "local_doc",
+      source_id: extract.source_id,
+      similarity: 1
+    });
+  }
+
+  const merged = truncateToTokenBudget(blocks.join("\n\n---\n\n"), tokenBudget);
+  return {
+    text: nonEmptyOrNull(merged),
+    sources: merged ? sources : []
+  };
+};
+
+const hasSupplementalContext = (params: {
+  brandReviewMd: string | null;
+  interviewAnswersText: string | null;
+  folderSummary: string | null;
+  documentExtracts: string | null;
+}): boolean =>
+  !!params.brandReviewMd || !!params.interviewAnswersText || !!params.folderSummary || !!params.documentExtracts;
 
 const formatSectionRow = (sourceType: Tier2SectionType, result: RagSearchResult): string => {
   switch (sourceType) {
@@ -250,6 +457,16 @@ export type CampaignPlanContext = {
   meta: RagContextMeta;
 };
 
+export type EnrichedCampaignContext = {
+  contextLevel: ContextLevel;
+  memoryMd: string | null;
+  brandReviewMd: string | null;
+  interviewAnswers: InterviewAnswers | null;
+  folderSummary: string | null;
+  documentExtracts: string | null;
+  meta: RagContextMeta;
+};
+
 export type ContentGenerationContext = {
   contextLevel: ContextLevel;
   memoryMd: string | null;
@@ -257,26 +474,101 @@ export type ContentGenerationContext = {
   meta: RagContextMeta;
 };
 
-export const buildCampaignPlanContext = async (orgId: string): Promise<CampaignPlanContext> => {
+export const buildEnrichedCampaignContext = async (
+  orgId: string,
+  options?: {
+    activityFolder?: string | null;
+    folderContext?: FolderContext | null;
+  }
+): Promise<EnrichedCampaignContext> => {
   const memory = await fetchMemoryMd(orgId);
-  if (!memory) {
-    return {
-      contextLevel: "no_context",
-      memoryMd: null,
-      meta: emptyMeta("no_context")
-    };
+  const memoryMd = memory ? nonEmptyOrNull(truncateToTokenBudget(memory.markdown, CAMPAIGN_CONTEXT_BUDGETS.memoryMd)) : null;
+
+  let brandReviewMd: string | null = null;
+  let interviewAnswers: InterviewAnswers | null = null;
+
+  try {
+    const brandSettings = await loadOrgBrandSettings(orgId);
+    if (brandSettings) {
+      const reviewMarkdown = pickBrandReviewHighlights(readReviewMarkdown(brandSettings));
+      brandReviewMd = nonEmptyOrNull(truncateToTokenBudget(reviewMarkdown, CAMPAIGN_CONTEXT_BUDGETS.brandReview));
+      interviewAnswers = normalizeInterviewAnswers(brandSettings.interview_answers);
+    }
+  } catch (error) {
+    console.warn(
+      `[RAG_CONTEXT] Failed to load brand settings for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 
+  const interviewAnswersText = nonEmptyOrNull(
+    truncateToTokenBudget(formatInterviewAnswers(interviewAnswers) ?? "", CAMPAIGN_CONTEXT_BUDGETS.interviewAnswers)
+  );
+  const folderSummary = nonEmptyOrNull(
+    truncateToTokenBudget(formatFolderSummary(options?.folderContext) ?? "", CAMPAIGN_CONTEXT_BUDGETS.folderSummary)
+  );
+
+  let documentExtracts: string | null = null;
+  let documentSources: RagContextMeta["tier2_sources"] = [];
+  const activityFolder = readString(options?.folderContext?.activity_folder) || readString(options?.activityFolder);
+  if (activityFolder) {
+    try {
+      const extracts = await getDocumentExtractsByFolder({
+        orgId,
+        activityFolder,
+        limitDocs: 3,
+        maxChunksPerDoc: 8
+      });
+      const formatted = formatDocumentExtracts(extracts, CAMPAIGN_CONTEXT_BUDGETS.documentExtracts);
+      documentExtracts = formatted.text;
+      documentSources = formatted.sources;
+    } catch (error) {
+      console.warn(
+        `[RAG_CONTEXT] Failed to load folder document extracts for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  const contextLevel: ContextLevel = !memoryMd
+    ? "minimal"
+    : hasSupplementalContext({
+          brandReviewMd,
+          interviewAnswersText,
+          folderSummary,
+          documentExtracts
+        })
+      ? "full"
+      : "partial";
+
+  const totalContextTokens =
+    countTokens(memoryMd ?? "") +
+    countTokens(brandReviewMd ?? "") +
+    countTokens(interviewAnswersText ?? "") +
+    countTokens(folderSummary ?? "") +
+    countTokens(documentExtracts ?? "");
+
   return {
-    contextLevel: "tier1_only",
-    memoryMd: memory.markdown,
+    contextLevel,
+    memoryMd,
+    brandReviewMd,
+    interviewAnswers,
+    folderSummary,
+    documentExtracts,
     meta: {
-      context_level: "tier1_only",
-      memory_md_generated_at: memory.generatedAt,
-      tier2_sources: [],
-      total_context_tokens: countTokens(memory.markdown),
+      context_level: contextLevel,
+      memory_md_generated_at: memory?.generatedAt ?? null,
+      tier2_sources: documentSources,
+      total_context_tokens: totalContextTokens,
       retrieval_avg_similarity: null
     }
+  };
+};
+
+export const buildCampaignPlanContext = async (orgId: string): Promise<CampaignPlanContext> => {
+  const enriched = await buildEnrichedCampaignContext(orgId);
+  return {
+    contextLevel: enriched.contextLevel,
+    memoryMd: enriched.memoryMd,
+    meta: enriched.meta
   };
 };
 
@@ -289,10 +581,10 @@ export const buildContentGenerationContext = async (
   const memory = await fetchMemoryMd(orgId);
   if (!memory) {
     return {
-      contextLevel: "no_context",
+      contextLevel: "minimal",
       memoryMd: null,
       tier2Sections: "",
-      meta: emptyMeta("no_context")
+      meta: emptyMeta("minimal")
     };
   }
 
@@ -300,11 +592,11 @@ export const buildContentGenerationContext = async (
   const tier2 = await fetchTier2(orgId, channel, topic, activityFolder);
   if (!tier2) {
     return {
-      contextLevel: "tier1_only",
+      contextLevel: "partial",
       memoryMd: memory.markdown,
       tier2Sections: "",
       meta: {
-        context_level: "tier1_only",
+        context_level: "partial",
         memory_md_generated_at: memory.generatedAt,
         tier2_sources: [],
         total_context_tokens: memoryTokens,
@@ -318,7 +610,7 @@ export const buildContentGenerationContext = async (
   const finalTier2Budget = Math.min(env.ragTier2TotalBudget, maxTier2FromTotal);
   const finalTier2Sections = truncateToTokenBudget(assembled.sectionsText, finalTier2Budget);
   const tier2Tokens = countTokens(finalTier2Sections);
-  const contextLevel: ContextLevel = finalTier2Sections ? "full" : "tier1_only";
+  const contextLevel: ContextLevel = finalTier2Sections ? "full" : "partial";
 
   return {
     contextLevel,

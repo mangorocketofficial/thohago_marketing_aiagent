@@ -56,7 +56,7 @@ export type CampaignPlan = {
   suggested_schedule: ScheduleItem[];
 };
 
-export type ContextLevel = "full" | "tier1_only" | "no_context";
+export type ContextLevel = "full" | "partial" | "minimal";
 
 export type RagContextSource = {
   id: string;

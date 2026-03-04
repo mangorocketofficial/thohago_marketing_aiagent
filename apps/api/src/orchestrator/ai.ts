@@ -1,5 +1,5 @@
 ﻿import { env } from "../lib/env";
-import { buildCampaignPlanContext, buildContentGenerationContext } from "./rag-context";
+import { buildContentGenerationContext, buildEnrichedCampaignContext } from "./rag-context";
 import type { CampaignPlan, RagContextMeta } from "./types";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -209,7 +209,7 @@ export const generateCampaignPlan = async (
     revisionReason?: string | null;
   }
 ): Promise<{ plan: CampaignPlan; ragMeta: RagContextMeta }> => {
-  const ctx = await buildCampaignPlanContext(orgId);
+  const ctx = await buildEnrichedCampaignContext(orgId, { activityFolder });
 
   const promptParts: string[] = [
     "당신은 한국 비영리 조직의 마케팅 전략가입니다.",
@@ -218,6 +218,29 @@ export const generateCampaignPlan = async (
 
   if (ctx.memoryMd) {
     promptParts.push("=== 조직 컨텍스트(memory.md) ===", ctx.memoryMd, "");
+  }
+
+  if (ctx.brandReviewMd) {
+    promptParts.push("=== 브랜드 리뷰 요약 ===", ctx.brandReviewMd, "");
+  }
+
+  if (ctx.interviewAnswers) {
+    promptParts.push(
+      "=== 인터뷰 응답 ===",
+      `톤/매너: ${ctx.interviewAnswers.q1 || "n/a"}`,
+      `타겟 오디언스: ${ctx.interviewAnswers.q2 || "n/a"}`,
+      `금지 단어/주제: ${ctx.interviewAnswers.q3 || "n/a"}`,
+      `캠페인 시즌: ${ctx.interviewAnswers.q4 || "n/a"}`,
+      ""
+    );
+  }
+
+  if (ctx.folderSummary) {
+    promptParts.push("=== 활동 폴더 컨텍스트 ===", ctx.folderSummary, "");
+  }
+
+  if (ctx.documentExtracts) {
+    promptParts.push("=== 문서 추출 내용 ===", ctx.documentExtracts, "");
   }
 
   const revisionReason = normalizeString(options?.revisionReason, "");

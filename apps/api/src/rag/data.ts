@@ -69,6 +69,27 @@ const readNumber = (value: unknown, fallback = 0): number => {
   return fallback;
 };
 
+const readInteger = (value: unknown, fallback = 0): number => {
+  const numeric = readNumber(value, fallback);
+  return Number.isFinite(numeric) ? Math.floor(numeric) : fallback;
+};
+
+const readBoolean = (value: unknown, fallback = false): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return fallback;
+};
+
 const readStringRecord = (value: unknown): Record<string, string> => {
   if (!isRecord(value)) {
     return {};
@@ -235,4 +256,151 @@ export const loadActiveCampaigns = async (orgId: string): Promise<Campaign[]> =>
   }
 
   return (Array.isArray(data) ? data : []).filter(isRecord).map(toCampaign);
+};
+
+export type FolderDocumentExtract = {
+  source_id: string;
+  file_name: string;
+  activity_folder: string;
+  content: string;
+  chunk_count: number;
+  created_at: string | null;
+};
+
+type FolderDocumentExtractQueryParams = {
+  orgId: string;
+  activityFolder: string;
+  limitDocs?: number;
+  maxChunksPerDoc?: number;
+  rowLimit?: number;
+};
+
+type FolderDocumentChunk = {
+  chunk_index: number;
+  content: string;
+  created_at: string | null;
+};
+
+const parseIsoTime = (value: string | null): number => {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+export const getDocumentExtractsByFolder = async (
+  params: FolderDocumentExtractQueryParams
+): Promise<FolderDocumentExtract[]> => {
+  const orgId = params.orgId.trim();
+  const activityFolder = params.activityFolder.trim();
+  if (!orgId || !activityFolder) {
+    return [];
+  }
+
+  const limitDocs =
+    typeof params.limitDocs === "number" && Number.isFinite(params.limitDocs)
+      ? Math.max(1, Math.min(10, Math.floor(params.limitDocs)))
+      : 3;
+  const maxChunksPerDoc =
+    typeof params.maxChunksPerDoc === "number" && Number.isFinite(params.maxChunksPerDoc)
+      ? Math.max(1, Math.min(20, Math.floor(params.maxChunksPerDoc)))
+      : 8;
+  const rowLimit =
+    typeof params.rowLimit === "number" && Number.isFinite(params.rowLimit)
+      ? Math.max(limitDocs * maxChunksPerDoc, Math.floor(params.rowLimit))
+      : Math.max(120, limitDocs * maxChunksPerDoc * 8);
+
+  const { data, error } = await supabaseAdmin
+    .from("org_rag_embeddings")
+    .select("source_id, chunk_index, content, metadata, created_at")
+    .eq("org_id", orgId)
+    .eq("source_type", "local_doc")
+    .contains("metadata", { activity_folder: activityFolder })
+    .order("created_at", { ascending: false })
+    .limit(rowLimit);
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to load folder document extracts: ${error.message}`);
+  }
+
+  const grouped = new Map<
+    string,
+    {
+      source_id: string;
+      file_name: string;
+      activity_folder: string;
+      chunks: FolderDocumentChunk[];
+      latest_created_at: string | null;
+    }
+  >();
+
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!isRecord(row)) {
+      continue;
+    }
+    const sourceId = readOptionalString(row.source_id);
+    if (!sourceId) {
+      continue;
+    }
+
+    const metadata = toRecord(row.metadata);
+    if (!readBoolean(metadata.text_extracted, false)) {
+      continue;
+    }
+
+    const chunkContent = readOptionalString(row.content);
+    if (!chunkContent) {
+      continue;
+    }
+
+    const fileName = readOptionalString(metadata.file_name) ?? sourceId;
+    const rowActivityFolder = readOptionalString(metadata.activity_folder) ?? activityFolder;
+    const createdAt = readOptionalString(row.created_at);
+    const chunkIndex = Math.max(0, readInteger(row.chunk_index, 0));
+
+    const existing = grouped.get(sourceId);
+    if (!existing) {
+      grouped.set(sourceId, {
+        source_id: sourceId,
+        file_name: fileName,
+        activity_folder: rowActivityFolder,
+        chunks: [{ chunk_index: chunkIndex, content: chunkContent, created_at: createdAt }],
+        latest_created_at: createdAt
+      });
+      continue;
+    }
+
+    existing.chunks.push({ chunk_index: chunkIndex, content: chunkContent, created_at: createdAt });
+    if (parseIsoTime(createdAt) > parseIsoTime(existing.latest_created_at)) {
+      existing.latest_created_at = createdAt;
+    }
+  }
+
+  return [...grouped.values()]
+    .sort((left, right) => {
+      const timeDiff = parseIsoTime(right.latest_created_at) - parseIsoTime(left.latest_created_at);
+      return timeDiff !== 0 ? timeDiff : left.file_name.localeCompare(right.file_name);
+    })
+    .slice(0, limitDocs)
+    .map((entry) => {
+      const orderedChunks = [...entry.chunks]
+        .sort((left, right) => {
+          if (left.chunk_index !== right.chunk_index) {
+            return left.chunk_index - right.chunk_index;
+          }
+          return parseIsoTime(left.created_at) - parseIsoTime(right.created_at);
+        })
+        .slice(0, maxChunksPerDoc);
+
+      return {
+        source_id: entry.source_id,
+        file_name: entry.file_name,
+        activity_folder: entry.activity_folder,
+        content: orderedChunks.map((chunk) => chunk.content).join("\n\n"),
+        chunk_count: orderedChunks.length,
+        created_at: entry.latest_created_at
+      };
+    })
+    .filter((entry) => !!entry.content.trim());
 };

@@ -181,10 +181,16 @@ const parseCampaignPlan = (value: unknown): CampaignPlan | null => {
 
 const parseContextLevel = (value: unknown): RagContextMeta["context_level"] => {
   const level = asString(value, "");
-  if (level === "full" || level === "tier1_only" || level === "no_context") {
+  if (level === "full" || level === "partial" || level === "minimal") {
     return level;
   }
-  return "no_context";
+  if (level === "tier1_only") {
+    return "partial";
+  }
+  if (level === "no_context") {
+    return "minimal";
+  }
+  return "minimal";
 };
 
 const parseRagContextMeta = (value: unknown): RagContextMeta | null => {
