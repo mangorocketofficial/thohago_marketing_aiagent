@@ -228,6 +228,10 @@ const toCampaign = (value: Record<string, unknown>): Campaign => ({
   status: readCampaignStatus(value.status),
   channels: readStringArray(value.channels),
   plan: readCampaignPlan(value.plan),
+  plan_chain_data: isRecord(value.plan_chain_data)
+    ? (value.plan_chain_data as Campaign["plan_chain_data"])
+    : null,
+  plan_document: readOptionalString(value.plan_document),
   created_at: readOptionalString(value.created_at) ?? new Date(0).toISOString(),
   updated_at: readOptionalString(value.updated_at) ?? new Date(0).toISOString()
 });
@@ -246,7 +250,7 @@ export const loadOrgBrandSettings = async (orgId: string): Promise<OrgBrandSetti
 export const loadActiveCampaigns = async (orgId: string): Promise<Campaign[]> => {
   const { data, error } = await supabaseAdmin
     .from("campaigns")
-    .select("id, org_id, title, activity_folder, status, channels, plan, created_at, updated_at")
+    .select("id, org_id, title, activity_folder, status, channels, plan, plan_chain_data, plan_document, created_at, updated_at")
     .eq("org_id", orgId)
     .in("status", ["draft", "approved", "active"])
     .order("updated_at", { ascending: false });

@@ -137,6 +137,155 @@ export type CampaignPlan = {
   suggested_schedule: CampaignPlanSchedule[];
 };
 
+export type CampaignChainStepState = "ok" | "failed" | "blocked_by_dependency";
+
+export type CampaignAudienceMessagingData = {
+  primary_audience: {
+    label: string;
+    description: string;
+    pain_points: string[];
+    active_platforms: string[];
+  };
+  secondary_audience: {
+    label: string;
+    description: string;
+    pain_points: string[];
+    active_platforms: string[];
+  } | null;
+  funnel_alignment: {
+    awareness: string;
+    consideration: string;
+    decision: string;
+  };
+  core_message: string;
+  support_messages: Array<{
+    message: string;
+    target_pain_point: string;
+    evidence: string;
+  }>;
+  channel_tone_guide: Record<string, string>;
+};
+
+export type CampaignChannelStrategyData = {
+  owned_channels: Array<{
+    channel: string;
+    rationale: string;
+    content_format: string;
+    effort_level: "high" | "medium" | "low";
+    key_strategy: string;
+  }>;
+  earned_channels: Array<{
+    channel: string;
+    rationale: string;
+    execution: string;
+    effort_level: "high" | "medium" | "low";
+  }>;
+  paid_reference: Array<{
+    channel: string;
+    description: string;
+    estimated_budget: string;
+  }> | null;
+};
+
+export type CampaignContentCalendarData = {
+  weeks: Array<{
+    week_number: number;
+    theme: string;
+    phase: "awareness" | "engagement" | "conversion";
+    items: Array<{
+      day: number;
+      day_label: string;
+      content_title: string;
+      content_description: string;
+      channel: string;
+      format: string;
+      owner_hint: string;
+      status: "draft";
+    }>;
+  }>;
+  dependencies: Array<{
+    source_day: number;
+    target_day: number;
+    description: string;
+  }>;
+};
+
+export type CampaignExecutionData = {
+  required_assets: Array<{
+    id: number;
+    name: string;
+    asset_type: string;
+    description: string;
+    priority: "must" | "recommended";
+    deadline_hint: string;
+  }>;
+  kpi_primary: Array<{
+    metric: string;
+    target: string;
+    measurement: string;
+    reporting_cadence: string;
+  }>;
+  kpi_secondary: Array<{
+    metric: string;
+    target: string;
+    measurement: string;
+    reporting_cadence: string;
+  }>;
+  reporting_plan: {
+    daily: string;
+    weekly: string;
+    post_campaign: string;
+  };
+  budget_breakdown: Array<{
+    item: string;
+    estimated_cost: string;
+    note: string;
+  }> | null;
+  risks: Array<{
+    risk: string;
+    likelihood: "high" | "medium" | "low";
+    mitigation: string;
+  }>;
+  next_steps: Array<{
+    action: string;
+    timing: string;
+  }>;
+  approval_required: string[];
+};
+
+export type CampaignChainStepMeta = {
+  state: CampaignChainStepState;
+  started_at: string;
+  completed_at: string;
+  latency_ms: number;
+  retry_count: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  error_code: string | null;
+  error_message: string | null;
+};
+
+export type CampaignPlanChainData = {
+  audience: CampaignAudienceMessagingData | null;
+  channels: CampaignChannelStrategyData | null;
+  calendar: CampaignContentCalendarData | null;
+  execution: CampaignExecutionData | null;
+  generated_at: string;
+  chain_version: number;
+  context_policy: {
+    step_a: "full_rag";
+    step_b: "compact_fact_pack";
+    step_c: "micro_fact_pack";
+    step_d: "micro_fact_pack";
+  };
+  step_meta: {
+    step_a: CampaignChainStepMeta;
+    step_b: CampaignChainStepMeta;
+    step_c: CampaignChainStepMeta;
+    step_d: CampaignChainStepMeta;
+  };
+};
+
 export type Campaign = {
   id: string;
   org_id: string;
@@ -145,6 +294,8 @@ export type Campaign = {
   status: CampaignStatus;
   channels: string[];
   plan: CampaignPlan;
+  plan_chain_data?: CampaignPlanChainData | null;
+  plan_document?: string | null;
   created_at: string;
   updated_at: string;
 };

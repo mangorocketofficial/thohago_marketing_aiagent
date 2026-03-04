@@ -9,6 +9,7 @@ import type {
   UpdateLatestWorkflowProjectionStatusInput
 } from "../chat-projection";
 import { generateCampaignPlan } from "../ai";
+import type { CampaignPlanChainData } from "../skills/campaign-plan/chain-types";
 import type {
   ForbiddenCheckMeta,
   OrchestratorSessionRow,
@@ -46,6 +47,20 @@ type GenerateContentDraftWithForbiddenCheckResult = {
   draft: string;
   ragMeta: RagContextMeta;
   forbiddenCheck: ForbiddenCheckMeta;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const parseCampaignChainData = (value: unknown): CampaignPlanChainData | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as CampaignPlanChainData) : null;
+
+const parseRerunFromStep = (value: unknown): "step_a" | "step_b" | "step_c" | "step_d" | undefined => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "step_a" || normalized === "step_b" || normalized === "step_c" || normalized === "step_d") {
+    return normalized;
+  }
+  return undefined;
 };
 
 export type CampaignStepResult = {
@@ -138,7 +153,14 @@ export const applyUserMessageStep = async (
     ...(uiContextMetadata ? { metadata: { ui_context: uiContextMetadata } } : {})
   });
 
-  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, userMessage);
+  const { plan, ragMeta, chainData, planDocument } = await generateCampaignPlan(
+    session.org_id,
+    state.activity_folder,
+    userMessage,
+    {
+      orgName: state.activity_folder
+    }
+  );
   const { data: campaign, error: campaignError } = await supabaseAdmin
     .from("campaigns")
     .insert({
@@ -147,7 +169,9 @@ export const applyUserMessageStep = async (
       activity_folder: state.activity_folder,
       status: "draft",
       channels: plan.channels,
-      plan
+      plan,
+      plan_chain_data: chainData,
+      plan_document: planDocument
     })
     .select("id")
     .single();
@@ -375,22 +399,75 @@ export const applyCampaignRevisionStep = async (
     sessionId: session.id
   });
 
-  const { plan, ragMeta } = await generateCampaignPlan(session.org_id, state.activity_folder, state.user_message ?? "", {
-    previousPlan: state.campaign_plan,
-    revisionReason: reason
-  });
+  const expectedUpdatedAt = deps.asString(payload?.expected_updated_at, "").trim();
+  const { data: campaignSnapshot, error: campaignSnapshotError } = await supabaseAdmin
+    .from("campaigns")
+    .select("plan, plan_chain_data, updated_at")
+    .eq("id", campaignId)
+    .eq("org_id", session.org_id)
+    .maybeSingle();
 
-  const { error: updateCampaignError } = await supabaseAdmin
+  if (campaignSnapshotError) {
+    throw new HttpError(500, "db_error", `Failed to read campaign revision base: ${campaignSnapshotError.message}`);
+  }
+  if (!campaignSnapshot) {
+    throw new HttpError(404, "not_found", "Campaign not found for revision.");
+  }
+
+  const snapshotRow = asRecord(campaignSnapshot);
+  const currentUpdatedAt = deps.asString(snapshotRow.updated_at, "").trim();
+  if (expectedUpdatedAt && currentUpdatedAt && expectedUpdatedAt !== currentUpdatedAt) {
+    throw new HttpError(409, "version_conflict", "Campaign plan was updated by another request.", {
+      campaign_id: campaignId,
+      expected_updated_at: expectedUpdatedAt,
+      current_updated_at: currentUpdatedAt
+    });
+  }
+
+  const snapshotPlanRaw = snapshotRow.plan;
+  const previousPlan =
+    state.campaign_plan ??
+    (snapshotPlanRaw && typeof snapshotPlanRaw === "object" && !Array.isArray(snapshotPlanRaw)
+      ? (snapshotPlanRaw as SessionState["campaign_plan"])
+      : null);
+  const previousChainData = parseCampaignChainData(snapshotRow.plan_chain_data);
+  const rerunFromStep = parseRerunFromStep(payload?.rerun_from_step);
+
+  const { plan, ragMeta, chainData, planDocument } = await generateCampaignPlan(
+    session.org_id,
+    state.activity_folder,
+    state.user_message ?? "",
+    {
+      previousPlan,
+      previousChainData,
+      revisionReason: reason,
+      orgName: state.activity_folder,
+      rerunFromStep
+    }
+  );
+
+  let updateCampaignQuery = supabaseAdmin
     .from("campaigns")
     .update({
       status: "draft",
       channels: plan.channels,
-      plan
+      plan,
+      plan_chain_data: chainData,
+      plan_document: planDocument
     })
     .eq("id", campaignId)
     .eq("org_id", session.org_id);
+
+  if (expectedUpdatedAt) {
+    updateCampaignQuery = updateCampaignQuery.eq("updated_at", expectedUpdatedAt);
+  }
+
+  const { data: updatedCampaign, error: updateCampaignError } = await updateCampaignQuery.select("id").maybeSingle();
   if (updateCampaignError) {
     throw new HttpError(500, "db_error", `Failed to apply revised campaign plan: ${updateCampaignError.message}`);
+  }
+  if (!updatedCampaign) {
+    throw new HttpError(409, "version_conflict", "Campaign plan was updated during revision request.");
   }
 
   const resubmitted = await applyWorkflowAction({

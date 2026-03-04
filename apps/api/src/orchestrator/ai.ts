@@ -1,11 +1,22 @@
 ﻿import { env } from "../lib/env";
 import { buildContentGenerationContext, buildEnrichedCampaignContext } from "./rag-context";
+import { assembleCampaignPlanDocument } from "./skills/campaign-plan/assembler";
+import {
+  runCampaignPlanChain,
+  type CampaignChainModelCallResult
+} from "./skills/campaign-plan/chain";
+import {
+  buildLegacyPlanFields,
+  type CampaignPlanChainData,
+  type ChainStepName
+} from "./skills/campaign-plan/chain-types";
 import type { CampaignPlan, RagContextMeta } from "./types";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_GENERAL_CHAT_MODEL = "gpt-4o-mini";
 const SUPPORTED_CONTENT_CHANNELS = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const CHAIN_TARGET_LATENCY_MS = 30_000;
 
 type AnthropicTextBlock = {
   type?: string;
@@ -14,6 +25,13 @@ type AnthropicTextBlock = {
 
 type AnthropicResponse = {
   content?: AnthropicTextBlock[];
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+  error?: {
+    message?: string;
+  };
 };
 
 type OpenAiChatCompletionResponse = {
@@ -25,15 +43,6 @@ type OpenAiChatCompletionResponse = {
   error?: {
     message?: string;
   };
-};
-
-const extractJsonObject = (value: string): string | null => {
-  const start = value.indexOf("{");
-  const end = value.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return null;
-  }
-  return value.slice(start, end + 1);
 };
 
 const parseIntSafe = (value: unknown, fallback: number): number => {
@@ -104,7 +113,7 @@ const normalizePlan = (value: unknown, activityFolder: string): CampaignPlan => 
 const fallbackPlan = (activityFolder: string): CampaignPlan =>
   normalizePlan(
     {
-      objective: `Share field updates from "${activityFolder}" with transparent storytelling.`,
+      objective: `Share verified updates from "${activityFolder}" with clear storytelling.`,
       channels: ["instagram", "threads"],
       duration_days: 7,
       post_count: 3,
@@ -119,7 +128,7 @@ const fallbackPlan = (activityFolder: string): CampaignPlan =>
   );
 
 const fallbackDraft = (activityFolder: string): string =>
-  `${activityFolder} 현장에서 만난 변화의 순간을 전합니다. 여러분의 관심이 다음 활동을 가능하게 만듭니다. 함께 응원해 주세요. #국제개발 #현장소식 #함께하는변화`;
+  `We are sharing a field update from ${activityFolder}. Your support helps us continue this work. #ngo #fieldupdate #impact`;
 
 const safeJson = (value: unknown): string => {
   try {
@@ -129,7 +138,9 @@ const safeJson = (value: unknown): string => {
   }
 };
 
-const callOpenAiGeneralChat = async (messages: Array<{ role: "system" | "user"; content: string }>): Promise<string | null> => {
+const callOpenAiGeneralChat = async (
+  messages: Array<{ role: "system" | "user"; content: string }>
+): Promise<string | null> => {
   if (!env.openAiApiKey) {
     return null;
   }
@@ -165,9 +176,15 @@ const callOpenAiGeneralChat = async (messages: Array<{ role: "system" | "user"; 
   }
 };
 
-const callAnthropic = async (prompt: string, maxTokens: number): Promise<string | null> => {
+const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promise<CampaignChainModelCallResult> => {
   if (!env.anthropicApiKey) {
-    return null;
+    return {
+      text: null,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: "missing_api_key",
+      errorMessage: "ANTHROPIC_API_KEY is missing."
+    };
   }
 
   try {
@@ -185,19 +202,52 @@ const callAnthropic = async (prompt: string, maxTokens: number): Promise<string 
       })
     });
 
+    const payload = (await response.json().catch(() => ({}))) as AnthropicResponse;
+    const promptTokens =
+      typeof payload.usage?.input_tokens === "number" && Number.isFinite(payload.usage.input_tokens)
+        ? payload.usage.input_tokens
+        : null;
+    const completionTokens =
+      typeof payload.usage?.output_tokens === "number" && Number.isFinite(payload.usage.output_tokens)
+        ? payload.usage.output_tokens
+        : null;
+
     if (!response.ok) {
-      const body = await response.text();
-      console.error(`[AI] Anthropic request failed (${response.status}): ${body}`);
-      return null;
+      const errorMessage = payload.error?.message ?? "unknown";
+      console.error(`[AI] Anthropic request failed (${response.status}): ${errorMessage}`);
+      return {
+        text: null,
+        promptTokens,
+        completionTokens,
+        errorCode: `http_${response.status}`,
+        errorMessage
+      };
     }
 
-    const payload = (await response.json()) as AnthropicResponse;
     const block = payload.content?.find((entry) => entry.type === "text" && !!entry.text?.trim());
-    return block?.text?.trim() ?? null;
+    return {
+      text: block?.text?.trim() ?? null,
+      promptTokens,
+      completionTokens,
+      errorCode: null,
+      errorMessage: null
+    };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error("[AI] Anthropic request error:", error);
-    return null;
+    return {
+      text: null,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: "request_error",
+      errorMessage: message
+    };
   }
+};
+
+const callAnthropic = async (prompt: string, maxTokens: number): Promise<string | null> => {
+  const result = await callAnthropicWithUsage(prompt, maxTokens);
+  return result.text;
 };
 
 export const generateCampaignPlan = async (
@@ -207,87 +257,71 @@ export const generateCampaignPlan = async (
   options?: {
     previousPlan?: CampaignPlan | null;
     revisionReason?: string | null;
+    previousChainData?: CampaignPlanChainData | null;
+    rerunFromStep?: ChainStepName;
+    orgName?: string | null;
   }
-): Promise<{ plan: CampaignPlan; ragMeta: RagContextMeta }> => {
+): Promise<{
+  plan: CampaignPlan;
+  ragMeta: RagContextMeta;
+  chainData: CampaignPlanChainData | null;
+  planDocument: string | null;
+}> => {
   const ctx = await buildEnrichedCampaignContext(orgId, { activityFolder });
 
-  const promptParts: string[] = [
-    "당신은 한국 비영리 조직의 마케팅 전략가입니다.",
-    "반드시 JSON 객체만 출력하세요."
-  ];
-
-  if (ctx.memoryMd) {
-    promptParts.push("=== 조직 컨텍스트(memory.md) ===", ctx.memoryMd, "");
-  }
-
-  if (ctx.brandReviewMd) {
-    promptParts.push("=== 브랜드 리뷰 요약 ===", ctx.brandReviewMd, "");
-  }
-
-  if (ctx.interviewAnswers) {
-    promptParts.push(
-      "=== 인터뷰 응답 ===",
-      `톤/매너: ${ctx.interviewAnswers.q1 || "n/a"}`,
-      `타겟 오디언스: ${ctx.interviewAnswers.q2 || "n/a"}`,
-      `금지 단어/주제: ${ctx.interviewAnswers.q3 || "n/a"}`,
-      `캠페인 시즌: ${ctx.interviewAnswers.q4 || "n/a"}`,
-      ""
-    );
-  }
-
-  if (ctx.folderSummary) {
-    promptParts.push("=== 활동 폴더 컨텍스트 ===", ctx.folderSummary, "");
-  }
-
-  if (ctx.documentExtracts) {
-    promptParts.push("=== 문서 추출 내용 ===", ctx.documentExtracts, "");
-  }
-
-  const revisionReason = normalizeString(options?.revisionReason, "");
-  const hasPreviousPlan = !!options?.previousPlan;
-  if (revisionReason || hasPreviousPlan) {
-    promptParts.push("=== 리비전 컨텍스트 ===");
-    if (revisionReason) {
-      promptParts.push(`수정 요청 사유: "${revisionReason}"`);
-    }
-    if (hasPreviousPlan) {
-      promptParts.push("이전 캠페인 계획(JSON):", safeJson(options?.previousPlan));
-    }
-    promptParts.push("이전 계획을 바탕으로 수정 사유를 반영한 개선안을 작성하세요.", "");
-  }
-
-  promptParts.push(
-    "=== 작업 ===",
-    `활동 폴더: \"${activityFolder}\"`,
-    `사용자 요청: \"${userMessage}\"`,
-    "브랜드 톤/금지 항목/대상 오디언스를 반영한 캠페인 계획을 작성하세요.",
-    "",
-    "JSON 스키마:",
-    "{",
-    '  "objective": string,',
-    '  "channels": string[],',
-    '  "duration_days": number,',
-    '  "post_count": number,',
-    '  "content_types": string[],',
-    '  "suggested_schedule": [{ "day": number, "channel": string, "type": string }]',
-    "}"
-  );
-
-  const response = await callAnthropic(promptParts.filter(Boolean).join("\n"), 500);
-  if (!response) {
-    return { plan: fallbackPlan(activityFolder), ragMeta: ctx.meta };
-  }
-
-  const jsonText = extractJsonObject(response);
-  if (!jsonText) {
-    return { plan: fallbackPlan(activityFolder), ragMeta: ctx.meta };
-  }
-
   try {
-    const parsed = JSON.parse(jsonText) as unknown;
-    return { plan: normalizePlan(parsed, activityFolder), ragMeta: ctx.meta };
-  } catch {
-    return { plan: fallbackPlan(activityFolder), ragMeta: ctx.meta };
+    const chain = await runCampaignPlanChain({
+      activityFolder,
+      userMessage,
+      context: ctx,
+      invokeModel: callAnthropicWithUsage,
+      revisionReason: options?.revisionReason ?? null,
+      previousChainData: options?.previousChainData ?? null,
+      rerunFromStep: options?.rerunFromStep
+    });
+
+    if (chain.totalLatencyMs > CHAIN_TARGET_LATENCY_MS) {
+      console.warn(
+        `[CAMPAIGN_CHAIN] Target latency exceeded (${chain.totalLatencyMs}ms > ${CHAIN_TARGET_LATENCY_MS}ms).`
+      );
+    }
+
+    const hasStructuredOutput =
+      !!chain.chainData.audience ||
+      !!chain.chainData.channels ||
+      !!chain.chainData.calendar ||
+      !!chain.chainData.execution;
+
+    const fallback = options?.previousPlan ? normalizePlan(options.previousPlan, activityFolder) : fallbackPlan(activityFolder);
+    const derivedPlan = buildLegacyPlanFields(activityFolder, chain.chainData);
+    const plan = hasStructuredOutput ? normalizePlan(derivedPlan, activityFolder) : fallback;
+
+    const planDocument = assembleCampaignPlanDocument({
+      plan,
+      audience: chain.chainData.audience,
+      channels: chain.chainData.channels,
+      calendar: chain.chainData.calendar,
+      execution: chain.chainData.execution,
+      orgName: normalizeString(options?.orgName, activityFolder || "Organization"),
+      generatedAt: chain.chainData.generated_at,
+      chain: chain.chainData
+    });
+
+    return {
+      plan,
+      ragMeta: ctx.meta,
+      chainData: chain.chainData,
+      planDocument
+    };
+  } catch (error) {
+    console.error("[CAMPAIGN_CHAIN] Failed to run campaign chain:", error);
+
+    return {
+      plan: options?.previousPlan ? normalizePlan(options.previousPlan, activityFolder) : fallbackPlan(activityFolder),
+      ragMeta: ctx.meta,
+      chainData: null,
+      planDocument: null
+    };
   }
 };
 
