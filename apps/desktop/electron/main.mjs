@@ -98,6 +98,12 @@ const buildIdempotencyKey = (action, parts = []) => {
   return `desktop:${action}:${digest}`;
 };
 
+const buildUserMessageIdempotencyKey = (sessionId, content) => {
+  // Keep per-send uniqueness to avoid dropping repeated prompts with identical text.
+  const nonce = `${Date.now()}:${randomBytes(8).toString("hex")}`;
+  return buildIdempotencyKey("user_message", [sessionId, content, nonce]);
+};
+
 const normalizeEditableInput = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 
 const parsePositiveInteger = (value) => {
@@ -1948,7 +1954,7 @@ const registerIpcHandlers = () => {
             content,
             ...(uiContext ? { ui_context: uiContext } : {})
           },
-          idempotency_key: buildIdempotencyKey("user_message", [sessionId, content])
+          idempotency_key: buildUserMessageIdempotencyKey(sessionId, content)
         })
       });
 
@@ -2098,7 +2104,6 @@ const registerIpcHandlers = () => {
     const actionId = (payload?.actionId ?? "").trim();
     const eventType = (payload?.eventType ?? "").trim();
     const expectedVersion = parsePositiveInteger(payload?.expectedVersion);
-    const campaignId = (payload?.campaignId ?? "").trim();
     const contentId = (payload?.contentId ?? "").trim();
     const reason = typeof payload?.reason === "string" ? payload.reason.trim() : "";
     const editedBody = typeof payload?.editedBody === "string" ? payload.editedBody.trim() : "";
@@ -2108,12 +2113,7 @@ const registerIpcHandlers = () => {
       throw new Error("sessionId, workflowItemId, actionId, eventType, expectedVersion are required.");
     }
 
-    const allowedEventTypes = new Set([
-      "campaign_approved",
-      "campaign_rejected",
-      "content_approved",
-      "content_rejected"
-    ]);
+    const allowedEventTypes = new Set(["content_approved", "content_rejected"]);
     if (!allowedEventTypes.has(eventType)) {
       throw new Error("Unsupported eventType for chat action dispatch.");
     }
@@ -2121,18 +2121,10 @@ const registerIpcHandlers = () => {
     const eventPayload = {
       expected_version: expectedVersion
     };
-    if (eventType.startsWith("campaign_")) {
-      if (!campaignId) {
-        throw new Error("campaignId is required for campaign events.");
-      }
-      eventPayload.campaign_id = campaignId;
+    if (!contentId) {
+      throw new Error("contentId is required for content events.");
     }
-    if (eventType.startsWith("content_")) {
-      if (!contentId) {
-        throw new Error("contentId is required for content events.");
-      }
-      eventPayload.content_id = contentId;
-    }
+    eventPayload.content_id = contentId;
     if (eventType === "content_approved" && editedBody) {
       eventPayload.edited_body = editedBody;
     }
@@ -2143,7 +2135,7 @@ const registerIpcHandlers = () => {
       }
       eventPayload.mode = "revision";
       eventPayload.reason = reason;
-    } else if ((eventType === "campaign_rejected" || eventType === "content_rejected") && reason) {
+    } else if (eventType === "content_rejected" && reason) {
       eventPayload.reason = reason;
     }
 

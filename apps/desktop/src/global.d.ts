@@ -201,7 +201,6 @@ type ChatDispatchActionPayload = {
   expectedVersion: number;
   actionId: ChatActionCardAction["id"];
   eventType: ChatActionCardEventType;
-  campaignId?: string;
   contentId?: string;
   mode?: "revision";
   reason?: string;

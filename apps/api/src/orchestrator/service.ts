@@ -300,6 +300,10 @@ const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   active_skill_confidence: null,
   user_message: null,
   campaign_id: null,
+  campaign_survey: null,
+  campaign_draft_version: 0,
+  campaign_chain_data: null,
+  campaign_plan_document: null,
   campaign_workflow_item_id: null,
   campaign_plan: null,
   content_id: null,
@@ -343,6 +347,22 @@ const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): SessionSt
     active_skill_confidence: row.active_skill_confidence === null ? null : parseSkillConfidence(row.active_skill_confidence),
     user_message: row.user_message === null ? null : asString(row.user_message, ""),
     campaign_id: row.campaign_id === null ? null : asString(row.campaign_id, ""),
+    campaign_survey:
+      row.campaign_survey && typeof row.campaign_survey === "object" && !Array.isArray(row.campaign_survey)
+        ? (row.campaign_survey as SessionState["campaign_survey"])
+        : null,
+    campaign_draft_version:
+      typeof row.campaign_draft_version === "number" && Number.isFinite(row.campaign_draft_version)
+        ? Math.max(0, Math.floor(row.campaign_draft_version))
+        : 0,
+    campaign_chain_data:
+      row.campaign_chain_data && typeof row.campaign_chain_data === "object" && !Array.isArray(row.campaign_chain_data)
+        ? (row.campaign_chain_data as Record<string, unknown>)
+        : null,
+    campaign_plan_document:
+      typeof row.campaign_plan_document === "string" && row.campaign_plan_document.trim()
+        ? row.campaign_plan_document
+        : null,
     campaign_workflow_item_id:
       typeof row.campaign_workflow_item_id === "string" && row.campaign_workflow_item_id.trim()
         ? row.campaign_workflow_item_id.trim()
@@ -416,6 +436,10 @@ const buildManualSessionState = (workspaceType: string, scopeId: string | null, 
     active_skill_confidence: null,
     user_message: null,
     campaign_id: null,
+    campaign_survey: null,
+    campaign_draft_version: 0,
+    campaign_chain_data: null,
+    campaign_plan_document: null,
     campaign_workflow_item_id: null,
     campaign_plan: null,
     content_id: null,

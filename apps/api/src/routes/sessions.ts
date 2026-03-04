@@ -16,9 +16,7 @@ import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionSta
 
 const SUPPORTED_EVENTS = new Set<ResumeEventType>([
   "user_message",
-  "campaign_approved",
   "content_approved",
-  "campaign_rejected",
   "content_rejected"
 ]);
 
@@ -173,7 +171,7 @@ const parseResumeEvent = (body: unknown): ResumeEventRequest => {
     if (mode !== "revision") {
       throw new HttpError(400, "invalid_payload", "payload.mode must be \"revision\" when provided.");
     }
-    if (eventType !== "campaign_rejected" && eventType !== "content_rejected") {
+    if (eventType !== "content_rejected") {
       throw new HttpError(400, "invalid_payload", "payload.mode is only allowed for reject events.");
     }
     payload.mode = "revision";

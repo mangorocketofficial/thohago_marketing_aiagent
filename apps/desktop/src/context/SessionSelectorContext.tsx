@@ -78,6 +78,11 @@ const SessionSelectorContext = createContext<SessionSelectorContextValue | null>
 const toRuntimeMessage = (error: unknown, fallback: string): string =>
   error instanceof Error && error.message ? error.message : fallback;
 
+const isOpenSessionStatus = (value: unknown): boolean => value === "running" || value === "paused";
+
+const isOpenSession = (session: OrchestratorSession | null | undefined): session is OrchestratorSession =>
+  !!session && typeof session.id === "string" && !!session.id.trim() && isOpenSessionStatus(session.status);
+
 const normalizeWorkspaceType = (value: unknown): string => {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized || "general";
@@ -393,6 +398,12 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
         return;
       }
 
+      if (!isOpenSession(recommended)) {
+        setRecommendedSession(null);
+        setRecommendationKey("");
+        return;
+      }
+
       if (!recommended?.id || recommended.id === selectedSessionId) {
         setRecommendedSession(null);
         setRecommendationKey("");
@@ -447,13 +458,13 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       const persisted = readPersistedSelectedSessionByOrg();
       const persistedSessionId = persisted[orgId] ?? "";
       const persistedSession = persistedSessionId ? recent.find((entry) => entry.id === persistedSessionId) ?? null : null;
-      if (persistedSession) {
+      if (isOpenSession(persistedSession)) {
         commitSelectedSession(persistedSession);
         return;
       }
 
-      const activeCompat = activeSessionRef.current?.id ? activeSessionRef.current : null;
-      if (activeCompat?.id) {
+      const activeCompat = isOpenSession(activeSessionRef.current) ? activeSessionRef.current : null;
+      if (activeCompat) {
         commitSelectedSession(activeCompat);
         setRecentSessions((previous) => upsertSession(previous, activeCompat, RECENT_LIMIT));
         return;
@@ -464,7 +475,7 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
         return;
       }
       const activeFromApi = activeResponse.ok ? activeResponse.session : null;
-      if (activeFromApi?.id) {
+      if (isOpenSession(activeFromApi)) {
         commitSelectedSession(activeFromApi);
         setRecentSessions((previous) => upsertSession(previous, activeFromApi, RECENT_LIMIT));
         return;
@@ -482,20 +493,20 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       if (requestId !== latestBootstrapRequestIdRef.current) {
         return;
       }
-      if (recommended?.id) {
+      if (isOpenSession(recommended)) {
         commitSelectedSession(recommended);
         setRecentSessions((previous) => upsertSession(previous, recommended, RECENT_LIMIT));
         return;
       }
 
-      const fallbackSession = recent[0] ?? null;
-      if (fallbackSession?.id) {
+      const fallbackSession = recent.find((entry) => isOpenSessionStatus(entry.status)) ?? null;
+      if (fallbackSession) {
         commitSelectedSession(fallbackSession);
         return;
       }
 
       commitSelectedSession(null);
-      setSessionNotice("No session is available yet. Create a new session to continue.");
+      setSessionNotice("No active session is available. Create a new session to continue.");
     } catch (error) {
       if (requestId !== latestBootstrapRequestIdRef.current) {
         return;

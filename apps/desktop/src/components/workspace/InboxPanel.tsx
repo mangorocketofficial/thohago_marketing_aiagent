@@ -195,9 +195,9 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
   };
 
   const submitItemAction = async (params: {
-    item: InboxItem;
+    item: Extract<InboxItem, { type: "content" }>;
     actionId: "approve" | "request_revision" | "reject";
-    eventType: "campaign_approved" | "campaign_rejected" | "content_approved" | "content_rejected";
+    eventType: "content_approved" | "content_rejected";
     mode?: "revision";
   }) => {
     const reason = (reasonByItem[params.item.key] ?? "").trim();
@@ -224,16 +224,6 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
     } as const;
 
     setNoticeByItem((previous) => ({ ...previous, [params.item.key]: "" }));
-
-    if (params.item.type === "campaign") {
-      await dispatchCardAction({
-        ...basePayload,
-        campaignId: params.item.campaign.id,
-        ...(params.mode === "revision" ? { mode: "revision", reason } : {}),
-        ...(params.actionId === "reject" && reason ? { reason } : {})
-      });
-      return;
-    }
 
     const originalBody = (params.item.content.body ?? "").trim();
     const editedBody = (editByItem[params.item.key] ?? originalBody).trim();
@@ -330,19 +320,17 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                   </>
                 )}
 
-                <textarea
-                  className="chat-card-reason"
-                  placeholder={
-                    item.type === "campaign"
-                      ? "Optional reason for reject"
-                      : "Optional reason (required for Request Revision)"
-                  }
-                  value={reason}
-                  onChange={(event) =>
-                    setReasonByItem((previous) => ({ ...previous, [item.key]: event.target.value }))
-                  }
-                  disabled={isActionPending}
-                />
+                {item.type === "content" ? (
+                  <textarea
+                    className="chat-card-reason"
+                    placeholder="Optional reason (required for Request Revision)"
+                    value={reason}
+                    onChange={(event) =>
+                      setReasonByItem((previous) => ({ ...previous, [item.key]: event.target.value }))
+                    }
+                    disabled={isActionPending}
+                  />
+                ) : null}
 
                 {item.type === "content" ? (
                   <div className="chat-card-editor-wrap">
@@ -373,22 +361,22 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                   </div>
                 ) : null}
 
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={isActionPending}
-                    onClick={() =>
-                      void submitItemAction({
-                        item,
-                        actionId: "approve",
-                        eventType: item.type === "campaign" ? "campaign_approved" : "content_approved"
-                      })
-                    }
-                  >
-                    {item.type === "campaign" ? t("campaignPlan.actionApprove") : "Approve"}
-                  </button>
-                  {item.type === "content" ? (
+                {item.type === "content" ? (
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={isActionPending}
+                      onClick={() =>
+                        void submitItemAction({
+                          item,
+                          actionId: "approve",
+                          eventType: "content_approved"
+                        })
+                      }
+                    >
+                      Approve
+                    </button>
                     <button
                       type="button"
                       disabled={isActionPending}
@@ -403,25 +391,25 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                     >
                       Request Revision
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={isActionPending}
-                    onClick={() =>
-                      void submitItemAction({
-                        item,
-                        actionId: "reject",
-                        eventType: item.type === "campaign" ? "campaign_rejected" : "content_rejected"
-                      })
-                    }
-                  >
-                    {item.type === "campaign" ? t("campaignPlan.actionReject") : "Reject"}
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      disabled={isActionPending}
+                      onClick={() =>
+                        void submitItemAction({
+                          item,
+                          actionId: "reject",
+                          eventType: "content_rejected"
+                        })
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                ) : (
+                  <p className="queue-chat-revision-hint">캠페인 초안 확정은 채팅에서 진행됩니다.</p>
+                )}
 
-                {item.type === "campaign" ? (
-                  <p className="queue-chat-revision-hint">{t("campaignPlan.revisionViaChatHint")}</p>
-                ) : null}
+                {item.type === "campaign" ? <p className="queue-chat-revision-hint">{t("campaignPlan.revisionViaChatHint")}</p> : null}
 
                 {notice ? <p className="notice">{notice}</p> : null}
               </div>

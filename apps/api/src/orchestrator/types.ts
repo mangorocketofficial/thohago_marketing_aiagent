@@ -79,6 +79,34 @@ export type ForbiddenCheckMeta = {
   regenerated: boolean;
 };
 
+export type SurveyQuestionId = "campaign_goal" | "channels" | "duration" | "content_source";
+export type SurveyQuestionPriority = "required" | "optional";
+
+export type SurveyQuestion = {
+  id: SurveyQuestionId;
+  priority: SurveyQuestionPriority;
+  label: string;
+  choices?: string[];
+  auto_fill_source?: string;
+};
+
+export type SurveyAnswer = {
+  question_id: SurveyQuestionId;
+  answer: string;
+  source: "user" | "auto_filled" | "extracted_from_initial_message";
+  answered_at: string;
+};
+
+export type CampaignSurveyState = {
+  started_at: string;
+  phase: "survey_active" | "draft_review";
+  pending_questions: SurveyQuestionId[];
+  answers: SurveyAnswer[];
+  auto_fill_applied: boolean;
+  completed_at: string | null;
+  awaiting_final_confirmation: boolean;
+};
+
 export type SessionState = {
   trigger_id: string;
   activity_folder: string;
@@ -90,6 +118,10 @@ export type SessionState = {
   active_skill_confidence: number | null;
   user_message: string | null;
   campaign_id: string | null;
+  campaign_survey: CampaignSurveyState | null;
+  campaign_draft_version: number;
+  campaign_chain_data: Record<string, unknown> | null;
+  campaign_plan_document: string | null;
   campaign_workflow_item_id: string | null;
   campaign_plan: CampaignPlan | null;
   content_id: string | null;

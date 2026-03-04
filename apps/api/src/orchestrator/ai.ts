@@ -139,11 +139,19 @@ const safeJson = (value: unknown): string => {
 };
 
 const callOpenAiGeneralChat = async (
-  messages: Array<{ role: "system" | "user"; content: string }>
+  messages: Array<{ role: "system" | "user"; content: string }>,
+  options?: {
+    temperature?: number;
+  }
 ): Promise<string | null> => {
   if (!env.openAiApiKey) {
     return null;
   }
+
+  const temperature =
+    typeof options?.temperature === "number" && Number.isFinite(options.temperature)
+      ? Math.max(0, Math.min(2, options.temperature))
+      : 0.7;
 
   try {
     const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
@@ -154,7 +162,7 @@ const callOpenAiGeneralChat = async (
       },
       body: JSON.stringify({
         model: OPENAI_GENERAL_CHAT_MODEL,
-        temperature: 0.7,
+        temperature,
         messages
       })
     });
@@ -174,6 +182,106 @@ const callOpenAiGeneralChat = async (
     console.error("[AI] OpenAI general chat request error:", error);
     return null;
   }
+};
+
+type CampaignDraftReviewIntent = "revision" | "satisfaction" | "confirm" | "discussion";
+
+const parseLooseJsonObject = (value: string): Record<string, unknown> | null => {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end < 0 || end <= start) {
+      return null;
+    }
+    const candidate = raw.slice(start, end + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+};
+
+export const classifyCampaignDraftReviewIntent = async (params: {
+  userMessage: string;
+  awaitingFinalConfirmation: boolean;
+}): Promise<{ intent: CampaignDraftReviewIntent; confidence: number; reason: string } | null> => {
+  const userMessage = String(params.userMessage ?? "").trim();
+  if (!userMessage) {
+    return null;
+  }
+
+  const response = await callOpenAiGeneralChat(
+    [
+      {
+        role: "system",
+        content: [
+          "You classify a user message during campaign draft review.",
+          "Return JSON only.",
+          "Allowed intents: revision | satisfaction | confirm | discussion.",
+          "Definitions:",
+          "- revision: asks to change/update/add/remove parts of draft.",
+          "- satisfaction: positive feedback but no explicit final approval.",
+          "- confirm: explicit final approval/confirmation to proceed.",
+          "- discussion: question/comment not requesting revision or approval.",
+          "If awaiting_final_confirmation=true, clear positive acceptance should be classified as confirm.",
+          'Output schema: {"intent":"revision|satisfaction|confirm|discussion","confidence":0..1,"reason":"short"}'
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: [
+          `[awaiting_final_confirmation] ${params.awaitingFinalConfirmation ? "true" : "false"}`,
+          `[user_message] ${userMessage}`
+        ].join("\n")
+      }
+    ],
+    {
+      temperature: 0.1
+    }
+  );
+
+  if (!response) {
+    return null;
+  }
+
+  const parsed = parseLooseJsonObject(response);
+  if (!parsed) {
+    return null;
+  }
+
+  const intentRaw = typeof parsed.intent === "string" ? parsed.intent.trim().toLowerCase() : "";
+  const validIntents = new Set<CampaignDraftReviewIntent>(["revision", "satisfaction", "confirm", "discussion"]);
+  if (!validIntents.has(intentRaw as CampaignDraftReviewIntent)) {
+    return null;
+  }
+
+  const confidenceRaw =
+    typeof parsed.confidence === "number"
+      ? parsed.confidence
+      : typeof parsed.confidence === "string"
+        ? Number.parseFloat(parsed.confidence)
+        : Number.NaN;
+  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0.5;
+  if (confidence < 0.55) {
+    return null;
+  }
+
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "llm_intent";
+  return {
+    intent: intentRaw as CampaignDraftReviewIntent,
+    confidence,
+    reason
+  };
 };
 
 const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promise<CampaignChainModelCallResult> => {
@@ -417,15 +525,11 @@ export const generateGeneralAssistantReply = async (params: {
     "You are a helpful marketing AI assistant for a Korean NGO workspace.",
     "Respond naturally and helpfully in Korean.",
     "Keep response concise (2-5 sentences) unless user asks for deep detail.",
-    "If campaign/content approval is pending, remind user that Inbox actions are still required for workflow progress while continuing normal conversation."
+    "If content approval is pending, remind user that Inbox actions are still required for workflow progress while continuing normal conversation."
   ].join(" ");
 
   const pendingState =
-    params.currentStep === "await_campaign_approval"
-      ? "campaign approval pending"
-      : params.currentStep === "await_content_approval"
-        ? "content approval pending"
-        : "normal";
+    params.currentStep === "await_content_approval" ? "content approval pending" : "normal";
   const contextNote = safeJson({
     activity_folder: params.activityFolder,
     step: params.currentStep,
@@ -443,5 +547,5 @@ export const generateGeneralAssistantReply = async (params: {
     return response;
   }
 
-  return "메시지는 확인했어요. 대화는 계속 진행할 수 있어요. 다만 현재 대기 중인 승인 항목은 Inbox에서 승인/수정요청/거절 처리가 필요합니다.";
+  return "메시지는 확인했어요. 대화는 계속 진행할 수 있어요. 다만 현재 대기 중인 콘텐츠 승인 항목은 Inbox에서 승인/수정요청/거절 처리가 필요합니다.";
 };

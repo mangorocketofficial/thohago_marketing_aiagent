@@ -621,6 +621,10 @@ export const ChatProvider = ({
         setChatNotice("Session switch is in progress. Wait for completion, then retry.");
         return;
       }
+      if (selectedSession && (selectedSession.status === "done" || selectedSession.status === "failed")) {
+        setChatNotice(`Selected session is ${selectedSession.status}. Select or create an active session to continue.`);
+        return;
+      }
       const source = typeof input?.content === "string" ? input.content : chatInput;
       const content = source.trim();
       if (!content) {
@@ -643,7 +647,7 @@ export const ChatProvider = ({
         }
       });
     },
-    [chatInput, clearChatInput, ensureSelectedSessionId, isSessionMutating, runChatAction, runtime]
+    [chatInput, clearChatInput, ensureSelectedSessionId, isSessionMutating, runChatAction, runtime, selectedSession]
   );
 
   const dispatchCardAction = useCallback(
@@ -657,29 +661,12 @@ export const ChatProvider = ({
         setChatNotice("sessionId is required for action card dispatch.");
         return;
       }
-      const payloadCampaignId = typeof payload.campaignId === "string" ? payload.campaignId.trim() : "";
       const payloadContentId = typeof payload.contentId === "string" ? payload.contentId.trim() : "";
-      const activeCampaignId =
-        typeof selectedSession?.state?.campaign_id === "string" ? selectedSession.state.campaign_id.trim() : "";
       const activeContentId =
         typeof selectedSession?.state?.content_id === "string" ? selectedSession.state.content_id.trim() : "";
-      const campaignId = payloadCampaignId || activeCampaignId;
       const contentId = payloadContentId || activeContentId;
 
-      const isCampaignEvent = payload.eventType.startsWith("campaign_");
-      const isContentEvent = payload.eventType.startsWith("content_");
-      if (isCampaignEvent && !campaignId) {
-        console.warn("[ChatContext] dispatchCardAction missing campaignId", {
-          sessionId,
-          workflowItemId: payload.workflowItemId,
-          selectedSessionId,
-          payloadCampaignId,
-          activeCampaignId
-        });
-        setChatNotice("Campaign action is missing campaignId. Retry from Inbox or refresh session state.");
-        return;
-      }
-      if (isContentEvent && !contentId) {
+      if (!contentId) {
         console.warn("[ChatContext] dispatchCardAction missing contentId", {
           sessionId,
           workflowItemId: payload.workflowItemId,
@@ -694,8 +681,7 @@ export const ChatProvider = ({
       await runChatAction(async () => {
         await runtime.chat.dispatchAction({
           ...payload,
-          ...(isCampaignEvent ? { campaignId } : {}),
-          ...(isContentEvent ? { contentId } : {})
+          contentId
         });
       });
     },
