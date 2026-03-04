@@ -1,16 +1,18 @@
 {
-  "run_id": "1772438539002-f83613fd",
-  "started_at": "2026-03-02T08:02:19.003Z",
-  "finished_at": "2026-03-02T08:02:35.362Z",
+  "run_id": "1772538132839-1f582768",
+  "started_at": "2026-03-03T11:42:12.840Z",
+  "finished_at": "2026-03-03T11:42:27.336Z",
   "success": true,
   "checks": [
     {
       "name": "supabase_status_env",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:19.742Z",
-      "duration_ms": 735,
+      "checked_at": "2026-03-03T11:42:13.629Z",
+      "duration_ms": 786,
       "details": {
         "api_url": "http://127.0.0.1:54321",
+        "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0",
+        "service_role_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU",
         "anon_key_present": true,
         "service_role_key_present": true
       }
@@ -18,8 +20,8 @@
     {
       "name": "required_env",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:20.490Z",
-      "duration_ms": 0,
+      "checked_at": "2026-03-03T11:42:13.630Z",
+      "duration_ms": 1,
       "details": {
         "api_secret_present": true,
         "openai_key_present": true,
@@ -29,32 +31,32 @@
     {
       "name": "api_startup",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:22.575Z",
-      "duration_ms": 2084,
+      "checked_at": "2026-03-03T11:42:15.704Z",
+      "duration_ms": 2074,
       "details": {
-        "api_base_url": "http://127.0.0.1:39673"
+        "api_base_url": "http://127.0.0.1:39595"
       }
     },
     {
       "name": "seed_users_and_orgs",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:23.079Z",
-      "duration_ms": 496,
+      "checked_at": "2026-03-03T11:42:16.247Z",
+      "duration_ms": 538,
       "details": {
-        "org_id": "f0590410-6850-4abb-869e-cb2726c4b6d4",
-        "outsider_org_id": "ff1700ce-865e-4794-9a6f-c5036200ce37",
-        "owner_user_id": "92971723-7869-474c-be9d-10e39be2398a",
-        "outsider_user_id": "d7c3e797-457a-4e18-9326-34c7bc56e02e"
+        "org_id": "bd19242d-1efa-484b-beba-65398a5f9f65",
+        "outsider_org_id": "916fc50e-89b7-4ef3-ae7c-cbda87ed449f",
+        "owner_user_id": "e211047c-e9b5-4f65-a5b4-acf3a3a0c517",
+        "outsider_user_id": "944c9aaf-1709-4e3a-a408-ca12dd9ee872"
       }
     },
     {
       "name": "onboarding_synthesize",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:30.219Z",
-      "duration_ms": 7140,
+      "checked_at": "2026-03-03T11:42:22.200Z",
+      "duration_ms": 5953,
       "details": {
         "http_status": 200,
-        "elapsed_ms": 7140,
+        "elapsed_ms": 5953,
         "review_markdown_length": 8480,
         "detected_tone": "친근하고 밝음"
       }
@@ -62,19 +64,19 @@
     {
       "name": "rag_ingestion_done",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:32.789Z",
-      "duration_ms": 2570,
+      "checked_at": "2026-03-03T11:42:24.730Z",
+      "duration_ms": 2529,
       "details": {
-        "wait_ms": 2569,
+        "wait_ms": 2529,
         "final_status": "done",
-        "rag_indexed_at": "2026-03-02T08:02:31.821+00:00"
+        "rag_indexed_at": "2026-03-03T11:42:23.573+00:00"
       }
     },
     {
       "name": "brand_profile_embeddings",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:32.804Z",
-      "duration_ms": 15,
+      "checked_at": "2026-03-03T11:42:24.750Z",
+      "duration_ms": 20,
       "details": {
         "total_brand_profile_chunks": 30,
         "review_chunk_count": 29,
@@ -85,29 +87,29 @@
     {
       "name": "memory_first_request",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:33.098Z",
-      "duration_ms": 294,
+      "checked_at": "2026-03-03T11:42:25.020Z",
+      "duration_ms": 270,
       "details": {
         "cache_hit": false,
-        "token_count": 319,
-        "freshness_key": "505e8ccd98153869b862559e62f0ddafd2e5c71366f6c7269ae6b7641700fb49"
+        "token_count": 317,
+        "freshness_key": "18c9cb7d05ce31dda87bf4d8713469ecf629ba7db7602b5e21fe448537cc004d"
       }
     },
     {
       "name": "memory_cache_hit",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:33.880Z",
-      "duration_ms": 782,
+      "checked_at": "2026-03-03T11:42:25.809Z",
+      "duration_ms": 789,
       "details": {
         "cache_hit": true,
-        "freshness_key": "505e8ccd98153869b862559e62f0ddafd2e5c71366f6c7269ae6b7641700fb49"
+        "freshness_key": "18c9cb7d05ce31dda87bf4d8713469ecf629ba7db7602b5e21fe448537cc004d"
       }
     },
     {
       "name": "memory_internal_token",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:33.901Z",
-      "duration_ms": 21,
+      "checked_at": "2026-03-03T11:42:25.847Z",
+      "duration_ms": 37,
       "details": {
         "cache_hit": true
       }
@@ -115,8 +117,8 @@
     {
       "name": "memory_forbidden_outsider",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:33.966Z",
-      "duration_ms": 65,
+      "checked_at": "2026-03-03T11:42:25.909Z",
+      "duration_ms": 62,
       "details": {
         "http_status": 403,
         "error": "forbidden"
@@ -125,18 +127,18 @@
     {
       "name": "memory_freshness_invalidation",
       "pass": true,
-      "checked_at": "2026-03-02T08:02:34.831Z",
-      "duration_ms": 865,
+      "checked_at": "2026-03-03T11:42:26.787Z",
+      "duration_ms": 878,
       "details": {
         "first_cache_hit": false,
         "second_cache_hit": true,
-        "new_freshness_key": "219b24dfa90d60958c7bff24619a0d2837ae7ec5fcc002ceb5ecfddff7219c6e"
+        "new_freshness_key": "989fc1fd3f7b2b2ae544ffcc741aded29b584065f3b1d990dd55979d4e85a757"
       }
     }
   ],
   "metrics": {
-    "synthesize_response_ms": 7140,
-    "ingestion_wait_ms": 2569,
+    "synthesize_response_ms": 5953,
+    "ingestion_wait_ms": 2529,
     "embedding_counts": {
       "total_brand_profile_chunks": 30,
       "review_chunk_count": 29,
@@ -146,27 +148,27 @@
     "memory_after_update": {
       "first_cache_hit": false,
       "second_cache_hit": true,
-      "new_freshness_key": "219b24dfa90d60958c7bff24619a0d2837ae7ec5fcc002ceb5ecfddff7219c6e"
+      "new_freshness_key": "989fc1fd3f7b2b2ae544ffcc741aded29b584065f3b1d990dd55979d4e85a757"
     }
   },
   "environment": {
-    "api_base_url": "http://127.0.0.1:39673",
+    "api_base_url": "http://127.0.0.1:39595",
     "supabase_url": "http://127.0.0.1:54321"
   },
   "artifacts": {
     "ingestion_status_timeline": [
       {
-        "at": "2026-03-02T08:02:30.259Z",
-        "status": "processing",
+        "at": "2026-03-03T11:42:22.213Z",
+        "status": "pending",
         "error": null
       },
       {
-        "at": "2026-03-02T08:02:32.789Z",
+        "at": "2026-03-03T11:42:24.730Z",
         "status": "done",
         "error": null
       }
     ],
-    "api_log_tail": "\n> @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n> tsx src/index.ts\n\n[API] Listening on http://localhost:39673\n[API] Supabase host: 127.0.0.1:54321\n",
+    "api_log_tail": "[stdout] > @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n[stdout] > tsx src/index.ts\n[stdout] [API] Listening on http://localhost:39595\n[stdout] [API] Supabase host: 127.0.0.1:54321\n[stdout] [HISTORICAL_CONTENT] Inserted 3 posts for org bd19242d-1efa-484b-beba-65398a5f9f65 (deleted 0 old)\n[stdout] [CONTENT_BACKFILL] org=bd19242d-1efa-484b-beba-65398a5f9f65, inserted=3, embedded=3, failed=0, remaining=0",
     "cleanup_errors": []
   },
   "error": null

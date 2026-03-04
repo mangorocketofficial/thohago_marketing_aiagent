@@ -14,3 +14,17 @@ coverage/
 __pycache__/
 *.pyc
 .venv/
+
+# Local-only docs/work artifacts
+docs/local/
+docs/reports/local/
+docs/sample_result/
+*.local.md
+*.local.json
+
+# Generated docs/reports (timestamped or debug output)
+docs/reports/crawl-websearch-*.md
+docs/reports/instagram-graph-api-test-*.md
+docs/reports/memory-md-*.md
+docs/reports/phase-*-test-result-20*.json
+docs/reports/phase-*-reingest-result-20*.json

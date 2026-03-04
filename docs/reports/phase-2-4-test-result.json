@@ -1,16 +1,18 @@
 {
-  "run_id": "1772454306757-29887b37",
-  "started_at": "2026-03-02T12:25:06.758Z",
-  "finished_at": "2026-03-02T12:25:13.405Z",
+  "run_id": "1772538119804-9d26b16a",
+  "started_at": "2026-03-03T11:41:59.804Z",
+  "finished_at": "2026-03-03T11:42:06.929Z",
   "success": true,
   "checks": [
     {
       "name": "supabase_status_env",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:07.453Z",
-      "duration_ms": 692,
+      "checked_at": "2026-03-03T11:42:00.651Z",
+      "duration_ms": 843,
       "details": {
         "api_url": "http://127.0.0.1:54321",
+        "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0",
+        "service_role_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU",
         "anon_key_present": true,
         "service_role_key_present": true
       }
@@ -18,7 +20,7 @@
     {
       "name": "required_env",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:08.142Z",
+      "checked_at": "2026-03-03T11:42:00.651Z",
       "duration_ms": 0,
       "details": {
         "api_secret_present": true,
@@ -30,37 +32,37 @@
     {
       "name": "api_startup",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:10.207Z",
-      "duration_ms": 2065,
+      "checked_at": "2026-03-03T11:42:02.751Z",
+      "duration_ms": 2099,
       "details": {
-        "api_base_url": "http://127.0.0.1:40175"
+        "api_base_url": "http://127.0.0.1:40463"
       }
     },
     {
       "name": "seed_owner_user",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:10.486Z",
-      "duration_ms": 275,
+      "checked_at": "2026-03-03T11:42:03.149Z",
+      "duration_ms": 389,
       "details": {
-        "userId": "fbf1b065-980c-4c18-b82b-12e8636ab99a",
+        "userId": "99454be3-e8f3-4cad-b162-c1691755958c",
         "access_token_present": true
       }
     },
     {
       "name": "seed_orgs_and_subscription",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:10.509Z",
-      "duration_ms": 23,
+      "checked_at": "2026-03-03T11:42:03.197Z",
+      "duration_ms": 48,
       "details": {
-        "org_active_id": "81baedf4-d19b-460f-8fc9-fb5defad3271",
-        "org_blocked_id": "9fc8eb03-0cf7-464c-b089-25b9d7cfd05e"
+        "org_active_id": "09325135-c9ef-4392-b530-97919732c7d7",
+        "org_blocked_id": "2f4d24f5-4e03-4b60-a731-2133372b9ead"
       }
     },
     {
       "name": "auth_failure_returns_401",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:10.524Z",
-      "duration_ms": 15,
+      "checked_at": "2026-03-03T11:42:03.217Z",
+      "duration_ms": 19,
       "details": {
         "http_status": 401
       }
@@ -68,8 +70,8 @@
     {
       "name": "subscription_gate_returns_402",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:10.534Z",
-      "duration_ms": 10,
+      "checked_at": "2026-03-03T11:42:03.233Z",
+      "duration_ms": 16,
       "details": {
         "http_status": 402,
         "error": "payment_required"
@@ -78,8 +80,8 @@
     {
       "name": "index_text_document",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:11.194Z",
-      "duration_ms": 660,
+      "checked_at": "2026-03-03T11:42:04.587Z",
+      "duration_ms": 1354,
       "details": {
         "chunk_count": 5,
         "row_count": 5
@@ -88,18 +90,18 @@
     {
       "name": "index_metadata_only_null_text",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:12.154Z",
-      "duration_ms": 960,
+      "checked_at": "2026-03-03T11:42:05.477Z",
+      "duration_ms": 890,
       "details": {
         "chunk_count": 1,
-        "content_preview": "file: event-photo.jpg\ntype: image\nactivity_folder: phase24-activity-177245431021"
+        "content_preview": "file: event-photo.jpg\ntype: image\nactivity_folder: phase24-activity-177253812276"
       }
     },
     {
       "name": "index_short_text_fallback",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:12.501Z",
-      "duration_ms": 346,
+      "checked_at": "2026-03-03T11:42:05.891Z",
+      "duration_ms": 414,
       "details": {
         "chunk_count": 1
       }
@@ -107,8 +109,8 @@
     {
       "name": "idempotent_reindex_no_duplicates",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:12.528Z",
-      "duration_ms": 27,
+      "checked_at": "2026-03-03T11:42:05.954Z",
+      "duration_ms": 63,
       "details": {
         "before_count": 5,
         "after_count": 5,
@@ -119,8 +121,8 @@
     {
       "name": "delete_document_embeddings",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:12.546Z",
-      "duration_ms": 18,
+      "checked_at": "2026-03-03T11:42:05.986Z",
+      "duration_ms": 32,
       "details": {
         "deleted": true
       }
@@ -128,8 +130,8 @@
     {
       "name": "retriever_local_doc_rpc",
       "pass": true,
-      "checked_at": "2026-03-02T12:25:12.957Z",
-      "duration_ms": 411,
+      "checked_at": "2026-03-03T11:42:06.444Z",
+      "duration_ms": 458,
       "details": {
         "result_count": 5
       }
@@ -137,11 +139,11 @@
   ],
   "metrics": {},
   "environment": {
-    "api_base_url": "http://127.0.0.1:40175",
+    "api_base_url": "http://127.0.0.1:40463",
     "supabase_url": "http://127.0.0.1:54321"
   },
   "artifacts": {
-    "api_log_tail": "\n> @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n> tsx src/index.ts\n\n[API] Listening on http://localhost:40175\n[API] Supabase host: 127.0.0.1:54321\n",
+    "api_log_tail": "[stdout] > @repo/api@0.1.0 dev C:\\Users\\User\\Desktop\\thohago_marketing_aiagent\\apps\\api\n[stdout] > tsx src/index.ts\n[stdout] [API] Listening on http://localhost:40463\n[stdout] [API] Supabase host: 127.0.0.1:54321",
     "cleanup_errors": []
   },
   "error": null

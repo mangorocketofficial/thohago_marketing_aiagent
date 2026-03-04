@@ -22,6 +22,7 @@ const defaultConfig = () => ({
   watchPath: "",
   orgId: SEED_ORG_ID,
   language: "ko",
+  lastAuthUserId: "",
   onboardingCompleted: false,
   onboardingDraft: defaultOnboardingDraft()
 });
@@ -94,6 +95,14 @@ export const saveOnboardingCompleted = (onboardingCompleted) => {
   return writeConfig({
     ...current,
     onboardingCompleted: !!onboardingCompleted
+  });
+};
+
+export const saveLastAuthUserId = (lastAuthUserId) => {
+  const current = readConfig();
+  return writeConfig({
+    ...current,
+    lastAuthUserId: String(lastAuthUserId ?? "").trim()
   });
 };
 
