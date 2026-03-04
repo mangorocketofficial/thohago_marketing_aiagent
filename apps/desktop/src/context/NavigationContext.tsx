@@ -7,28 +7,28 @@ import {
   type PropsWithChildren
 } from "react";
 import type {
-  AgentChatHandoff,
   ContextPanelMode,
   NavigateOptions,
   NavigationState,
-  PageId
+  PageId,
+  WorkspaceHandoff
 } from "../types/navigation";
 import { defaultContextPanelModeForPage, isFullWidthPage } from "../types/navigation";
 
 type NavigationContextValue = NavigationState & {
   isContextPanelHidden: boolean;
   navigate: (pageId: PageId, options?: NavigateOptions) => void;
-  clearAgentChatHandoff: () => void;
+  clearWorkspaceHandoff: () => void;
   setContextPanelMode: (mode: ContextPanelMode) => void;
   setContextPanelCollapsed: (value: boolean) => void;
   toggleContextPanelCollapsed: () => void;
 };
 
 const INITIAL_NAVIGATION_STATE: NavigationState = {
-  activePage: "dashboard",
-  contextPanelMode: defaultContextPanelModeForPage("dashboard"),
+  activePage: "workspace",
+  contextPanelMode: defaultContextPanelModeForPage("workspace"),
   contextPanelCollapsed: false,
-  agentChatHandoff: null
+  workspaceHandoff: null
 };
 
 const NavigationContext = createContext<NavigationContextValue | null>(null);
@@ -37,21 +37,21 @@ export const NavigationProvider = ({ children }: PropsWithChildren) => {
   const [state, setState] = useState<NavigationState>(INITIAL_NAVIGATION_STATE);
 
   const navigate = useCallback((pageId: PageId, options?: NavigateOptions) => {
-    const nextHandoff: AgentChatHandoff | null =
-      pageId === "agent-chat" ? (options?.agentChatHandoff ?? null) : null;
+    const nextHandoff: WorkspaceHandoff | null =
+      pageId === "workspace" ? (options?.workspaceHandoff ?? null) : null;
 
     setState((previous) => ({
       ...previous,
       activePage: pageId,
       contextPanelMode: options?.contextPanelMode ?? defaultContextPanelModeForPage(pageId),
-      agentChatHandoff: nextHandoff
+      workspaceHandoff: nextHandoff
     }));
   }, []);
 
-  const clearAgentChatHandoff = useCallback(() => {
+  const clearWorkspaceHandoff = useCallback(() => {
     setState((previous) => ({
       ...previous,
-      agentChatHandoff: null
+      workspaceHandoff: null
     }));
   }, []);
 
@@ -81,12 +81,12 @@ export const NavigationProvider = ({ children }: PropsWithChildren) => {
       ...state,
       isContextPanelHidden: state.contextPanelMode === "hidden" || isFullWidthPage(state.activePage),
       navigate,
-      clearAgentChatHandoff,
+      clearWorkspaceHandoff,
       setContextPanelMode,
       setContextPanelCollapsed,
       toggleContextPanelCollapsed
     }),
-    [clearAgentChatHandoff, navigate, setContextPanelCollapsed, setContextPanelMode, state, toggleContextPanelCollapsed]
+    [clearWorkspaceHandoff, navigate, setContextPanelCollapsed, setContextPanelMode, state, toggleContextPanelCollapsed]
   );
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;

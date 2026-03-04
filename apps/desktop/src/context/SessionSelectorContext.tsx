@@ -155,39 +155,7 @@ const resolveWorkspaceContext = (pageId: PageId, selectedSession: OrchestratorSe
     };
   }
 
-  if (pageId === "campaign-plan") {
-    const workspaceType = "campaign_plan";
-    const scopedCampaignId =
-      selectedSession?.workspace_type === "campaign_plan"
-        ? normalizeScopeId(selectedSession.state?.campaign_id)
-        : "default";
-    const scopeId = scopedCampaignId;
-    return {
-      pageId,
-      workspaceType,
-      scopeId,
-      workspaceKey: buildWorkspaceKey(workspaceType, scopeId),
-      label: toWorkspaceLabel(workspaceType, scopeId)
-    };
-  }
-
-  if (pageId === "content-create") {
-    const workspaceType = "content_create";
-    const scopedContentId =
-      selectedSession?.workspace_type === "content_create"
-        ? normalizeScopeId(selectedSession.state?.content_id)
-        : "default";
-    const scopeId = scopedContentId;
-    return {
-      pageId,
-      workspaceType,
-      scopeId,
-      workspaceKey: buildWorkspaceKey(workspaceType, scopeId),
-      label: toWorkspaceLabel(workspaceType, scopeId)
-    };
-  }
-
-  if (pageId === "agent-chat") {
+  if (pageId === "workspace") {
     const workspaceType = normalizeWorkspaceType(selectedSession?.workspace_type);
     const scopeId = normalizeScopeId(selectedSession?.scope_id);
     return {

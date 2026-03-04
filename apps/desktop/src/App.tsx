@@ -7,14 +7,12 @@ import { SessionSelectorProvider } from "./context/SessionSelectorContext";
 import { OnboardingLayout, resolveOnboardingEntryStep, type OnboardingStep } from "./layouts/OnboardingLayout";
 import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
-import { AgentChatPage } from "./pages/AgentChat";
 import { AnalyticsPage } from "./pages/Analytics";
 import { BrandReviewPage } from "./pages/BrandReview";
-import { CampaignPlanPage } from "./pages/CampaignPlan";
-import { ContentCreatePage } from "./pages/ContentCreate";
 import { DashboardPage } from "./pages/Dashboard";
 import { EmailAutomationPage } from "./pages/EmailAutomation";
 import { SettingsPage } from "./pages/Settings";
+import { WorkspacePage } from "./pages/Workspace";
 import type { OrchestratorSession } from "@repo/types";
 
 type UiMode = "loading" | "onboarding" | "dashboard";
@@ -475,6 +473,7 @@ const App = () => {
           refreshActiveSession={refreshActiveSession}
         >
           <MainLayout
+            workspacePage={<WorkspacePage formatDateTime={formatDateTime} />}
             dashboardPage={
               <DashboardPage
                 runtimeSummary={runtimeSummary}
@@ -495,11 +494,8 @@ const App = () => {
                 formatDateTime={formatDateTime}
               />
             }
-            campaignPlanPage={<CampaignPlanPage />}
-            contentCreatePage={<ContentCreatePage />}
             analyticsPage={<AnalyticsPage />}
             emailAutomationPage={<EmailAutomationPage />}
-            agentChatPage={<AgentChatPage formatDateTime={formatDateTime} />}
             settingsPage={
               <SettingsPage
                 orgId={desktopConfig?.orgId ?? "-"}

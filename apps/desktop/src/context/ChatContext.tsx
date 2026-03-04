@@ -33,14 +33,21 @@ type WorkflowItemLinkRow = {
   version: number | string;
 };
 
+type WorkflowItemSessionRow = {
+  workflow_item_id: string | null;
+  session_id?: string | null;
+  created_at: string;
+};
+
 export type WorkflowLinkHint = {
   workflowItemId: string;
   workflowStatus: WorkflowStatus;
   version: number;
+  sessionId: string | null;
 };
 
 export type ChatUiContext = {
-  source: "agent-chat-page" | "context-panel-widget";
+  source: "workspace-chat" | "context-panel-widget";
   pageId: PageId;
   contextPanelMode?: "agent-chat" | "page-context";
   focusWorkflowItemId?: string;
@@ -82,7 +89,7 @@ type ChatContextValue = {
   isSessionMutating: boolean;
   loadLegacyMessages: () => Promise<void>;
   sendMessage: (input?: SendMessageInput) => Promise<void>;
-  dispatchCardAction: (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => Promise<void>;
+  dispatchCardAction: (payload: ChatActionCardDispatchInput) => Promise<void>;
 };
 
 type RuntimeActionError = Error & {
@@ -141,6 +148,14 @@ const toPositiveIntOrDefault = (value: unknown, fallback: number): number => {
     return fallback;
   }
   return Math.max(1, Math.floor(normalized));
+};
+
+const toOptionalSessionId = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
 };
 
 const sortMessages = (messages: ChatMessage[]): ChatMessage[] =>
@@ -326,6 +341,7 @@ export const ChatProvider = ({
       return;
     }
 
+    const workflowItemIds: string[] = [];
     const nextHints: Record<string, WorkflowLinkHint> = {};
     for (const row of workflowRows as WorkflowItemLinkRow[]) {
       const sourceCampaignId =
@@ -339,8 +355,36 @@ export const ChatProvider = ({
       nextHints[sourceCampaignId] = {
         workflowItemId,
         workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1)
+        version: toPositiveIntOrDefault(row.version, 1),
+        sessionId: null
       };
+      workflowItemIds.push(workflowItemId);
+    }
+
+    if (workflowItemIds.length > 0) {
+      const { data: actionRows } = await supabase
+        .from("chat_messages")
+        .select("workflow_item_id,session_id,created_at")
+        .eq("org_id", chatConfig.orgId)
+        .eq("message_type", "action_card")
+        .in("workflow_item_id", workflowItemIds)
+        .order("created_at", { ascending: false });
+
+      if (actionRows) {
+        const latestSessionByWorkflowId = new Map<string, string | null>();
+        for (const row of actionRows as WorkflowItemSessionRow[]) {
+          const workflowItemId =
+            typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
+          if (!workflowItemId || latestSessionByWorkflowId.has(workflowItemId)) {
+            continue;
+          }
+          latestSessionByWorkflowId.set(workflowItemId, toOptionalSessionId(row.session_id));
+        }
+
+        for (const hint of Object.values(nextHints)) {
+          hint.sessionId = latestSessionByWorkflowId.get(hint.workflowItemId) ?? null;
+        }
+      }
     }
 
     setCampaignWorkflowHints(nextHints);
@@ -389,6 +433,7 @@ export const ChatProvider = ({
       return;
     }
 
+    const workflowItemIds: string[] = [];
     const nextHints: Record<string, WorkflowLinkHint> = {};
     for (const row of workflowRows as WorkflowItemLinkRow[]) {
       const sourceContentId =
@@ -402,8 +447,36 @@ export const ChatProvider = ({
       nextHints[sourceContentId] = {
         workflowItemId,
         workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1)
+        version: toPositiveIntOrDefault(row.version, 1),
+        sessionId: null
       };
+      workflowItemIds.push(workflowItemId);
+    }
+
+    if (workflowItemIds.length > 0) {
+      const { data: actionRows } = await supabase
+        .from("chat_messages")
+        .select("workflow_item_id,session_id,created_at")
+        .eq("org_id", chatConfig.orgId)
+        .eq("message_type", "action_card")
+        .in("workflow_item_id", workflowItemIds)
+        .order("created_at", { ascending: false });
+
+      if (actionRows) {
+        const latestSessionByWorkflowId = new Map<string, string | null>();
+        for (const row of actionRows as WorkflowItemSessionRow[]) {
+          const workflowItemId =
+            typeof row.workflow_item_id === "string" && row.workflow_item_id.trim() ? row.workflow_item_id.trim() : "";
+          if (!workflowItemId || latestSessionByWorkflowId.has(workflowItemId)) {
+            continue;
+          }
+          latestSessionByWorkflowId.set(workflowItemId, toOptionalSessionId(row.session_id));
+        }
+
+        for (const hint of Object.values(nextHints)) {
+          hint.sessionId = latestSessionByWorkflowId.get(hint.workflowItemId) ?? null;
+        }
+      }
     }
 
     setPendingContentWorkflowHints(nextHints);
@@ -665,7 +738,7 @@ export const ChatProvider = ({
   );
 
   const dispatchCardAction = useCallback(
-    async (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => {
+    async (payload: ChatActionCardDispatchInput) => {
       if (isSessionMutating) {
         setChatNotice("Session switch is in progress. Wait for completion, then retry.");
         return;
@@ -675,36 +748,45 @@ export const ChatProvider = ({
         setChatNotice("sessionId is required for action card dispatch.");
         return;
       }
-      if (!selectedSessionId) {
-        setChatNotice("No selected session. Choose a session before dispatching card actions.");
-        return;
-      }
-      if (selectedSessionId !== sessionId) {
-        setChatNotice("Selected session does not match this action card session. Switch session explicitly first.");
-        return;
-      }
-
+      const payloadCampaignId = typeof payload.campaignId === "string" ? payload.campaignId.trim() : "";
+      const payloadContentId = typeof payload.contentId === "string" ? payload.contentId.trim() : "";
       const activeCampaignId =
         typeof selectedSession?.state?.campaign_id === "string" ? selectedSession.state.campaign_id.trim() : "";
       const activeContentId =
         typeof selectedSession?.state?.content_id === "string" ? selectedSession.state.content_id.trim() : "";
+      const campaignId = payloadCampaignId || activeCampaignId;
+      const contentId = payloadContentId || activeContentId;
 
       const isCampaignEvent = payload.eventType.startsWith("campaign_");
       const isContentEvent = payload.eventType.startsWith("content_");
-      if (isCampaignEvent && !activeCampaignId) {
-        setChatNotice("Selected session campaign_id is missing. Switch session or retry.");
+      if (isCampaignEvent && !campaignId) {
+        console.warn("[ChatContext] dispatchCardAction missing campaignId", {
+          sessionId,
+          workflowItemId: payload.workflowItemId,
+          selectedSessionId,
+          payloadCampaignId,
+          activeCampaignId
+        });
+        setChatNotice("Campaign action is missing campaignId. Retry from Inbox or refresh session state.");
         return;
       }
-      if (isContentEvent && !activeContentId) {
-        setChatNotice("Selected session content_id is missing. Switch session or retry.");
+      if (isContentEvent && !contentId) {
+        console.warn("[ChatContext] dispatchCardAction missing contentId", {
+          sessionId,
+          workflowItemId: payload.workflowItemId,
+          selectedSessionId,
+          payloadContentId,
+          activeContentId
+        });
+        setChatNotice("Content action is missing contentId. Retry from Inbox or refresh session state.");
         return;
       }
 
       await runChatAction(async () => {
         await runtime.chat.dispatchAction({
           ...payload,
-          ...(isCampaignEvent ? { campaignId: activeCampaignId } : {}),
-          ...(isContentEvent ? { contentId: activeContentId } : {})
+          ...(isCampaignEvent ? { campaignId } : {}),
+          ...(isContentEvent ? { contentId } : {})
         });
       });
     },

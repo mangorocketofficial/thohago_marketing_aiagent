@@ -1,31 +1,27 @@
 export type PageId =
+  | "workspace"
   | "dashboard"
   | "brand-review"
-  | "campaign-plan"
-  | "content-create"
   | "analytics"
   | "email-automation"
-  | "agent-chat"
   | "settings";
 
 export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
 
-export type AgentChatHandoff = {
+export type WorkspaceHandoff = {
   focusWorkflowItemId?: string;
-  focusContentId?: string;
-  focusCampaignId?: string;
 };
 
 export type NavigateOptions = {
   contextPanelMode?: ContextPanelMode;
-  agentChatHandoff?: AgentChatHandoff | null;
+  workspaceHandoff?: WorkspaceHandoff | null;
 };
 
 export type NavigationState = {
   activePage: PageId;
   contextPanelMode: ContextPanelMode;
   contextPanelCollapsed: boolean;
-  agentChatHandoff: AgentChatHandoff | null;
+  workspaceHandoff: WorkspaceHandoff | null;
 };
 
 export type NavItem = {
@@ -35,7 +31,7 @@ export type NavItem = {
   section: "primary" | "secondary";
 };
 
-export const FULL_WIDTH_PAGES: readonly PageId[] = ["agent-chat", "settings"] as const;
+export const FULL_WIDTH_PAGES: readonly PageId[] = ["workspace", "settings"] as const;
 
 const FULL_WIDTH_PAGE_SET = new Set<PageId>(FULL_WIDTH_PAGES);
 
@@ -45,12 +41,9 @@ export const defaultContextPanelModeForPage = (pageId: PageId): ContextPanelMode
   isFullWidthPage(pageId) ? "hidden" : "page-context";
 
 export const NAV_ITEMS: readonly NavItem[] = [
+  { id: "workspace", label: "Workspace", icon: "WS", section: "primary" },
   { id: "dashboard", label: "Dashboard", icon: "DB", section: "primary" },
   { id: "brand-review", label: "Brand Review", icon: "BR", section: "primary" },
-  { id: "campaign-plan", label: "Campaign Plan", icon: "CP", section: "primary" },
-  { id: "content-create", label: "Content Create", icon: "CC", section: "primary" },
   { id: "analytics", label: "Analytics", icon: "AN", section: "primary" },
-  { id: "email-automation", label: "Email Automation", icon: "EM", section: "primary" },
-  { id: "agent-chat", label: "Agent Chat", icon: "AG", section: "secondary" },
   { id: "settings", label: "Settings", icon: "ST", section: "secondary" }
 ] as const;

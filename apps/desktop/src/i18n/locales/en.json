@@ -90,24 +90,20 @@
       "orgLabel": "Desktop Organization"
     },
     "nav": {
+      "workspace": "Workspace",
       "dashboard": "Dashboard",
       "brand-review": "Brand Review",
-      "campaign-plan": "Campaign Plan",
-      "content-create": "Content Create",
-      "analytics": "Analytics",
+      "analytics": "Performance",
       "email-automation": "Email Automation",
-      "agent-chat": "Agent Chat",
       "settings": "Settings"
     },
     "contextPanel": {
       "titleByPage": {
+        "workspace": "Workspace Context",
         "dashboard": "Dashboard Context",
         "brand-review": "Brand Review Context",
-        "campaign-plan": "Campaign Context",
-        "content-create": "Content Context",
         "analytics": "Analytics Context",
         "email-automation": "Email Context",
-        "agent-chat": "Agent Chat Context",
         "settings": "Settings Context"
       },
       "modeLabel": "Mode",
@@ -118,15 +114,20 @@
       "closeMiniChat": "Close Mini Chat"
     },
     "pages": {
+      "workspace": {
+        "eyebrow": "Workspace",
+        "title": "Workspace",
+        "description": "Inbox approvals, session chat, and session rail in one surface.",
+        "inboxTitle": "Inbox",
+        "inboxDescription": "Approve, request revision, or reject pending workflow items.",
+        "inboxEmpty": "No pending workflow items.",
+        "chatTitle": "Chat",
+        "sessionRailTitle": "Session Rail"
+      },
       "dashboard": {
         "eyebrow": "Runtime",
         "title": "Dashboard",
         "description": "Live runtime status, pending visibility, and indexed files."
-      },
-      "agentChat": {
-        "eyebrow": "Agent Chat",
-        "title": "Conversation",
-        "description": "Realtime assistant conversation and action approvals."
       },
       "settings": {
         "eyebrow": "Settings",
@@ -143,24 +144,6 @@
         "empty": "No review markdown is available yet.",
         "dataAccessUnavailable": "Brand review data is unavailable in the current runtime session.",
         "loadFailed": "Failed to load brand review."
-      },
-      "contentCreate": {
-        "eyebrow": "Content Create",
-        "title": "Content Create",
-        "description": "Plan and draft channel-ready content artifacts.",
-        "briefTitle": "Content Brief",
-        "briefDescription": "Brief builder and template mapping will be connected in a later phase.",
-        "previewTitle": "Preview Surface",
-        "previewDescription": "Multi-channel preview and validation summary will be wired in a later phase."
-      },
-      "campaignPlan": {
-        "eyebrow": "Campaign Plan",
-        "title": "Campaign Plan",
-        "description": "Assemble campaign objectives, channels, and schedule skeleton.",
-        "objectiveTitle": "Campaign Objective",
-        "objectiveDescription": "Structured campaign objective editor will be connected in a later phase.",
-        "scheduleTitle": "Schedule Preview",
-        "scheduleDescription": "Calendar and posting cadence visualization will be connected in a later phase."
       },
       "analytics": {
         "eyebrow": "Analytics",
@@ -203,7 +186,7 @@
       "reviewAll": "Review all tasks",
       "reviewAllTitle": "All Sessions",
       "newSession": "New session",
-      "openHub": "Open Agent Chat Hub",
+      "openHub": "Open Workspace",
       "refreshList": "Refresh session list",
       "recommendedLabel": "Recommended",
       "continueCurrent": "Continue current",

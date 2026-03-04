@@ -152,7 +152,7 @@ type ChatDispatchActionPayload = {
 };
 
 type ChatSendUiContext = {
-  source: "agent-chat-page" | "context-panel-widget";
+  source: "workspace-chat" | "context-panel-widget";
   pageId: string;
   contextPanelMode?: "agent-chat" | "page-context";
   focusWorkflowItemId?: string;

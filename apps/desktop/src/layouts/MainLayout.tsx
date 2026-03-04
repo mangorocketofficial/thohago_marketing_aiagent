@@ -1,36 +1,30 @@
-﻿import type { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ContextPanel } from "../components/ContextPanel";
-import { Sidebar } from "../components/Sidebar";
+import { TopBarNav } from "../components/TopBarNav";
 import { useNavigation } from "../context/NavigationContext";
 import type { PageId } from "../types/navigation";
 
 type MainLayoutProps = {
+  workspacePage: ReactNode;
   dashboardPage: ReactNode;
   brandReviewPage: ReactNode;
-  campaignPlanPage: ReactNode;
-  contentCreatePage: ReactNode;
   analyticsPage: ReactNode;
   emailAutomationPage: ReactNode;
-  agentChatPage: ReactNode;
   settingsPage: ReactNode;
 };
 
 const resolvePageNode = (props: MainLayoutProps, pageId: PageId): ReactNode => {
   switch (pageId) {
+    case "workspace":
+      return props.workspacePage;
     case "dashboard":
       return props.dashboardPage;
     case "brand-review":
       return props.brandReviewPage;
-    case "campaign-plan":
-      return props.campaignPlanPage;
-    case "content-create":
-      return props.contentCreatePage;
     case "analytics":
       return props.analyticsPage;
     case "email-automation":
       return props.emailAutomationPage;
-    case "agent-chat":
-      return props.agentChatPage;
     case "settings":
       return props.settingsPage;
     default:
@@ -50,19 +44,21 @@ export const MainLayout = (props: MainLayoutProps) => {
 
   return (
     <div className="ui-main-layout">
-      <Sidebar activePage={activePage} />
+      <TopBarNav />
 
-      <main className="ui-main-content">{resolvePageNode(props, activePage)}</main>
+      <div className="ui-main-body">
+        <main className="ui-main-content">{resolvePageNode(props, activePage)}</main>
 
-      {!isContextPanelHidden ? (
-        <ContextPanel
-          activePage={activePage}
-          mode={contextPanelMode}
-          isCollapsed={contextPanelCollapsed}
-          onModeChange={setContextPanelMode}
-          onToggleCollapsed={toggleContextPanelCollapsed}
-        />
-      ) : null}
+        {!isContextPanelHidden ? (
+          <ContextPanel
+            activePage={activePage}
+            mode={contextPanelMode}
+            isCollapsed={contextPanelCollapsed}
+            onModeChange={setContextPanelMode}
+            onToggleCollapsed={toggleContextPanelCollapsed}
+          />
+        ) : null}
+      </div>
     </div>
   );
 };

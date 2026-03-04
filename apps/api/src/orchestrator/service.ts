@@ -20,7 +20,7 @@ import {
   ensureContentWorkflowItem
 } from "../workflow/service";
 import type { WorkflowItemRow, WorkflowStatus } from "../workflow/types";
-import { generateContentDraft, generateDetectMessage } from "./ai";
+import { generateContentDraft, generateDetectMessage, generateGeneralAssistantReply } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
 import type {
   CampaignPlan,
@@ -953,6 +953,49 @@ const ensureContentWorkflowItemForState = async (params: {
   });
 };
 
+const acceptUserMessageDuringApprovalStep = async (params: {
+  session: OrchestratorSessionRow;
+  state: SessionState;
+  event: ResumeEventRequest;
+}): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
+  const content = asString(params.event.payload?.content, "").trim();
+  if (!content) {
+    throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
+  }
+
+  await insertChatMessage({
+    orgId: params.session.org_id,
+    sessionId: params.session.id,
+    role: "user",
+    content
+  });
+
+  const assistantReply = await generateGeneralAssistantReply({
+    activityFolder: params.state.activity_folder,
+    currentStep: params.session.current_step,
+    userMessage: content,
+    campaignId: params.state.campaign_id,
+    contentId: params.state.content_id
+  });
+
+  await insertChatMessage({
+    orgId: params.session.org_id,
+    sessionId: params.session.id,
+    role: "assistant",
+    content: assistantReply
+  });
+
+  return {
+    state: {
+      ...params.state,
+      last_error: null
+    },
+    step: normalizeStep(params.session.current_step),
+    status: "paused",
+    completed: false
+  };
+};
+
 const processResumeEvent = async (
   session: OrchestratorSessionRow,
   state: SessionState,
@@ -996,6 +1039,13 @@ const processResumeEvent = async (
 
   switch (event.event_type) {
     case "user_message": {
+      if (session.current_step === "await_campaign_approval" || session.current_step === "await_content_approval") {
+        return acceptUserMessageDuringApprovalStep({
+          session,
+          state,
+          event
+        });
+      }
       const next = await applyUserMessageStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
       return { ...next, completed: false };
     }

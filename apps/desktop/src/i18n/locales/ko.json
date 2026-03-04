@@ -90,24 +90,20 @@
       "orgLabel": "데스크톱 조직"
     },
     "nav": {
+      "workspace": "워크스페이스",
       "dashboard": "대시보드",
       "brand-review": "브랜드 리뷰",
-      "campaign-plan": "캠페인 기획",
-      "content-create": "콘텐츠 제작",
-      "analytics": "분석",
+      "analytics": "성과분석",
       "email-automation": "이메일 자동화",
-      "agent-chat": "에이전트 채팅",
       "settings": "설정"
     },
     "contextPanel": {
       "titleByPage": {
+        "workspace": "워크스페이스 컨텍스트",
         "dashboard": "대시보드 컨텍스트",
         "brand-review": "브랜드 리뷰 컨텍스트",
-        "campaign-plan": "캠페인 컨텍스트",
-        "content-create": "콘텐츠 컨텍스트",
         "analytics": "분석 컨텍스트",
         "email-automation": "이메일 컨텍스트",
-        "agent-chat": "에이전트 채팅 컨텍스트",
         "settings": "설정 컨텍스트"
       },
       "modeLabel": "모드",
@@ -118,15 +114,20 @@
       "closeMiniChat": "미니 채팅 닫기"
     },
     "pages": {
+      "workspace": {
+        "eyebrow": "워크스페이스",
+        "title": "워크스페이스",
+        "description": "Inbox 승인, 세션 채팅, 세션 레일을 한 화면에서 처리합니다.",
+        "inboxTitle": "Inbox",
+        "inboxDescription": "대기 중인 워크플로우 항목을 승인, 수정 요청, 거절할 수 있습니다.",
+        "inboxEmpty": "대기 중인 워크플로우 항목이 없습니다.",
+        "chatTitle": "채팅",
+        "sessionRailTitle": "세션 레일"
+      },
       "dashboard": {
         "eyebrow": "런타임",
         "title": "대시보드",
         "description": "실시간 런타임 상태, 승인 대기 현황, 인덱싱 파일을 확인합니다."
-      },
-      "agentChat": {
-        "eyebrow": "에이전트 채팅",
-        "title": "대화",
-        "description": "실시간 어시스턴트 대화와 승인 액션을 처리합니다."
       },
       "settings": {
         "eyebrow": "설정",
@@ -143,24 +144,6 @@
         "empty": "아직 리뷰 마크다운이 없습니다.",
         "dataAccessUnavailable": "현재 런타임 세션에서 브랜드 리뷰 데이터에 접근할 수 없습니다.",
         "loadFailed": "브랜드 리뷰를 불러오지 못했습니다."
-      },
-      "contentCreate": {
-        "eyebrow": "콘텐츠 제작",
-        "title": "콘텐츠 제작",
-        "description": "채널별 콘텐츠 아티팩트를 기획하고 초안을 구성합니다.",
-        "briefTitle": "콘텐츠 브리프",
-        "briefDescription": "브리프 작성기와 템플릿 매핑은 다음 단계에서 연결됩니다.",
-        "previewTitle": "미리보기 화면",
-        "previewDescription": "채널별 미리보기와 검증 요약은 다음 단계에서 연결됩니다."
-      },
-      "campaignPlan": {
-        "eyebrow": "캠페인 기획",
-        "title": "캠페인 기획",
-        "description": "캠페인 목표, 채널, 일정 스켈레톤을 구성합니다.",
-        "objectiveTitle": "캠페인 목표",
-        "objectiveDescription": "구조화된 캠페인 목표 편집기는 다음 단계에서 연결됩니다.",
-        "scheduleTitle": "일정 미리보기",
-        "scheduleDescription": "캘린더와 발행 주기 시각화는 다음 단계에서 연결됩니다."
       },
       "analytics": {
         "eyebrow": "분석",
@@ -203,7 +186,7 @@
       "reviewAll": "전체 작업 보기",
       "reviewAllTitle": "전체 세션",
       "newSession": "새 세션",
-      "openHub": "에이전트 채팅 허브 열기",
+      "openHub": "워크스페이스 열기",
       "refreshList": "세션 목록 새로고침",
       "recommendedLabel": "추천 세션",
       "continueCurrent": "현재 유지",
@@ -215,7 +198,7 @@
       "loading": "불러오는 중...",
       "empty": "세션이 없습니다.",
       "loadMore": "더 불러오기",
-      "inputPlaceholder": "어시스턴트에게 보낼 답변을 입력하세요...",
+      "inputPlaceholder": "또대리에게 보낼 답변을 입력하세요...",
       "send": "전송",
       "error": {
         "loadFailed": "세션 데이터를 불러오지 못했습니다."

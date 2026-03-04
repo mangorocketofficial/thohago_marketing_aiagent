@@ -105,7 +105,7 @@ export const DashboardPage = ({
       <section className="panel panel-split">
         <article className="subpanel">
           <h2>Campaign Pending View</h2>
-          <p className="sub-description">Read-only status view. Approval decisions execute in Agent Chat action-cards.</p>
+          <p className="sub-description">Read-only status view. Approval decisions execute in Workspace Inbox.</p>
           {campaignToReview ? (
             <div className="campaign-card">
               <p>
@@ -120,15 +120,14 @@ export const DashboardPage = ({
                 <button
                   className="primary"
                   onClick={() =>
-                    navigate("agent-chat", {
-                      agentChatHandoff: {
-                        focusWorkflowItemId: campaignWorkflowHint?.workflowItemId,
-                        focusCampaignId: campaignToReview.id
+                    navigate("workspace", {
+                      workspaceHandoff: {
+                        focusWorkflowItemId: campaignWorkflowHint?.workflowItemId
                       }
                     })
                   }
                 >
-                  Open in Chat
+                  Open in Workspace
                 </button>
               </div>
             </div>
@@ -163,16 +162,14 @@ export const DashboardPage = ({
                       <button
                         className="primary"
                         onClick={() =>
-                          navigate("agent-chat", {
-                            agentChatHandoff: {
-                              focusWorkflowItemId: workflowHint?.workflowItemId,
-                              focusContentId: content.id,
-                              ...(content.campaign_id ? { focusCampaignId: content.campaign_id } : {})
+                          navigate("workspace", {
+                            workspaceHandoff: {
+                              focusWorkflowItemId: workflowHint?.workflowItemId
                             }
                           })
                         }
                       >
-                        Open in Chat
+                        Open in Workspace
                       </button>
                     </div>
                   </div>

@@ -3,6 +3,8 @@ import { buildCampaignPlanContext, buildContentGenerationContext } from "./rag-c
 import type { CampaignPlan, RagContextMeta } from "./types";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_GENERAL_CHAT_MODEL = "gpt-4o-mini";
 const SUPPORTED_CONTENT_CHANNELS = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
 
 type AnthropicTextBlock = {
@@ -12,6 +14,17 @@ type AnthropicTextBlock = {
 
 type AnthropicResponse = {
   content?: AnthropicTextBlock[];
+};
+
+type OpenAiChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
 };
 
 const extractJsonObject = (value: string): string | null => {
@@ -113,6 +126,42 @@ const safeJson = (value: unknown): string => {
     return JSON.stringify(value, null, 2);
   } catch {
     return "{}";
+  }
+};
+
+const callOpenAiGeneralChat = async (messages: Array<{ role: "system" | "user"; content: string }>): Promise<string | null> => {
+  if (!env.openAiApiKey) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${env.openAiApiKey}`
+      },
+      body: JSON.stringify({
+        model: OPENAI_GENERAL_CHAT_MODEL,
+        temperature: 0.7,
+        messages
+      })
+    });
+
+    const body = (await response.json().catch(() => ({}))) as OpenAiChatCompletionResponse;
+    if (!response.ok) {
+      console.error(`[AI] OpenAI general chat failed (${response.status}): ${body.error?.message ?? "unknown"}`);
+      return null;
+    }
+
+    const content = body.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      return null;
+    }
+    return content.trim();
+  } catch (error) {
+    console.error("[AI] OpenAI general chat request error:", error);
+    return null;
   }
 };
 
@@ -313,4 +362,44 @@ export const generateContentDraft = async (
     draft: fallbackDraft(activityFolder),
     ragMeta: ctx.meta
   };
+};
+
+export const generateGeneralAssistantReply = async (params: {
+  activityFolder: string;
+  currentStep: string;
+  userMessage: string;
+  campaignId?: string | null;
+  contentId?: string | null;
+}): Promise<string> => {
+  const systemPrompt = [
+    "You are a helpful marketing AI assistant for a Korean NGO workspace.",
+    "Respond naturally and helpfully in Korean.",
+    "Keep response concise (2-5 sentences) unless user asks for deep detail.",
+    "If campaign/content approval is pending, remind user that Inbox actions are still required for workflow progress while continuing normal conversation."
+  ].join(" ");
+
+  const pendingState =
+    params.currentStep === "await_campaign_approval"
+      ? "campaign approval pending"
+      : params.currentStep === "await_content_approval"
+        ? "content approval pending"
+        : "normal";
+  const contextNote = safeJson({
+    activity_folder: params.activityFolder,
+    step: params.currentStep,
+    pending_state: pendingState,
+    campaign_id: params.campaignId ?? null,
+    content_id: params.contentId ?? null
+  });
+  const userPrompt = [`[workspace_context]`, contextNote, `[user_message]`, params.userMessage].join("\n");
+
+  const response = await callOpenAiGeneralChat([
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt }
+  ]);
+  if (response) {
+    return response;
+  }
+
+  return "메시지는 확인했어요. 대화는 계속 진행할 수 있어요. 다만 현재 대기 중인 승인 항목은 Inbox에서 승인/수정요청/거절 처리가 필요합니다.";
 };

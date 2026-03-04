@@ -55,7 +55,10 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
 
   const isUiBusy = isActionPending || isSessionMutating;
-  const recentMessages = useMemo(() => messages.slice(-20), [messages]);
+  const recentMessages = useMemo(
+    () => messages.filter((message) => message.message_type !== "action_card").slice(-20),
+    [messages]
+  );
 
   const recentSelectableSessions = useMemo(() => {
     if (selectedSession && !recentSessions.some((entry) => entry.id === selectedSession.id)) {
@@ -141,7 +144,7 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
           <button type="button" onClick={() => void createSessionForCurrentWorkspace()} disabled={isUiBusy}>
             {t("chat.sessionSelector.newSession")}
           </button>
-          <button type="button" onClick={() => navigate("agent-chat")} disabled={isUiBusy}>
+          <button type="button" onClick={() => navigate("workspace")} disabled={isUiBusy}>
             {t("chat.sessionSelector.openHub")}
           </button>
         </div>
