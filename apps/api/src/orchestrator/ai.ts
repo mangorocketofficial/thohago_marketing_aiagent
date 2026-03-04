@@ -200,21 +200,6 @@ const callAnthropic = async (prompt: string, maxTokens: number): Promise<string 
   }
 };
 
-export const generateDetectMessage = async (activityFolder: string, fileName: string): Promise<string> => {
-  const prompt = [
-    `새 활동 폴더 "${activityFolder}"가 감지되었고 파일 "${fileName}"가 추가되었습니다.`,
-    "한국어로 2-3문장 안내 메시지를 작성하세요.",
-    "사용자에게 이번 활동으로 마케팅 캠페인을 시작할지 물어보세요."
-  ].join("\n");
-
-  const response = await callAnthropic(prompt, 240);
-  if (response) {
-    return response;
-  }
-
-  return `"${activityFolder}" 폴더가 새로 감지되었습니다. 첫 파일은 "${fileName}"입니다. 이번 활동으로 마케팅 캠페인을 시작할까요?`;
-};
-
 export const generateCampaignPlan = async (
   orgId: string,
   activityFolder: string,

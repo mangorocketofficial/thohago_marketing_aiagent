@@ -43,17 +43,21 @@ const buildSessionPreview = (session: { current_step?: string; state?: Record<st
 
 export const SessionRailPanel = ({ onHide }: SessionRailPanelProps) => {
   const { t } = useTranslation();
-  const { selectedSessionId, selectedSession, isActionPending, isSessionMutating } = useChatContext();
+  const { selectedSessionId, selectedSession, isActionPending, isSessionMutating, setChatInput } = useChatContext();
   const {
     recentSessions,
     recommendedSession,
     isSessionLoading,
     sessionNotice,
     workspaceContext,
+    pendingFolderUpdates,
+    isFolderUpdatesLoading,
     createSessionForCurrentWorkspace,
     selectSession,
     dismissRecommendation,
-    refreshRecentSessions
+    refreshRecentSessions,
+    refreshPendingFolderUpdates,
+    acknowledgeFolderUpdates
   } = useSessionSelector();
 
   const isUiBusy = isActionPending || isSessionMutating;
@@ -71,6 +75,27 @@ export const SessionRailPanel = ({ onHide }: SessionRailPanelProps) => {
     }
     void refreshRecentSessions();
   }, [isSessionLoading, recentSessions.length, refreshRecentSessions]);
+
+  const handleRefreshClick = async () => {
+    await Promise.all([refreshRecentSessions(), refreshPendingFolderUpdates()]);
+  };
+
+  const handleFolderBadgeClick = async (activityFolder: string) => {
+    const nextPrompt = t("chat.sessionSelector.folderPrompt", {
+      folder: activityFolder
+    });
+    setChatInput(nextPrompt);
+
+    if (!selectedSessionId) {
+      await createSessionForCurrentWorkspace();
+    }
+
+    try {
+      await acknowledgeFolderUpdates(activityFolder);
+    } catch {
+      void refreshPendingFolderUpdates();
+    }
+  };
 
   return (
     <aside className="ui-workspace-session-rail subpanel">
@@ -101,17 +126,46 @@ export const SessionRailPanel = ({ onHide }: SessionRailPanelProps) => {
           className="ui-session-rail-icon-button"
           aria-label={t("chat.sessionSelector.refreshList")}
           title={t("chat.sessionSelector.refreshList")}
-          onClick={() => void refreshRecentSessions()}
-          disabled={isUiBusy || isSessionLoading}
+          onClick={() => void handleRefreshClick()}
+          disabled={isUiBusy || isSessionLoading || isFolderUpdatesLoading}
         >
           {"↻"}
         </button>
       </div>
 
+      <div className="ui-session-rail-folder-block">
+        <p className="ui-session-rail-section-title">{t("chat.sessionSelector.newFilesTitle")}</p>
+        {isFolderUpdatesLoading && pendingFolderUpdates.length === 0 ? (
+          <p className="empty">{t("chat.sessionSelector.newFilesLoading")}</p>
+        ) : pendingFolderUpdates.length === 0 ? (
+          <p className="empty">{t("chat.sessionSelector.newFilesEmpty")}</p>
+        ) : (
+          <div className="ui-session-rail-folder-list">
+            {pendingFolderUpdates.map((entry) => (
+              <button
+                key={entry.activity_folder}
+                type="button"
+                className="ui-session-rail-folder-item"
+                onClick={() => void handleFolderBadgeClick(entry.activity_folder)}
+                disabled={isUiBusy}
+                title={t("chat.sessionSelector.folderPrompt", { folder: entry.activity_folder })}
+              >
+                <span className="ui-session-rail-folder-title">
+                  {entry.activity_folder} ({entry.pending_count})
+                </span>
+                <span className="ui-session-rail-folder-meta">
+                  img {entry.file_type_counts.image} · vid {entry.file_type_counts.video} · doc {entry.file_type_counts.document}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {recommendedSession && recommendedSession.id !== selectedSessionId ? (
         <div className="ui-session-selector-recommendation">
           <p>
-            {t("chat.sessionSelector.recommendedLabel")}:{" "}
+            {t("chat.sessionSelector.recommendedLabel")}: {" "}
             <strong>
               {recommendedSession.title?.trim() ||
                 selectedWorkspaceLabel(recommendedSession.workspace_type, recommendedSession.scope_id)}

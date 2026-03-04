@@ -1732,6 +1732,77 @@ const registerIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle("chat:list-folder-updates", async (_, payload) => {
+    const limitInput = payload?.limit;
+    const limit = parsePositiveInteger(limitInput);
+    if (limitInput !== undefined && limit === null) {
+      throw new Error("limit must be a positive integer.");
+    }
+
+    const params = new URLSearchParams();
+    if (limit !== null) {
+      params.set("limit", String(limit));
+    }
+
+    const suffix = params.toString();
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/folder-updates${suffix ? `?${suffix}` : ""}`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        folder_updates: Array.isArray(body?.folder_updates) ? body.folder_updates : []
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load folder updates.";
+      return {
+        ok: false,
+        folder_updates: [],
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:acknowledge-folder-updates", async (_, payload) => {
+    const activityFolder = typeof payload?.activityFolder === "string" ? payload.activityFolder.trim() : "";
+    if (!activityFolder) {
+      throw new Error("activityFolder is required.");
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/folder-updates/${encodeURIComponent(activityFolder)}/acknowledge`,
+        {
+          method: "POST",
+          body: JSON.stringify({})
+        }
+      );
+
+      return {
+        ok: true,
+        activity_folder:
+          typeof body?.activity_folder === "string" && body.activity_folder.trim()
+            ? body.activity_folder
+            : activityFolder,
+        updated_count:
+          typeof body?.updated_count === "number" && Number.isFinite(body.updated_count)
+            ? Math.max(0, Math.floor(body.updated_count))
+            : 0
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to acknowledge folder updates.";
+      return {
+        ok: false,
+        activity_folder: activityFolder,
+        updated_count: 0,
+        message
+      };
+    }
+  });
+
   ipcMain.handle("chat:create-session", async (_, payload) => {
     const workspaceType = typeof payload?.workspaceType === "string" ? payload.workspaceType.trim() : "";
     const scopeId =

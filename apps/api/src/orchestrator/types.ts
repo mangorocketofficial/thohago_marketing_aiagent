@@ -14,6 +14,20 @@ export type PipelineTriggerRow = {
   created_at: string;
 };
 
+export type TriggerFileTypeCounts = {
+  image: number;
+  video: number;
+  document: number;
+};
+
+export type PendingFolderUpdateSummary = {
+  activity_folder: string;
+  pending_count: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  file_type_counts: TriggerFileTypeCounts;
+};
+
 export type CampaignStatus = "draft" | "approved" | "active" | "completed" | "cancelled";
 
 export type SessionStatus = "running" | "paused" | "done" | "failed";
@@ -145,11 +159,6 @@ export type ResumeEventRequest = {
   event_type: ResumeEventType;
   payload?: Record<string, unknown>;
   idempotency_key?: string;
-};
-
-export type EnqueueTriggerResult = {
-  mode: "started" | "queued";
-  session_id: string;
 };
 
 export type ResumeSessionResult = {

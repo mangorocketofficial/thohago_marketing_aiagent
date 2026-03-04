@@ -91,6 +91,35 @@ export type PipelineTrigger = {
   created_at: string;
 };
 
+export type TriggerFileTypeCounts = {
+  image: number;
+  video: number;
+  document: number;
+};
+
+export type PendingFolderUpdate = {
+  activity_folder: string;
+  pending_count: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  file_type_counts: TriggerFileTypeCounts;
+};
+
+export type FolderContext = {
+  activity_folder: string;
+  total_files: number;
+  images: string[];
+  videos: string[];
+  documents: string[];
+  scanned_at: string;
+};
+
+export type FolderDiff = {
+  added: string[];
+  removed: string[];
+  is_first_scan: boolean;
+};
+
 export type CampaignStatus = "draft" | "approved" | "active" | "completed" | "cancelled";
 
 export type CampaignPlanSchedule = {
@@ -257,6 +286,10 @@ export type OrchestratorState = {
   activity_folder: string;
   file_name: string;
   file_type: FileType;
+  active_skill?: string | null;
+  active_skill_started_at?: string | null;
+  active_skill_version?: string | null;
+  active_skill_confidence?: number | null;
   user_message: string | null;
   campaign_id: string | null;
   campaign_workflow_item_id: string | null;

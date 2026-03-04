@@ -19,17 +19,17 @@ import {
   ensureContentWorkflowItem
 } from "../workflow/service";
 import type { WorkflowItemRow, WorkflowStatus } from "../workflow/types";
-import { generateContentDraft, generateDetectMessage, generateGeneralAssistantReply } from "./ai";
+import { generateContentDraft, generateGeneralAssistantReply } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
 import type {
   CampaignPlan,
   CreateSessionParams,
   CreateSessionResult,
-  EnqueueTriggerResult,
   ForbiddenCheckMeta,
   ListSessionsParams,
   OrchestratorSessionRow,
   OrchestratorStep,
+  PendingFolderUpdateSummary,
   PipelineTriggerRow,
   RagContextMeta,
   ResumeEventRequest,
@@ -42,6 +42,7 @@ const ACTIVE_SESSION_STATUSES: SessionStatus[] = ["running", "paused"];
 const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
 const DEFAULT_WORKSPACE_TYPE = "general";
 const DEFAULT_SCOPE_ID = "default";
+const MAX_PENDING_TRIGGER_SCAN = 1000;
 
 const lockQueueByKey = new Map<string, Promise<void>>();
 
@@ -652,21 +653,106 @@ export const getRecommendedSessionForWorkspace = async (params: {
   return (data as OrchestratorSessionRow | null) ?? null;
 };
 
-const getPendingTrigger = async (orgId: string): Promise<PipelineTriggerRow | null> => {
+export const listPendingFolderUpdatesForOrg = async (params: {
+  orgId: string;
+  limit?: number;
+}): Promise<PendingFolderUpdateSummary[]> => {
+  const safeLimit =
+    typeof params.limit === "number" && Number.isFinite(params.limit)
+      ? Math.max(1, Math.min(100, Math.floor(params.limit)))
+      : 20;
+
   const { data, error } = await supabaseAdmin
     .from("pipeline_triggers")
-    .select("*")
-    .eq("org_id", orgId)
+    .select("activity_folder,file_type,created_at")
+    .eq("org_id", params.orgId)
     .eq("status", "pending")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(MAX_PENDING_TRIGGER_SCAN);
 
   if (error) {
-    throw new HttpError(500, "db_error", `Failed to query pending trigger: ${error.message}`);
+    throw new HttpError(500, "db_error", `Failed to query pending folder updates: ${error.message}`);
   }
 
-  return (data as PipelineTriggerRow | null) ?? null;
+  const grouped = new Map<string, PendingFolderUpdateSummary>();
+  for (const row of (data as Record<string, unknown>[] | null) ?? []) {
+    const activityFolder = asString(row.activity_folder, "").trim();
+    if (!activityFolder) {
+      continue;
+    }
+    const createdAt = asString(row.created_at, new Date().toISOString());
+    const fileType = asString(row.file_type, "document");
+
+    const current =
+      grouped.get(activityFolder) ??
+      {
+        activity_folder: activityFolder,
+        pending_count: 0,
+        first_detected_at: createdAt,
+        last_detected_at: createdAt,
+        file_type_counts: {
+          image: 0,
+          video: 0,
+          document: 0
+        }
+      };
+
+    current.pending_count += 1;
+    if (createdAt < current.first_detected_at) {
+      current.first_detected_at = createdAt;
+    }
+    if (createdAt > current.last_detected_at) {
+      current.last_detected_at = createdAt;
+    }
+
+    if (fileType === "image") {
+      current.file_type_counts.image += 1;
+    } else if (fileType === "video") {
+      current.file_type_counts.video += 1;
+    } else {
+      current.file_type_counts.document += 1;
+    }
+
+    grouped.set(activityFolder, current);
+  }
+
+  return [...grouped.values()]
+    .sort((left, right) => {
+      if (left.last_detected_at === right.last_detected_at) {
+        return left.activity_folder.localeCompare(right.activity_folder);
+      }
+      return right.last_detected_at.localeCompare(left.last_detected_at);
+    })
+    .slice(0, safeLimit);
+};
+
+export const acknowledgePendingFolderUpdatesForFolder = async (params: {
+  orgId: string;
+  activityFolder: string;
+}): Promise<{ updated_count: number }> => {
+  const activityFolder = params.activityFolder.trim();
+  if (!activityFolder) {
+    throw new HttpError(400, "invalid_payload", "activity_folder is required.");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("pipeline_triggers")
+    .update({
+      status: "processing",
+      processed_at: new Date().toISOString()
+    })
+    .eq("org_id", params.orgId)
+    .eq("activity_folder", activityFolder)
+    .eq("status", "pending")
+    .select("id");
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to acknowledge folder updates: ${error.message}`);
+  }
+
+  return {
+    updated_count: Array.isArray(data) ? data.length : 0
+  };
 };
 
 const updateTrigger = async (
@@ -696,103 +782,6 @@ const updateSession = async (
   if (error) {
     throw new HttpError(500, "db_error", `Failed to update session: ${error.message}`);
   }
-};
-
-const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<string> => {
-  const state = emptyStateFromTrigger(trigger);
-  const workspaceType = DEFAULT_WORKSPACE_TYPE;
-  const scopeId = DEFAULT_SCOPE_ID;
-  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
-  const insertBasePayload = {
-    org_id: trigger.org_id,
-    trigger_id: trigger.id,
-    workspace_type: workspaceType,
-    scope_id: scopeId,
-    archived_at: null,
-    state,
-    current_step: "detect",
-    status: "running"
-  };
-
-  const { data: createdSession, error: insertError } = await supabaseAdmin
-    .from("orchestrator_sessions")
-    .insert({
-      ...insertBasePayload,
-      workspace_key: workspaceKey
-    })
-    .select("*")
-    .single();
-
-  let session: OrchestratorSessionRow | null = null;
-
-  if (insertError && isWorkspaceKeyColumnMissingError(insertError)) {
-    const { data: fallbackCreated, error: fallbackInsertError } = await supabaseAdmin
-      .from("orchestrator_sessions")
-      .insert(insertBasePayload)
-      .select("*")
-      .single();
-
-    if (fallbackInsertError) {
-      if ((fallbackInsertError as { code?: string }).code === "23505") {
-        const activeSession = await getActiveSessionByWorkspace(trigger.org_id, workspaceType, scopeId);
-        if (!activeSession) {
-          throw new HttpError(409, "session_conflict", "Active session already exists for this workspace.");
-        }
-        return activeSession.id;
-      }
-      throw new HttpError(500, "db_error", `Failed to create session: ${fallbackInsertError.message}`);
-    }
-    session = fallbackCreated as OrchestratorSessionRow;
-  }
-
-  if (!session && insertError) {
-    if ((insertError as { code?: string }).code === "23505") {
-      const activeSession = await getActiveSessionByWorkspace(trigger.org_id, workspaceType, scopeId);
-      if (!activeSession) {
-        throw new HttpError(409, "session_conflict", "Active session already exists for this workspace.");
-      }
-      return activeSession.id;
-    }
-
-    throw new HttpError(500, "db_error", `Failed to create session: ${insertError.message}`);
-  }
-
-  if (!session) {
-    session = createdSession as OrchestratorSessionRow;
-  }
-
-  try {
-    const now = new Date().toISOString();
-    await updateTrigger(trigger.id, { status: "processing", processed_at: now });
-
-    const detectMessage = await generateDetectMessage(trigger.activity_folder, trigger.file_name);
-    await insertChatMessage({
-      orgId: trigger.org_id,
-      sessionId: session.id,
-      role: "assistant",
-      content: detectMessage
-    });
-
-    await updateSession(session.id, {
-      state,
-      current_step: "await_user_input",
-      status: "paused"
-    });
-  } catch (error) {
-    const nextState: SessionState = {
-      ...state,
-      last_error: messageFromError(error)
-    };
-
-    await updateSession(session.id, {
-      state: nextState,
-      status: "failed"
-    });
-    await updateTrigger(trigger.id, { status: "failed" });
-    throw error;
-  }
-
-  return session.id;
 };
 
 const eventAlreadyProcessed = (state: SessionState, idempotencyKey: string | null): boolean => {
@@ -1287,39 +1276,6 @@ const processResumeEvent = async (
   }
 };
 
-const tryStartNextPendingForOrg = async (orgId: string): Promise<void> => {
-  await withLock(`org:${orgId}`, async () => {
-    const active = await getActiveSessionByWorkspace(orgId, DEFAULT_WORKSPACE_TYPE, DEFAULT_SCOPE_ID);
-    if (active) {
-      return;
-    }
-
-    const pendingTrigger = await getPendingTrigger(orgId);
-    if (!pendingTrigger) {
-      return;
-    }
-
-    await startSessionForTrigger(pendingTrigger);
-  });
-};
-
-export const enqueueTrigger = async (trigger: PipelineTriggerRow): Promise<EnqueueTriggerResult> =>
-  withLock(`org:${trigger.org_id}`, async () => {
-    const active = await getActiveSessionByWorkspace(trigger.org_id, DEFAULT_WORKSPACE_TYPE, DEFAULT_SCOPE_ID);
-    if (active) {
-      return {
-        mode: "queued",
-        session_id: active.id
-      };
-    }
-
-    const sessionId = await startSessionForTrigger(trigger);
-    return {
-      mode: "started",
-      session_id: sessionId
-    };
-  });
-
 export const resumeSession = async (
   sessionId: string,
   event: ResumeEventRequest
@@ -1328,8 +1284,6 @@ export const resumeSession = async (
   if (!seedSession) {
     throw new HttpError(404, "not_found", "Session not found.");
   }
-
-  let shouldKickoffNext = false;
 
   const result = await withLock(`org:${seedSession.org_id}`, async () => {
     const currentSession = await getSessionById(sessionId);
@@ -1385,8 +1339,6 @@ export const resumeSession = async (
         status: processed.status
       });
 
-      shouldKickoffNext = processed.completed;
-
       return {
         session_id: currentSession.id,
         current_step: processed.step,
@@ -1411,15 +1363,9 @@ export const resumeSession = async (
       if (currentState.trigger_id.trim()) {
         await updateTrigger(currentState.trigger_id, { status: "failed" });
       }
-
-      shouldKickoffNext = true;
       throw error;
     }
   });
-
-  if (shouldKickoffNext) {
-    void tryStartNextPendingForOrg(seedSession.org_id);
-  }
 
   return result;
 };

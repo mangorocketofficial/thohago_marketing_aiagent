@@ -1214,6 +1214,47 @@ th {
   gap: 8px;
 }
 
+.ui-session-rail-folder-block {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ui-session-rail-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ui-session-rail-folder-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ui-session-rail-folder-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #cfdcf5;
+  background: #eef4ff;
+  border-radius: 9px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+}
+
+.ui-session-rail-folder-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d355f;
+}
+
+.ui-session-rail-folder-meta {
+  font-size: 11px;
+  color: #4f678f;
+}
+
 .ui-session-rail-item {
   width: 100%;
   text-align: left;

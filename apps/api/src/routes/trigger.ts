@@ -5,7 +5,10 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import { supabaseAdmin } from "../lib/supabase-admin";
-import { enqueueTrigger, getActiveSessionForOrg } from "../orchestrator/service";
+import {
+  acknowledgePendingFolderUpdatesForFolder,
+  listPendingFolderUpdatesForOrg
+} from "../orchestrator/service";
 import type { PipelineTriggerRow, TriggerFileType } from "../orchestrator/types";
 
 const FILE_TYPES = new Set<TriggerFileType>(["image", "video", "document"]);
@@ -16,6 +19,23 @@ const parseFileType = (value: unknown): TriggerFileType => {
     throw new HttpError(400, "invalid_payload", "file_type must be image, video, or document.");
   }
   return fileType;
+};
+
+const parseOptionalPositiveInt = (value: unknown, fallback: number): number => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+    throw new HttpError(400, "invalid_payload", "limit must be a positive integer.");
+  }
+  return Math.max(1, Math.min(100, parsed));
 };
 
 const handleInsertError = async (
@@ -98,27 +118,95 @@ triggerRouter.post("/trigger", async (req, res) => {
           duplicate: false
         };
 
+    const folderUpdates = await listPendingFolderUpdatesForOrg({
+      orgId: trigger.org_id,
+      limit: 20
+    });
+
     if (trigger.status !== "pending") {
-      const activeSession = await getActiveSessionForOrg(trigger.org_id);
       res.status(200).json({
         ok: true,
         trigger_id: trigger.id,
-        session_id: activeSession?.id ?? null,
-        queued: !!activeSession,
+        session_id: null,
+        queued: false,
         duplicate: true,
-        skipped: true
+        skipped: true,
+        folder_updates: folderUpdates
       });
       return;
     }
 
-    const enqueueResult = await enqueueTrigger(trigger);
-
     res.status(duplicate ? 200 : 201).json({
       ok: true,
       trigger_id: trigger.id,
-      session_id: enqueueResult.session_id,
-      queued: enqueueResult.mode === "queued",
-      duplicate
+      session_id: null,
+      queued: false,
+      duplicate,
+      notification_type: "folder_updated",
+      folder_updates: folderUpdates
+    });
+  } catch (error) {
+    const httpError = toHttpError(error);
+    res.status(httpError.status).json({
+      ok: false,
+      error: httpError.code,
+      message: httpError.message
+    });
+  }
+});
+
+triggerRouter.get("/orgs/:orgId/folder-updates", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const limit = parseOptionalPositiveInt(req.query.limit, 20);
+    const folderUpdates = await listPendingFolderUpdatesForOrg({
+      orgId,
+      limit
+    });
+
+    res.json({
+      ok: true,
+      folder_updates: folderUpdates
+    });
+  } catch (error) {
+    const httpError = toHttpError(error);
+    res.status(httpError.status).json({
+      ok: false,
+      error: httpError.code,
+      message: httpError.message
+    });
+  }
+});
+
+triggerRouter.post("/orgs/:orgId/folder-updates/:activityFolder/acknowledge", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const activityFolder = parseRequiredString(req.params.activityFolder, "activityFolder");
+    const acknowledged = await acknowledgePendingFolderUpdatesForFolder({
+      orgId,
+      activityFolder
+    });
+
+    res.json({
+      ok: true,
+      activity_folder: activityFolder,
+      ...acknowledged
     });
   } catch (error) {
     const httpError = toHttpError(error);

@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     getConfig: () => ipcRenderer.invoke("chat:get-config"),
     getActiveSession: () => ipcRenderer.invoke("chat:get-active-session"),
     listSessions: (payload) => ipcRenderer.invoke("chat:list-sessions", payload),
+    listFolderUpdates: (payload) => ipcRenderer.invoke("chat:list-folder-updates", payload),
+    acknowledgeFolderUpdates: (payload) => ipcRenderer.invoke("chat:acknowledge-folder-updates", payload),
     createSession: (payload) => ipcRenderer.invoke("chat:create-session", payload),
     getRecommendedSession: (payload) => ipcRenderer.invoke("chat:get-recommended-session", payload),
     sendMessage: (payload) => ipcRenderer.invoke("chat:send-message", payload),

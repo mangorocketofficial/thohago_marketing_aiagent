@@ -105,6 +105,31 @@ type ChatSessionListResult = {
   message?: string;
 };
 
+type ChatPendingFolderUpdate = {
+  activity_folder: string;
+  pending_count: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  file_type_counts: {
+    image: number;
+    video: number;
+    document: number;
+  };
+};
+
+type ChatFolderUpdateListResult = {
+  ok: boolean;
+  folder_updates: ChatPendingFolderUpdate[];
+  message?: string;
+};
+
+type ChatAcknowledgeFolderUpdatesResult = {
+  ok: boolean;
+  activity_folder: string;
+  updated_count: number;
+  message?: string;
+};
+
 type ChatCreateSessionPayload = {
   workspaceType: string;
   scopeId?: string | null;
@@ -288,6 +313,10 @@ declare global {
         getConfig: () => Promise<ChatConfig>;
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
+        listFolderUpdates: (payload?: { limit?: number }) => Promise<ChatFolderUpdateListResult>;
+        acknowledgeFolderUpdates: (payload: {
+          activityFolder: string;
+        }) => Promise<ChatAcknowledgeFolderUpdatesResult>;
         createSession: (payload: ChatCreateSessionPayload) => Promise<ChatCreateSessionResult>;
         getRecommendedSession: (payload: ChatRecommendedSessionPayload) => Promise<ChatRecommendedSessionResult>;
         sendMessage: (payload: {

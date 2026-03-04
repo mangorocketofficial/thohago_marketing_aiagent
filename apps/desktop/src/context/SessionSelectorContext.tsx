@@ -14,6 +14,7 @@ import { useNavigation } from "./NavigationContext";
 
 const RECENT_LIMIT = 5;
 const REVIEW_ALL_LIMIT = 20;
+const FOLDER_UPDATE_LIMIT = 20;
 const RECOMMENDATION_DEBOUNCE_MS = 400;
 const SELECTED_SESSION_STORAGE_KEY = "ddohago:selectedSessionIdByOrg";
 
@@ -33,6 +34,18 @@ type WorkspaceContext = {
   label: string;
 };
 
+type PendingFolderUpdate = {
+  activity_folder: string;
+  pending_count: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  file_type_counts: {
+    image: number;
+    video: number;
+    document: number;
+  };
+};
+
 type SessionSelectorContextValue = {
   selectedSessionId: string | null;
   selectedSession: OrchestratorSession | null;
@@ -45,7 +58,11 @@ type SessionSelectorContextValue = {
   reviewAllSessions: OrchestratorSession[];
   reviewAllNextCursor: string | null;
   isReviewAllLoading: boolean;
+  pendingFolderUpdates: PendingFolderUpdate[];
+  isFolderUpdatesLoading: boolean;
   refreshRecentSessions: () => Promise<void>;
+  refreshPendingFolderUpdates: () => Promise<void>;
+  acknowledgeFolderUpdates: (activityFolder: string) => Promise<void>;
   refreshRecommendedSession: () => Promise<void>;
   createSessionForCurrentWorkspace: () => Promise<void>;
   selectSession: (session: OrchestratorSession) => void;
@@ -192,6 +209,8 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
   const [reviewAllSessions, setReviewAllSessions] = useState<OrchestratorSession[]>([]);
   const [reviewAllNextCursor, setReviewAllNextCursor] = useState<string | null>(null);
   const [isReviewAllLoading, setIsReviewAllLoading] = useState(false);
+  const [pendingFolderUpdates, setPendingFolderUpdates] = useState<PendingFolderUpdate[]>([]);
+  const [isFolderUpdatesLoading, setIsFolderUpdatesLoading] = useState(false);
   const [recommendationKey, setRecommendationKey] = useState("");
 
   const latestRecentRequestIdRef = useRef(0);
@@ -199,6 +218,7 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
   const latestCreateRequestIdRef = useRef(0);
   const latestRecommendRequestIdRef = useRef(0);
   const latestReviewRequestIdRef = useRef(0);
+  const latestFolderUpdateRequestIdRef = useRef(0);
   const recommendationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressedRecommendationKeyRef = useRef("");
   const activePageRef = useRef<PageId>(activePage);
@@ -287,6 +307,63 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
     }
   }, [fetchRecentSessions]);
 
+  const fetchPendingFolderUpdates = useCallback(async (): Promise<PendingFolderUpdate[]> => {
+    const response = await runtime.chat.listFolderUpdates({
+      limit: FOLDER_UPDATE_LIMIT
+    });
+    if (!response.ok) {
+      throw new Error(response.message ?? "Failed to load folder updates.");
+    }
+    return response.folder_updates ?? [];
+  }, [runtime]);
+
+  const refreshPendingFolderUpdates = useCallback(async () => {
+    if (!chatConfig?.enabled || !orgId) {
+      setPendingFolderUpdates([]);
+      setIsFolderUpdatesLoading(false);
+      return;
+    }
+
+    const requestId = latestFolderUpdateRequestIdRef.current + 1;
+    latestFolderUpdateRequestIdRef.current = requestId;
+    setIsFolderUpdatesLoading(true);
+    try {
+      const updates = await fetchPendingFolderUpdates();
+      if (requestId !== latestFolderUpdateRequestIdRef.current) {
+        return;
+      }
+      setPendingFolderUpdates(updates);
+    } catch (error) {
+      if (requestId !== latestFolderUpdateRequestIdRef.current) {
+        return;
+      }
+      setSessionNotice(toRuntimeMessage(error, "Failed to refresh folder updates."));
+    } finally {
+      if (requestId === latestFolderUpdateRequestIdRef.current) {
+        setIsFolderUpdatesLoading(false);
+      }
+    }
+  }, [chatConfig?.enabled, fetchPendingFolderUpdates, orgId]);
+
+  const acknowledgeFolderUpdates = useCallback(
+    async (activityFolder: string) => {
+      const normalizedFolder = activityFolder.trim();
+      if (!normalizedFolder) {
+        return;
+      }
+
+      const response = await runtime.chat.acknowledgeFolderUpdates({
+        activityFolder: normalizedFolder
+      });
+      if (!response.ok) {
+        throw new Error(response.message ?? "Failed to acknowledge folder updates.");
+      }
+
+      await refreshPendingFolderUpdates();
+    },
+    [refreshPendingFolderUpdates, runtime]
+  );
+
   const fetchRecommendedSession = useCallback(
     async (workspace: WorkspaceContext): Promise<OrchestratorSession | null> => {
       const response = await runtime.chat.getRecommendedSession({
@@ -349,6 +426,8 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       setRecommendedSession(null);
       setReviewAllSessions([]);
       setReviewAllNextCursor(null);
+      setPendingFolderUpdates([]);
+      setIsFolderUpdatesLoading(false);
       setSessionNotice("");
       return;
     }
@@ -433,6 +512,29 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
   useEffect(() => {
     void bootstrapSelection();
   }, [bootstrapSelection]);
+
+  useEffect(() => {
+    if (!chatConfig?.enabled || !orgId) {
+      setPendingFolderUpdates([]);
+      setIsFolderUpdatesLoading(false);
+      return;
+    }
+    void refreshPendingFolderUpdates();
+  }, [chatConfig?.enabled, orgId, refreshPendingFolderUpdates]);
+
+  useEffect(() => {
+    const offIndexed = runtime.watcher.onFileIndexed(() => {
+      void refreshPendingFolderUpdates();
+    });
+    const offDeleted = runtime.watcher.onFileDeleted(() => {
+      void refreshPendingFolderUpdates();
+    });
+
+    return () => {
+      offIndexed();
+      offDeleted();
+    };
+  }, [refreshPendingFolderUpdates, runtime]);
 
   useEffect(() => {
     if (!selectedSessionId || !activeSession?.id || activeSession.id !== selectedSessionId) {
@@ -650,7 +752,11 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       reviewAllSessions,
       reviewAllNextCursor,
       isReviewAllLoading,
+      pendingFolderUpdates,
+      isFolderUpdatesLoading,
       refreshRecentSessions,
+      refreshPendingFolderUpdates,
+      acknowledgeFolderUpdates,
       refreshRecommendedSession,
       createSessionForCurrentWorkspace,
       selectSession,
@@ -665,13 +771,17 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       createSessionForCurrentWorkspace,
       dismissRecommendation,
       invalidateSelectedSession,
+      isFolderUpdatesLoading,
       isReviewAllLoading,
       isSessionLoading,
       isSessionMutating,
+      acknowledgeFolderUpdates,
       loadMoreReviewAllSessions,
       loadReviewAllSessions,
+      pendingFolderUpdates,
       recentSessions,
       recommendedSession,
+      refreshPendingFolderUpdates,
       refreshRecentSessions,
       refreshRecommendedSession,
       reviewAllNextCursor,
