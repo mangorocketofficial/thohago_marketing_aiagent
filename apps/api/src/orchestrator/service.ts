@@ -9,12 +9,11 @@ import {
   updateLatestWorkflowProjectionStatus
 } from "./chat-projection";
 import { runContentApprovalSideEffects } from "./side-effects";
-import {
-  applyCampaignApprovedStep,
-  applyCampaignRejectStep,
-  applyUserMessageStep
-} from "./steps/campaign";
 import { applyContentApprovedStep, applyContentRejectStep } from "./steps/content";
+import type { CampaignStepDeps } from "./steps/campaign";
+import type { ContentStepDeps } from "./steps/content";
+import { routeSkill } from "./skills/router";
+import type { SkillDeps, SkillOutcome, SkillRouteDecision } from "./skills/types";
 import {
   ensureCampaignWorkflowItem,
   ensureContentWorkflowItem
@@ -245,11 +244,28 @@ const parseForbiddenCheckMeta = (value: unknown): ForbiddenCheckMeta | null => {
   };
 };
 
+const parseSkillConfidence = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.min(1, value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseFloat(value.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(1, parsed));
+    }
+  }
+  return null;
+};
+
 const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   trigger_id: trigger.id,
   activity_folder: trigger.activity_folder,
   file_name: trigger.file_name,
   file_type: trigger.file_type,
+  active_skill: null,
+  active_skill_started_at: null,
+  active_skill_version: null,
+  active_skill_confidence: null,
   user_message: null,
   campaign_id: null,
   campaign_workflow_item_id: null,
@@ -282,6 +298,17 @@ const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): SessionSt
         : asString(row.file_type, trigger?.file_type ?? "document") === "image"
           ? "image"
           : "document",
+    active_skill:
+      typeof row.active_skill === "string" && row.active_skill.trim() ? row.active_skill.trim() : null,
+    active_skill_started_at:
+      typeof row.active_skill_started_at === "string" && row.active_skill_started_at.trim()
+        ? row.active_skill_started_at.trim()
+        : null,
+    active_skill_version:
+      typeof row.active_skill_version === "string" && row.active_skill_version.trim()
+        ? row.active_skill_version.trim()
+        : null,
+    active_skill_confidence: row.active_skill_confidence === null ? null : parseSkillConfidence(row.active_skill_confidence),
     user_message: row.user_message === null ? null : asString(row.user_message, ""),
     campaign_id: row.campaign_id === null ? null : asString(row.campaign_id, ""),
     campaign_workflow_item_id:
@@ -351,6 +378,10 @@ const buildManualSessionState = (workspaceType: string, scopeId: string | null, 
     activity_folder: activityFolder,
     file_name: "",
     file_type: "document",
+    active_skill: null,
+    active_skill_started_at: null,
+    active_skill_version: null,
+    active_skill_confidence: null,
     user_message: null,
     campaign_id: null,
     campaign_workflow_item_id: null,
@@ -1017,11 +1048,54 @@ const ensureContentWorkflowItemForState = async (params: {
   return workflowItem;
 };
 
-const acceptUserMessageDuringApprovalStep = async (params: {
+type ProcessResumeEventResult = {
+  state: SessionState;
+  step: OrchestratorStep;
+  status: SessionStatus;
+  completed: boolean;
+};
+
+const buildCampaignStepDeps = (): CampaignStepDeps => ({
+  asString,
+  resolveCampaignId,
+  resolveExpectedVersion,
+  normalizeChannel,
+  buildWorkflowCreateIdempotencyKey,
+  buildWorkflowActionIdempotencyKey,
+  ensureCampaignWorkflowItemForState,
+  ensureContentWorkflowItemForState,
+  emitCampaignActionCardProjection,
+  emitContentActionCardProjection,
+  updateLatestWorkflowProjectionStatus,
+  mirrorCampaignStatusFromWorkflow,
+  generateContentDraftWithForbiddenCheck,
+  insertChatMessage,
+  updateTrigger
+});
+
+const buildContentStepDeps = (): ContentStepDeps => ({
+  asString,
+  asRecord,
+  normalizeChannel,
+  resolveContentId,
+  resolveExpectedVersion,
+  buildWorkflowActionIdempotencyKey,
+  ensureContentWorkflowItemForState,
+  updateLatestWorkflowProjectionStatus,
+  mirrorContentStatusFromWorkflow,
+  emitContentActionCardProjection,
+  generateContentDraftWithForbiddenCheck,
+  insertChatMessage,
+  updateTrigger,
+  runContentApprovalSideEffects
+});
+
+const handleGeneralUserMessage = async (params: {
   session: OrchestratorSessionRow;
   state: SessionState;
   event: ResumeEventRequest;
-}): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
+  lastError?: string | null;
+}): Promise<ProcessResumeEventResult> => {
   const content = asString(params.event.payload?.content, "").trim();
   if (!content) {
     throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
@@ -1052,11 +1126,65 @@ const acceptUserMessageDuringApprovalStep = async (params: {
   return {
     state: {
       ...params.state,
-      last_error: null
+      last_error: params.lastError ?? null
     },
     step: normalizeStep(params.session.current_step),
     status: "paused",
     completed: false
+  };
+};
+
+const resolveTransitionFromSkillOutcome = (params: {
+  session: OrchestratorSessionRow;
+  outcome: SkillOutcome;
+}): { step: OrchestratorStep; status: SessionStatus } => {
+  switch (params.outcome) {
+    case "await_campaign_approval":
+      return { step: "await_campaign_approval", status: "paused" };
+    case "await_content_approval":
+      return { step: "await_content_approval", status: "paused" };
+    case "session_done":
+      return { step: "done", status: "done" };
+    case "session_failed":
+      return { step: normalizeStep(params.session.current_step), status: "failed" };
+    default:
+      return { step: normalizeStep(params.session.current_step), status: "paused" };
+  }
+};
+
+const applySkillStatePatch = (params: {
+  state: SessionState;
+  route: SkillRouteDecision;
+  outcome: SkillOutcome;
+  statePatch?: Partial<SessionState>;
+}): SessionState => {
+  const merged: SessionState = {
+    ...params.state,
+    ...(params.statePatch ?? {})
+  };
+
+  if (params.statePatch?.last_error === undefined && params.outcome !== "session_failed") {
+    merged.last_error = null;
+  }
+
+  if (params.outcome === "session_done" || params.outcome === "session_failed") {
+    return {
+      ...merged,
+      active_skill: null,
+      active_skill_started_at: null,
+      active_skill_version: null,
+      active_skill_confidence: null
+    };
+  }
+
+  const now = new Date().toISOString();
+  const isSameSkill = params.state.active_skill === params.route.skill.id;
+  return {
+    ...merged,
+    active_skill: params.route.skill.id,
+    active_skill_started_at: isSameSkill ? params.state.active_skill_started_at ?? now : now,
+    active_skill_version: params.route.skill.version,
+    active_skill_confidence: params.route.confidence ?? params.state.active_skill_confidence
   };
 };
 
@@ -1065,70 +1193,95 @@ const processResumeEvent = async (
   state: SessionState,
   event: ResumeEventRequest,
   idempotencyKey: string | null
-): Promise<{ state: SessionState; step: OrchestratorStep; status: SessionStatus; completed: boolean }> => {
-  const campaignStepDeps = {
+): Promise<ProcessResumeEventResult> => {
+  const campaignStepDeps = buildCampaignStepDeps();
+  const contentStepDeps = buildContentStepDeps();
+  const skillDeps: SkillDeps = {
+    campaign: campaignStepDeps,
+    content: contentStepDeps,
     asString,
-    resolveCampaignId,
-    resolveExpectedVersion,
-    normalizeChannel,
-    buildWorkflowCreateIdempotencyKey,
-    buildWorkflowActionIdempotencyKey,
-    ensureCampaignWorkflowItemForState,
-    ensureContentWorkflowItemForState,
-    emitCampaignActionCardProjection,
-    emitContentActionCardProjection,
-    updateLatestWorkflowProjectionStatus,
-    mirrorCampaignStatusFromWorkflow,
-    generateContentDraftWithForbiddenCheck,
-    insertChatMessage,
-    updateTrigger
+    normalizeStep,
+    generateGeneralAssistantReply
   };
 
-  const contentStepDeps = {
-    asString,
-    asRecord,
-    normalizeChannel,
-    resolveContentId,
-    resolveExpectedVersion,
-    buildWorkflowActionIdempotencyKey,
-    ensureContentWorkflowItemForState,
-    updateLatestWorkflowProjectionStatus,
-    mirrorContentStatusFromWorkflow,
-    emitContentActionCardProjection,
-    generateContentDraftWithForbiddenCheck,
-    insertChatMessage,
-    updateTrigger,
-    runContentApprovalSideEffects
-  };
+  const routedSkill = routeSkill({
+    event,
+    session,
+    state
+  });
 
-  switch (event.event_type) {
-    case "user_message": {
-      if (session.current_step === "await_campaign_approval" || session.current_step === "await_content_approval") {
-        return acceptUserMessageDuringApprovalStep({
+  if (routedSkill) {
+    try {
+      const skillResult = await routedSkill.skill.execute({
+        session,
+        state,
+        event,
+        idempotencyKey,
+        routeReason: routedSkill.reason,
+        routeConfidence: routedSkill.confidence,
+        deps: skillDeps
+      });
+
+      if (!skillResult.handled) {
+        console.warn(
+          `[SKILL_ROUTER] handled=false skill=${routedSkill.skill.id} event=${event.event_type} session=${session.id}`
+        );
+      } else {
+        const transition = resolveTransitionFromSkillOutcome({
+          session,
+          outcome: skillResult.outcome
+        });
+        const nextState = applySkillStatePatch({
+          state,
+          route: routedSkill,
+          outcome: skillResult.outcome,
+          statePatch: skillResult.statePatch
+        });
+
+        return {
+          state: nextState,
+          step: transition.step,
+          status: transition.status,
+          completed: skillResult.completion === "kickoff_next"
+        };
+      }
+    } catch (error) {
+      const errorMessage = messageFromError(error);
+      console.error(
+        `[SKILL_ROUTER] execute_failed skill=${routedSkill.skill.id} event=${event.event_type} session=${session.id} reason=${routedSkill.reason}: ${errorMessage}`
+      );
+
+      if (event.event_type === "user_message") {
+        return handleGeneralUserMessage({
           session,
           state,
-          event
+          event,
+          lastError: `skill_execute_failed:${routedSkill.skill.id}:${errorMessage}`
         });
       }
-      const next = await applyUserMessageStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
-      return { ...next, completed: false };
+
+      throw error;
     }
-    case "campaign_approved": {
-      const next = await applyCampaignApprovedStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
-      return { ...next, completed: false };
-    }
+  }
+
+  switch (event.event_type) {
     case "content_approved": {
       const next = await applyContentApprovedStep(session, state, event.payload, idempotencyKey, contentStepDeps);
-      return next;
-    }
-    case "campaign_rejected": {
-      const next = await applyCampaignRejectStep(session, state, event.payload, idempotencyKey, campaignStepDeps);
       return next;
     }
     case "content_rejected": {
       const next = await applyContentRejectStep(session, state, event.payload, idempotencyKey, contentStepDeps);
       return next;
     }
+    case "user_message":
+      return handleGeneralUserMessage({
+        session,
+        state,
+        event
+      });
+    case "campaign_approved":
+    case "campaign_rejected":
+      throw new HttpError(409, "skill_not_routed", `No skill route resolved for ${event.event_type}.`);
     default:
       throw new HttpError(400, "invalid_event", `Unsupported event type: ${event.event_type}`);
   }

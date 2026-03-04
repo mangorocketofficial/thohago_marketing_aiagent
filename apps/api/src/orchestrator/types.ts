@@ -70,6 +70,10 @@ export type SessionState = {
   activity_folder: string;
   file_name: string;
   file_type: TriggerFileType;
+  active_skill: string | null;
+  active_skill_started_at: string | null;
+  active_skill_version: string | null;
+  active_skill_confidence: number | null;
   user_message: string | null;
   campaign_id: string | null;
   campaign_workflow_item_id: string | null;

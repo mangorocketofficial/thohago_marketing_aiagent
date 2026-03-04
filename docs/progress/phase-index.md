@@ -46,3 +46,4 @@
 | Session-S4 | Agent Chat Session Hub Consolidation | Done | 2026-03-04 | [phase-session-s4-completion.md](./phase-session-s4-completion.md) |
 | Session-S5a | Workspace Shell + Queue/Chat Policy Separation | Done | 2026-03-04 | [phase-session-s5a-completion.md](./phase-session-s5a-completion.md) |
 | Session-S5b | Work Item Session Linking + Backend Projection Migration | Done | 2026-03-04 | [phase-session-s5b-completion.md](./phase-session-s5b-completion.md) |
+| 5-0 | Skill Router Foundation | Done | 2026-03-04 | [phase-5-0-completion.md](./phase-5-0-completion.md) |
