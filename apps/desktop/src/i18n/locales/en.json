@@ -78,7 +78,8 @@
     "common": {
       "refresh": "Refresh",
       "todo": "TODO: later phase",
-      "notAvailable": "-"
+      "notAvailable": "-",
+      "compatibilityOnly": "compatibility-only"
     },
     "sidebar": {
       "productEyebrow": "Ddohago",
@@ -211,6 +212,13 @@
       "error": {
         "loadFailed": "Failed to load session data."
       }
+    },
+    "legacy": {
+      "openLegacy": "Legacy messages",
+      "currentTimeline": "Current timeline",
+      "readOnlyNotice": "Legacy messages are read-only and excluded from normal session timelines.",
+      "loading": "Loading legacy messages...",
+      "empty": "No legacy messages found."
     }
   }
 }

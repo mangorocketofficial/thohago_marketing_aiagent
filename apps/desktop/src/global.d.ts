@@ -76,6 +76,7 @@ type ChatActionError = {
 type ChatConfig = {
   orgId: string;
   apiBaseUrl: string;
+  timelineScope: "session" | "org";
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseAccessToken: string;

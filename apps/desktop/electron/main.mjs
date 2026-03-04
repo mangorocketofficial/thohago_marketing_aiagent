@@ -39,6 +39,8 @@ const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 const configuredDesktopToken = (process.env.DESKTOP_SUPABASE_ACCESS_TOKEN ?? "").trim();
 const fallbackRlsToken = (process.env.RLS_TEST_USER_TOKEN ?? "").trim();
+const configuredTimelineScopeRaw = (process.env.DESKTOP_CHAT_TIMELINE_SCOPE ?? "session").trim().toLowerCase();
+const configuredTimelineScope = configuredTimelineScopeRaw === "org" ? "org" : "session";
 const oauthCallbackPort = Number.parseInt((process.env.DESKTOP_OAUTH_CALLBACK_PORT ?? "48721").trim(), 10);
 const oauthCallbackHost = (process.env.DESKTOP_OAUTH_CALLBACK_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
 const oauthCallbackTimeoutMs = Number.parseInt((process.env.DESKTOP_OAUTH_TIMEOUT_MS ?? "90000").trim(), 10);
@@ -990,6 +992,7 @@ const getChatRuntimeConfig = () => ({
   })(),
   orgId: runtimeState.orgId,
   apiBaseUrl: orchestratorApiBase,
+  timelineScope: configuredTimelineScope,
   supabaseUrl,
   supabaseAnonKey,
   enabled: !!(orchestratorApiBase && supabaseUrl && supabaseAnonKey),

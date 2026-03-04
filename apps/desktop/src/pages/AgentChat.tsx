@@ -1,7 +1,6 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   isActionCardMessage,
-  type ChatActionCardDispatchInput,
   type WorkflowActionCardMetadata
 } from "@repo/types";
 import { useTranslation } from "react-i18next";
@@ -73,6 +72,10 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
   const { t } = useTranslation();
   const {
     messages,
+    legacyMessages,
+    isLegacyMessagesLoading,
+    legacyMessagesNotice,
+    loadLegacyMessages,
     chatInput,
     setChatInput,
     chatNotice,
@@ -84,6 +87,8 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
     sendMessage,
     dispatchCardAction
   } = useChatContext();
+  const [isLegacyView, setIsLegacyView] = useState(false);
+
   const isInteractionBlocked = isActionPending || isSessionMutating;
 
   const { activePage, agentChatHandoff, clearAgentChatHandoff } = useNavigation();
@@ -149,6 +154,13 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
   );
 
   useEffect(() => {
+    if (!isLegacyView) {
+      return;
+    }
+    void loadLegacyMessages();
+  }, [isLegacyView, loadLegacyMessages]);
+
+  useEffect(() => {
     if (activePage !== "agent-chat" || !agentChatHandoff) {
       return;
     }
@@ -203,11 +215,11 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
           {chatConfigMessage ? <p className="notice">{chatConfigMessage}</p> : null}
           <div className="chat-session-summary">
             <p>
-              <strong>{t("chat.sessionSelector.currentSession")}</strong>:{" "}
+              <strong>{t("chat.sessionSelector.currentSession")}</strong>: {" "}
               {selectedSession ? (selectedSession.title?.trim() || selectedWorkspaceLabel(selectedSession.workspace_type, selectedSession.scope_id)) : "-"}
             </p>
             <p>
-              {t("chat.sessionSelector.workspaceContext")}:{" "}
+              {t("chat.sessionSelector.workspaceContext")}: {" "}
               {selectedSession ? selectedWorkspaceLabel(selectedSession.workspace_type, selectedSession.scope_id) : "general:default"}
             </p>
             <p>
@@ -215,8 +227,41 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
             </p>
           </div>
 
+          <div className="button-row chat-legacy-toggle-row">
+            <button className={!isLegacyView ? "primary" : ""} onClick={() => setIsLegacyView(false)}>
+              {t("chat.legacy.currentTimeline")}
+            </button>
+            <button
+              className={isLegacyView ? "primary" : ""}
+              onClick={() => {
+                setIsLegacyView(true);
+                void loadLegacyMessages();
+              }}
+            >
+              {t("chat.legacy.openLegacy")}
+            </button>
+          </div>
+
+          {isLegacyView ? <p className="notice">{t("chat.legacy.readOnlyNotice")}</p> : null}
+
           <div className="chat-list">
-            {messages.length === 0 ? (
+            {isLegacyView ? (
+              isLegacyMessagesLoading ? (
+                <p className="empty">{t("chat.legacy.loading")}</p>
+              ) : legacyMessages.length === 0 ? (
+                <p className="empty">{t("chat.legacy.empty")}</p>
+              ) : (
+                legacyMessages.map((message) => (
+                  <div key={message.id} className={`chat-item chat-${message.role}`}>
+                    <div className="chat-head">
+                      <strong>{message.role}</strong>
+                      <span>{formatDateTime(message.created_at)}</span>
+                    </div>
+                    <p>{message.content || "-"}</p>
+                  </div>
+                ))
+              )
+            ) : messages.length === 0 ? (
               <p className="empty">No chat messages yet.</p>
             ) : (
               messages.map((message) => {
@@ -389,22 +434,24 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
             )}
           </div>
 
-          {!selectedSessionId ? (
+          {!selectedSessionId && !isLegacyView ? (
             <p className="empty">
               No selected session yet. Choose a session from mini chat selector or create a new one.
             </p>
           ) : null}
+
+          {legacyMessagesNotice ? <p className="notice">{legacyMessagesNotice}</p> : null}
 
           <div className="chat-input-row">
             <input
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
               placeholder="Type a reply for the assistant..."
-              disabled={isInteractionBlocked || !selectedSessionId}
+              disabled={isInteractionBlocked || !selectedSessionId || isLegacyView}
             />
             <button
               className="primary"
-              disabled={isInteractionBlocked || !selectedSessionId || !chatInput.trim()}
+              disabled={isInteractionBlocked || !selectedSessionId || !chatInput.trim() || isLegacyView}
               onClick={() =>
                 void sendMessage({
                   uiContext: {

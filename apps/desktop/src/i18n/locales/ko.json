@@ -78,7 +78,8 @@
     "common": {
       "refresh": "새로고침",
       "todo": "TODO: 다음 단계에서 구현",
-      "notAvailable": "-"
+      "notAvailable": "-",
+      "compatibilityOnly": "호환성 전용"
     },
     "sidebar": {
       "productEyebrow": "Ddohago",
@@ -211,6 +212,13 @@
       "error": {
         "loadFailed": "세션 데이터를 불러오지 못했습니다."
       }
+    },
+    "legacy": {
+      "openLegacy": "이전 대화 보기",
+      "currentTimeline": "현재 타임라인",
+      "readOnlyNotice": "이전 대화는 읽기 전용이며 일반 세션 타임라인에는 포함되지 않습니다.",
+      "loading": "이전 대화를 불러오는 중...",
+      "empty": "이전 대화가 없습니다."
     }
   }
 }

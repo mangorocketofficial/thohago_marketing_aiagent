@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   useCallback,
   useContext,
@@ -8,7 +8,7 @@
   useState,
   type PropsWithChildren
 } from "react";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type {
   Campaign,
   ChatActionCardDispatchInput,
@@ -23,6 +23,7 @@ import { useSessionSelector } from "./SessionSelectorContext";
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 
 type ChatConfig = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["getConfig"]>>;
+type ChatTimelineScope = "session" | "org";
 
 type WorkflowItemLinkRow = {
   id: string;
@@ -62,6 +63,9 @@ type ChatProviderProps = PropsWithChildren<{
 
 type ChatContextValue = {
   messages: ChatMessage[];
+  legacyMessages: ChatMessage[];
+  isLegacyMessagesLoading: boolean;
+  legacyMessagesNotice: string;
   draftCampaigns: Campaign[];
   pendingContents: Content[];
   campaignWorkflowHints: Record<string, WorkflowLinkHint>;
@@ -76,6 +80,7 @@ type ChatContextValue = {
   selectedSession: OrchestratorSession | null;
   isActionPending: boolean;
   isSessionMutating: boolean;
+  loadLegacyMessages: () => Promise<void>;
   sendMessage: (input?: SendMessageInput) => Promise<void>;
   dispatchCardAction: (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => Promise<void>;
 };
@@ -146,6 +151,8 @@ const upsertMessage = (messages: ChatMessage[], next: ChatMessage): ChatMessage[
   return sortMessages([...withoutOld, next]);
 };
 
+const normalizeTimelineScope = (value: unknown): ChatTimelineScope => (value === "org" ? "org" : "session");
+
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 export const ChatProvider = ({
@@ -157,15 +164,26 @@ export const ChatProvider = ({
   refreshActiveSession
 }: ChatProviderProps) => {
   const { selectedSessionId, selectedSession, isSessionMutating, invalidateSelectedSession } = useSessionSelector();
+  const timelineScope = normalizeTimelineScope(chatConfig?.timelineScope);
+
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [legacyMessages, setLegacyMessages] = useState<ChatMessage[]>([]);
+  const [isLegacyMessagesLoading, setIsLegacyMessagesLoading] = useState(false);
+  const [legacyMessagesNotice, setLegacyMessagesNotice] = useState("");
   const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
   const [campaignWorkflowHints, setCampaignWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
   const [pendingContents, setPendingContents] = useState<Content[]>([]);
   const [pendingContentWorkflowHints, setPendingContentWorkflowHints] = useState<Record<string, WorkflowLinkHint>>({});
   const [chatNotice, setChatNotice] = useState("");
   const [isActionPending, setIsActionPending] = useState(false);
+
   const refreshActiveSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedSessionIdRef = useRef<string | null>(selectedSessionId);
+  const timelineScopeRef = useRef<ChatTimelineScope>(timelineScope);
+  const messageRefreshRequestIdRef = useRef(0);
+  const chatSubscriptionTokenRef = useRef(0);
+  const chatChannelRef = useRef<RealtimeChannel | null>(null);
 
   const clearChatInput = useCallback(() => {
     setChatInput("");
@@ -173,25 +191,96 @@ export const ChatProvider = ({
 
   const campaignToReview = useMemo(() => draftCampaigns[0] ?? null, [draftCampaigns]);
 
-  const refreshMessages = useCallback(async () => {
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    timelineScopeRef.current = timelineScope;
+  }, [timelineScope]);
+
+  const refreshMessages = useCallback(
+    async (options?: { token?: number }) => {
+      const requestId = messageRefreshRequestIdRef.current + 1;
+      messageRefreshRequestIdRef.current = requestId;
+
+      const token = options?.token ?? chatSubscriptionTokenRef.current;
+      const boundSelectedSessionId = selectedSessionId;
+      const boundTimelineScope = timelineScope;
+
+      if (!supabase || !chatConfig) {
+        if (requestId === messageRefreshRequestIdRef.current) {
+          setMessages([]);
+        }
+        return;
+      }
+
+      if (boundTimelineScope === "session" && !boundSelectedSessionId) {
+        if (requestId === messageRefreshRequestIdRef.current) {
+          setMessages([]);
+        }
+        return;
+      }
+
+      let query = supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("org_id", chatConfig.orgId)
+        .order("created_at", { ascending: true })
+        .limit(200);
+
+      if (boundTimelineScope === "session") {
+        query = query.eq("session_id", boundSelectedSessionId);
+      }
+
+      const { data, error } = await query;
+
+      if (
+        requestId !== messageRefreshRequestIdRef.current ||
+        token !== chatSubscriptionTokenRef.current ||
+        timelineScopeRef.current !== boundTimelineScope ||
+        (boundTimelineScope === "session" && selectedSessionIdRef.current !== boundSelectedSessionId)
+      ) {
+        return;
+      }
+
+      if (error) {
+        setChatNotice(`Failed to load chat messages: ${error.message}`);
+        return;
+      }
+
+      setMessages(sortMessages((data ?? []) as ChatMessage[]));
+    },
+    [chatConfig, selectedSessionId, supabase, timelineScope]
+  );
+
+  const loadLegacyMessages = useCallback(async () => {
     if (!supabase || !chatConfig) {
-      setMessages([]);
+      setLegacyMessages([]);
+      setLegacyMessagesNotice("");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .order("created_at", { ascending: true })
-      .limit(200);
+    setIsLegacyMessagesLoading(true);
+    setLegacyMessagesNotice("");
+    try {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("org_id", chatConfig.orgId)
+        .is("session_id", null)
+        .order("created_at", { ascending: true })
+        .limit(200);
 
-    if (error) {
-      setChatNotice(`Failed to load chat messages: ${error.message}`);
-      return;
+      if (error) {
+        setLegacyMessagesNotice(`Failed to load legacy messages: ${error.message}`);
+        return;
+      }
+
+      setLegacyMessages(sortMessages((data ?? []) as ChatMessage[]));
+    } finally {
+      setIsLegacyMessagesLoading(false);
     }
-
-    setMessages(sortMessages((data ?? []) as ChatMessage[]));
   }, [chatConfig, supabase]);
 
   const refreshDraftCampaigns = useCallback(async () => {
@@ -361,7 +450,6 @@ export const ChatProvider = ({
 
   useEffect(() => {
     if (!supabase || !chatConfig) {
-      setMessages([]);
       setDraftCampaigns([]);
       setCampaignWorkflowHints({});
       setPendingContents([]);
@@ -369,37 +457,8 @@ export const ChatProvider = ({
       return;
     }
 
-    void refreshMessages();
     void refreshDraftCampaigns();
     void refreshPendingContents();
-
-    const chatChannel = supabase
-      .channel(`desktop-chat-${chatConfig.orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "chat_messages",
-          filter: `org_id=eq.${chatConfig.orgId}`
-        },
-        (payload) => {
-          const nextRow = (payload.new ?? null) as ChatMessage | null;
-          const oldRow = (payload.old ?? null) as ChatMessage | null;
-
-          setMessages((prev) => {
-            if (nextRow && typeof nextRow.id === "string") {
-              return upsertMessage(prev, nextRow);
-            }
-            if (oldRow && typeof oldRow.id === "string") {
-              return prev.filter((item) => item.id !== oldRow.id);
-            }
-            return prev;
-          });
-          scheduleRefreshActiveSession();
-        }
-      )
-      .subscribe();
 
     const contentsChannel = supabase
       .channel(`desktop-contents-${chatConfig.orgId}`)
@@ -436,18 +495,100 @@ export const ChatProvider = ({
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(chatChannel);
       void supabase.removeChannel(contentsChannel);
       void supabase.removeChannel(campaignsChannel);
     };
-  }, [
-    chatConfig,
-    refreshDraftCampaigns,
-    refreshMessages,
-    refreshPendingContents,
-    scheduleRefreshActiveSession,
-    supabase
-  ]);
+  }, [chatConfig, refreshDraftCampaigns, refreshPendingContents, scheduleRefreshActiveSession, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !chatConfig) {
+      setMessages([]);
+      return;
+    }
+
+    const token = chatSubscriptionTokenRef.current + 1;
+    chatSubscriptionTokenRef.current = token;
+
+    const boundTimelineScope = timelineScope;
+    const boundSelectedSessionId = selectedSessionId;
+
+    // 1) clear stale timeline first
+    setMessages([]);
+
+    // 2) unsubscribe previous message channel
+    if (chatChannelRef.current) {
+      void supabase.removeChannel(chatChannelRef.current);
+      chatChannelRef.current = null;
+    }
+
+    if (boundTimelineScope === "session" && !boundSelectedSessionId) {
+      return;
+    }
+
+    const channelFilter =
+      boundTimelineScope === "session"
+        ? `org_id=eq.${chatConfig.orgId},session_id=eq.${boundSelectedSessionId}`
+        : `org_id=eq.${chatConfig.orgId}`;
+    const channelName =
+      boundTimelineScope === "session"
+        ? `desktop-chat-${chatConfig.orgId}-${boundSelectedSessionId}`
+        : `desktop-chat-${chatConfig.orgId}-org`;
+
+    // 3) subscribe new channel
+    const nextChannel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "chat_messages",
+          filter: channelFilter
+        },
+        (payload) => {
+          if (token !== chatSubscriptionTokenRef.current) {
+            return;
+          }
+          if (timelineScopeRef.current !== boundTimelineScope) {
+            return;
+          }
+          if (boundTimelineScope === "session" && selectedSessionIdRef.current !== boundSelectedSessionId) {
+            return;
+          }
+
+          const nextRow = (payload.new ?? null) as ChatMessage | null;
+          const oldRow = (payload.old ?? null) as ChatMessage | null;
+          const eventSessionIdRaw = nextRow?.session_id ?? oldRow?.session_id ?? null;
+          const eventSessionId = typeof eventSessionIdRaw === "string" ? eventSessionIdRaw.trim() : null;
+          if (boundTimelineScope === "session" && eventSessionId !== boundSelectedSessionId) {
+            return;
+          }
+
+          setMessages((prev) => {
+            if (nextRow && typeof nextRow.id === "string") {
+              return upsertMessage(prev, nextRow);
+            }
+            if (oldRow && typeof oldRow.id === "string") {
+              return prev.filter((item) => item.id !== oldRow.id);
+            }
+            return prev;
+          });
+          scheduleRefreshActiveSession();
+        }
+      )
+      .subscribe();
+    chatChannelRef.current = nextChannel;
+
+    // 4) load snapshot after binding
+    void refreshMessages({ token });
+
+    return () => {
+      if (chatChannelRef.current === nextChannel) {
+        void supabase.removeChannel(nextChannel);
+        chatChannelRef.current = null;
+      }
+    };
+  }, [chatConfig, refreshMessages, scheduleRefreshActiveSession, selectedSessionId, supabase, timelineScope]);
 
   const ensureSelectedSessionId = useCallback(async (): Promise<string | null> => {
     if (selectedSessionId) {
@@ -573,6 +714,9 @@ export const ChatProvider = ({
   const value = useMemo<ChatContextValue>(
     () => ({
       messages,
+      legacyMessages,
+      isLegacyMessagesLoading,
+      legacyMessagesNotice,
       draftCampaigns,
       pendingContents,
       campaignWorkflowHints,
@@ -587,11 +731,15 @@ export const ChatProvider = ({
       selectedSession,
       isActionPending,
       isSessionMutating,
+      loadLegacyMessages,
       sendMessage,
       dispatchCardAction
     }),
     [
       messages,
+      legacyMessages,
+      isLegacyMessagesLoading,
+      legacyMessagesNotice,
       draftCampaigns,
       pendingContents,
       campaignWorkflowHints,
@@ -605,6 +753,7 @@ export const ChatProvider = ({
       selectedSession,
       isActionPending,
       isSessionMutating,
+      loadLegacyMessages,
       sendMessage,
       dispatchCardAction
     ]

@@ -189,6 +189,11 @@ button.primary {
   color: #364152;
 }
 
+.meta-compatibility {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .onboarding-crawl-grid {
   margin-bottom: 8px;
 }
@@ -1063,6 +1068,10 @@ th {
 .chat-session-summary p {
   color: #33445c;
   font-size: 13px;
+}
+
+.chat-legacy-toggle-row {
+  margin-top: 8px;
 }
 
 @media (max-width: 1320px) {
