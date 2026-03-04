@@ -1668,6 +1668,158 @@ const registerIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle("chat:list-sessions", async (_, payload) => {
+    const limitInput = payload?.limit;
+    const limit = parsePositiveInteger(limitInput);
+    if (limitInput !== undefined && limit === null) {
+      throw new Error("limit must be a positive integer.");
+    }
+
+    const cursorRaw = typeof payload?.cursor === "string" ? payload.cursor.trim() : "";
+    const workspaceTypeRaw = typeof payload?.workspaceType === "string" ? payload.workspaceType.trim() : "";
+    const scopeIdRaw =
+      payload?.scopeId === null
+        ? null
+        : typeof payload?.scopeId === "string"
+          ? payload.scopeId.trim()
+          : undefined;
+    const archivedRaw = payload?.archived;
+    if (archivedRaw !== undefined && typeof archivedRaw !== "boolean") {
+      throw new Error("archived must be a boolean when provided.");
+    }
+
+    const params = new URLSearchParams();
+    if (limit !== null) {
+      params.set("limit", String(limit));
+    }
+    if (cursorRaw) {
+      params.set("cursor", cursorRaw);
+    }
+    if (workspaceTypeRaw) {
+      params.set("workspace_type", workspaceTypeRaw);
+    }
+    if (scopeIdRaw !== undefined) {
+      params.set("scope_id", scopeIdRaw ?? "");
+    }
+    if (typeof archivedRaw === "boolean") {
+      params.set("archived", archivedRaw ? "true" : "false");
+    }
+
+    const suffix = params.toString();
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/sessions${suffix ? `?${suffix}` : ""}`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        sessions: Array.isArray(body?.sessions) ? body.sessions : [],
+        next_cursor: typeof body?.next_cursor === "string" && body.next_cursor.trim() ? body.next_cursor : null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to list sessions.";
+      return {
+        ok: false,
+        sessions: [],
+        next_cursor: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:create-session", async (_, payload) => {
+    const workspaceType = typeof payload?.workspaceType === "string" ? payload.workspaceType.trim() : "";
+    const scopeId =
+      payload?.scopeId === null
+        ? null
+        : typeof payload?.scopeId === "string"
+          ? payload.scopeId.trim() || null
+          : null;
+    const title =
+      payload?.title === null
+        ? null
+        : typeof payload?.title === "string"
+          ? payload.title.trim() || null
+          : null;
+    const startPausedRaw = payload?.startPaused;
+    if (startPausedRaw !== undefined && typeof startPausedRaw !== "boolean") {
+      throw new Error("startPaused must be a boolean when provided.");
+    }
+
+    if (!workspaceType) {
+      throw new Error("workspaceType is required.");
+    }
+
+    try {
+      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/sessions`, {
+        method: "POST",
+        body: JSON.stringify({
+          workspace_type: workspaceType,
+          ...(scopeId !== undefined ? { scope_id: scopeId } : {}),
+          ...(title !== undefined ? { title } : {}),
+          ...(typeof startPausedRaw === "boolean" ? { start_paused: startPausedRaw } : {})
+        })
+      });
+
+      return {
+        ok: true,
+        reused: body?.reused === true,
+        session: body?.session ?? null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create session.";
+      return {
+        ok: false,
+        reused: false,
+        session: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:get-recommended-session", async (_, payload) => {
+    const workspaceType = typeof payload?.workspaceType === "string" ? payload.workspaceType.trim() : "";
+    const scopeIdRaw =
+      payload?.scopeId === null
+        ? null
+        : typeof payload?.scopeId === "string"
+          ? payload.scopeId.trim()
+          : undefined;
+
+    if (!workspaceType) {
+      throw new Error("workspaceType is required.");
+    }
+
+    const params = new URLSearchParams();
+    params.set("workspace_type", workspaceType);
+    if (scopeIdRaw !== undefined) {
+      params.set("scope_id", scopeIdRaw ?? "");
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/sessions/recommended?${params.toString()}`,
+        {
+          method: "GET"
+        }
+      );
+
+      return {
+        ok: true,
+        session: body?.session ?? null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load recommended session.";
+      return {
+        ok: false,
+        session: null,
+        message
+      };
+    }
+  });
+
   ipcMain.handle("chat:send-message", async (_, payload) => {
     const sessionId = (payload?.sessionId ?? "").trim();
     const content = (payload?.content ?? "").trim();

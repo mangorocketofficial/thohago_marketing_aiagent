@@ -63,6 +63,12 @@ const renderContentDetails = (cardData: Record<string, unknown>) => {
   );
 };
 
+const selectedWorkspaceLabel = (workspaceType: unknown, scopeId: unknown): string => {
+  const type = typeof workspaceType === "string" && workspaceType.trim() ? workspaceType.trim() : "general";
+  const scope = typeof scopeId === "string" && scopeId.trim() ? scopeId.trim() : "default";
+  return `${type}:${scope}`;
+};
+
 export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
   const { t } = useTranslation();
   const {
@@ -71,11 +77,14 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
     setChatInput,
     chatNotice,
     chatConfigMessage,
-    activeSessionId,
+    selectedSessionId,
+    selectedSession,
     isActionPending,
+    isSessionMutating,
     sendMessage,
     dispatchCardAction
   } = useChatContext();
+  const isInteractionBlocked = isActionPending || isSessionMutating;
 
   const { activePage, agentChatHandoff, clearAgentChatHandoff } = useNavigation();
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -192,6 +201,19 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
       <section className="panel">
         <article className="subpanel">
           {chatConfigMessage ? <p className="notice">{chatConfigMessage}</p> : null}
+          <div className="chat-session-summary">
+            <p>
+              <strong>{t("chat.sessionSelector.currentSession")}</strong>:{" "}
+              {selectedSession ? (selectedSession.title?.trim() || selectedWorkspaceLabel(selectedSession.workspace_type, selectedSession.scope_id)) : "-"}
+            </p>
+            <p>
+              {t("chat.sessionSelector.workspaceContext")}:{" "}
+              {selectedSession ? selectedWorkspaceLabel(selectedSession.workspace_type, selectedSession.scope_id) : "general:default"}
+            </p>
+            <p>
+              {t("chat.sessionSelector.status")}: {selectedSession?.status ?? "-"}
+            </p>
+          </div>
 
           <div className="chat-list">
             {messages.length === 0 ? (
@@ -284,7 +306,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                           v{currentVersion} / {statusLabel}
                         </p>
                       </div>
-                      <button className="chat-card-toggle" onClick={() => toggleCard(message.id)} disabled={isActionPending}>
+                      <button className="chat-card-toggle" onClick={() => toggleCard(message.id)} disabled={isInteractionBlocked}>
                         {collapsed ? "Expand" : "Collapse"}
                       </button>
                     </div>
@@ -304,7 +326,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                           onChange={(event) =>
                             setReasonByCard((prev) => ({ ...prev, [message.id]: event.target.value }))
                           }
-                          disabled={isActionPending || isResolved}
+                          disabled={isInteractionBlocked || isResolved}
                         />
 
                         {message.metadata.card_type === "content_draft" ? (
@@ -317,7 +339,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                                   setEditByCard((prev) => ({ ...prev, [message.id]: contentBodyFromCard }));
                                 }
                               }}
-                              disabled={isActionPending || isResolved}
+                              disabled={isInteractionBlocked || isResolved}
                             >
                               {isEditOpen ? "Hide Edited Body" : "Edit Body Before Approve"}
                             </button>
@@ -329,7 +351,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                                 onChange={(event) =>
                                   setEditByCard((prev) => ({ ...prev, [message.id]: event.target.value }))
                                 }
-                                disabled={isActionPending || isResolved}
+                                disabled={isInteractionBlocked || isResolved}
                               />
                             ) : null}
                           </div>
@@ -338,7 +360,7 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
                         <div className="button-row">
                           {message.metadata.actions.map((action) => {
                             const actionDisabled =
-                              isActionPending || action.disabled === true || !isLatestVersion || isResolved;
+                              isInteractionBlocked || action.disabled === true || !isLatestVersion || isResolved;
                             return (
                               <button
                                 key={`${message.id}:${action.id}`}
@@ -367,10 +389,9 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
             )}
           </div>
 
-          {!activeSessionId ? (
+          {!selectedSessionId ? (
             <p className="empty">
-              No active session yet. Add a file under an activity folder (example:{" "}
-              <code>tanzania-activity/photo01.jpg</code>) or place a file at watch-root.
+              No selected session yet. Choose a session from mini chat selector or create a new one.
             </p>
           ) : null}
 
@@ -379,11 +400,11 @@ export const AgentChatPage = ({ formatDateTime }: AgentChatPageProps) => {
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
               placeholder="Type a reply for the assistant..."
-              disabled={isActionPending}
+              disabled={isInteractionBlocked || !selectedSessionId}
             />
             <button
               className="primary"
-              disabled={isActionPending || !chatInput.trim()}
+              disabled={isInteractionBlocked || !selectedSessionId || !chatInput.trim()}
               onClick={() =>
                 void sendMessage({
                   uiContext: {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatProvider } from "./context/ChatContext";
 import { NavigationProvider } from "./context/NavigationContext";
+import { SessionSelectorProvider } from "./context/SessionSelectorContext";
 import { OnboardingLayout, resolveOnboardingEntryStep, type OnboardingStep } from "./layouts/OnboardingLayout";
 import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
@@ -487,54 +488,56 @@ const App = () => {
 
   return (
     <NavigationProvider>
-      <ChatProvider
-        runtime={runtime}
-        supabase={supabase}
-        chatConfig={chatConfig}
-        activeSession={activeSession}
-        refreshActiveSession={refreshActiveSession}
-      >
-        <MainLayout
-          dashboardPage={
-            <DashboardPage
-              runtimeSummary={runtimeSummary}
-              notice={notice}
-              sortedFiles={sortedFiles}
-              isAuthPending={isAuthPending}
-              formatDateTime={formatDateTime}
-              onOpenWatchFolder={() => void openWatchFolder()}
-              onRefreshActiveSession={() => void refreshActiveSession()}
-              onSignOut={() => void signOutAuth()}
-            />
-          }
-          brandReviewPage={
-            <BrandReviewPage
-              supabase={supabase}
-              orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
-              dataAccessMessage={chatConfig?.message ?? ""}
-              formatDateTime={formatDateTime}
-            />
-          }
-          campaignPlanPage={<CampaignPlanPage />}
-          contentCreatePage={<ContentCreatePage />}
-          analyticsPage={<AnalyticsPage />}
-          emailAutomationPage={<EmailAutomationPage />}
-          agentChatPage={<AgentChatPage formatDateTime={formatDateTime} />}
-          settingsPage={
-            <SettingsPage
-              orgId={desktopConfig?.orgId ?? "-"}
-              watchPath={selectedPath || status?.watchPath || "-"}
-              language={i18n.language}
-              userEmail={authSession?.user?.email ?? "-"}
-              runtimeSummary={runtimeSummary}
-              isAuthPending={isAuthPending}
-              onOpenWatchFolder={() => void openWatchFolder()}
-              onSignOut={() => void signOutAuth()}
-              onChangeLanguage={(language) => void updateLanguage(language)}
-            />
-          }
-        />
-      </ChatProvider>
+      <SessionSelectorProvider runtime={runtime} chatConfig={chatConfig} activeSession={activeSession}>
+        <ChatProvider
+          runtime={runtime}
+          supabase={supabase}
+          chatConfig={chatConfig}
+          activeSession={activeSession}
+          refreshActiveSession={refreshActiveSession}
+        >
+          <MainLayout
+            dashboardPage={
+              <DashboardPage
+                runtimeSummary={runtimeSummary}
+                notice={notice}
+                sortedFiles={sortedFiles}
+                isAuthPending={isAuthPending}
+                formatDateTime={formatDateTime}
+                onOpenWatchFolder={() => void openWatchFolder()}
+                onRefreshActiveSession={() => void refreshActiveSession()}
+                onSignOut={() => void signOutAuth()}
+              />
+            }
+            brandReviewPage={
+              <BrandReviewPage
+                supabase={supabase}
+                orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
+                dataAccessMessage={chatConfig?.message ?? ""}
+                formatDateTime={formatDateTime}
+              />
+            }
+            campaignPlanPage={<CampaignPlanPage />}
+            contentCreatePage={<ContentCreatePage />}
+            analyticsPage={<AnalyticsPage />}
+            emailAutomationPage={<EmailAutomationPage />}
+            agentChatPage={<AgentChatPage formatDateTime={formatDateTime} />}
+            settingsPage={
+              <SettingsPage
+                orgId={desktopConfig?.orgId ?? "-"}
+                watchPath={selectedPath || status?.watchPath || "-"}
+                language={i18n.language}
+                userEmail={authSession?.user?.email ?? "-"}
+                runtimeSummary={runtimeSummary}
+                isAuthPending={isAuthPending}
+                onOpenWatchFolder={() => void openWatchFolder()}
+                onSignOut={() => void signOutAuth()}
+                onChangeLanguage={(language) => void updateLanguage(language)}
+              />
+            }
+          />
+        </ChatProvider>
+      </SessionSelectorProvider>
     </NavigationProvider>
   );
 };

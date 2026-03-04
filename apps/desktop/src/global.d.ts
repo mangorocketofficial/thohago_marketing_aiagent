@@ -89,6 +89,46 @@ type ChatActiveSessionResult = {
   message?: string;
 };
 
+type ChatSessionListParams = {
+  limit?: number;
+  cursor?: string | null;
+  workspaceType?: string;
+  scopeId?: string | null;
+  archived?: boolean;
+};
+
+type ChatSessionListResult = {
+  ok: boolean;
+  sessions: OrchestratorSession[];
+  next_cursor: string | null;
+  message?: string;
+};
+
+type ChatCreateSessionPayload = {
+  workspaceType: string;
+  scopeId?: string | null;
+  title?: string | null;
+  startPaused?: boolean;
+};
+
+type ChatCreateSessionResult = {
+  ok: boolean;
+  reused: boolean;
+  session: OrchestratorSession | null;
+  message?: string;
+};
+
+type ChatRecommendedSessionPayload = {
+  workspaceType: string;
+  scopeId?: string | null;
+};
+
+type ChatRecommendedSessionResult = {
+  ok: boolean;
+  session: OrchestratorSession | null;
+  message?: string;
+};
+
 type ChatResumeResult = {
   ok: boolean;
   session_id: string;
@@ -246,6 +286,9 @@ declare global {
         onActionError: (cb: (payload: ChatActionError) => void) => () => void;
         getConfig: () => Promise<ChatConfig>;
         getActiveSession: () => Promise<ChatActiveSessionResult>;
+        listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
+        createSession: (payload: ChatCreateSessionPayload) => Promise<ChatCreateSessionResult>;
+        getRecommendedSession: (payload: ChatRecommendedSessionPayload) => Promise<ChatRecommendedSessionResult>;
         sendMessage: (payload: {
           sessionId: string;
           content: string;

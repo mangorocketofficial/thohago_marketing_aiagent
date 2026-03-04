@@ -18,6 +18,7 @@ import type {
   WorkflowStatus
 } from "@repo/types";
 import type { PageId } from "../types/navigation";
+import { useSessionSelector } from "./SessionSelectorContext";
 
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 
@@ -71,8 +72,10 @@ type ChatContextValue = {
   clearChatInput: () => void;
   chatNotice: string;
   chatConfigMessage: string;
-  activeSessionId: string | null;
+  selectedSessionId: string | null;
+  selectedSession: OrchestratorSession | null;
   isActionPending: boolean;
+  isSessionMutating: boolean;
   sendMessage: (input?: SendMessageInput) => Promise<void>;
   dispatchCardAction: (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => Promise<void>;
 };
@@ -150,9 +153,10 @@ export const ChatProvider = ({
   runtime,
   supabase,
   chatConfig,
-  activeSession,
+  activeSession: _activeSession,
   refreshActiveSession
 }: ChatProviderProps) => {
+  const { selectedSessionId, selectedSession, isSessionMutating, invalidateSelectedSession } = useSessionSelector();
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftCampaigns, setDraftCampaigns] = useState<Campaign[]>([]);
@@ -445,19 +449,14 @@ export const ChatProvider = ({
     supabase
   ]);
 
-  const ensureActiveSessionId = useCallback(async (): Promise<string | null> => {
-    if (activeSession?.id) {
-      return activeSession.id;
+  const ensureSelectedSessionId = useCallback(async (): Promise<string | null> => {
+    if (selectedSessionId) {
+      return selectedSessionId;
     }
 
-    const session = await refreshActiveSession();
-    if (!session?.id) {
-      setChatNotice("No active session yet. Wait for trigger processing, then retry.");
-      return null;
-    }
-
-    return session.id;
-  }, [activeSession, refreshActiveSession]);
+    setChatNotice("No selected session. Choose a session or create a new session first.");
+    return null;
+  }, [selectedSessionId]);
 
   const runChatAction = useCallback(
     async (action: () => Promise<void>) => {
@@ -470,6 +469,16 @@ export const ChatProvider = ({
         await Promise.all([refreshDraftCampaigns(), refreshPendingContents()]);
       } catch (error) {
         const runtimeError = toRuntimeActionError(error, "Action failed.");
+        if (
+          runtimeError.status === 403 ||
+          runtimeError.status === 404 ||
+          runtimeError.code === "not_found" ||
+          runtimeError.code === "session_closed"
+        ) {
+          await invalidateSelectedSession("Selected session is unavailable. Re-select a valid session.");
+          setChatNotice("Selected session is unavailable. Re-select a valid session.");
+          return;
+        }
         if (runtimeError.code === "version_conflict") {
           setChatNotice(buildVersionConflictNotice(runtimeError));
           await Promise.all([refreshMessages(), refreshActiveSession(), refreshDraftCampaigns(), refreshPendingContents()]);
@@ -480,18 +489,22 @@ export const ChatProvider = ({
         setIsActionPending(false);
       }
     },
-    [refreshActiveSession, refreshDraftCampaigns, refreshMessages, refreshPendingContents]
+    [invalidateSelectedSession, refreshActiveSession, refreshDraftCampaigns, refreshMessages, refreshPendingContents]
   );
 
   const sendMessage = useCallback(
     async (input?: SendMessageInput) => {
+      if (isSessionMutating) {
+        setChatNotice("Session switch is in progress. Wait for completion, then retry.");
+        return;
+      }
       const source = typeof input?.content === "string" ? input.content : chatInput;
       const content = source.trim();
       if (!content) {
         return;
       }
 
-      const sessionId = await ensureActiveSessionId();
+      const sessionId = await ensureSelectedSessionId();
       if (!sessionId) {
         return;
       }
@@ -507,30 +520,42 @@ export const ChatProvider = ({
         }
       });
     },
-    [chatInput, clearChatInput, ensureActiveSessionId, runChatAction, runtime]
+    [chatInput, clearChatInput, ensureSelectedSessionId, isSessionMutating, runChatAction, runtime]
   );
 
   const dispatchCardAction = useCallback(
     async (payload: Omit<ChatActionCardDispatchInput, "campaignId" | "contentId">) => {
+      if (isSessionMutating) {
+        setChatNotice("Session switch is in progress. Wait for completion, then retry.");
+        return;
+      }
       const sessionId = payload.sessionId.trim();
       if (!sessionId) {
         setChatNotice("sessionId is required for action card dispatch.");
         return;
       }
+      if (!selectedSessionId) {
+        setChatNotice("No selected session. Choose a session before dispatching card actions.");
+        return;
+      }
+      if (selectedSessionId !== sessionId) {
+        setChatNotice("Selected session does not match this action card session. Switch session explicitly first.");
+        return;
+      }
 
       const activeCampaignId =
-        typeof activeSession?.state?.campaign_id === "string" ? activeSession.state.campaign_id.trim() : "";
+        typeof selectedSession?.state?.campaign_id === "string" ? selectedSession.state.campaign_id.trim() : "";
       const activeContentId =
-        typeof activeSession?.state?.content_id === "string" ? activeSession.state.content_id.trim() : "";
+        typeof selectedSession?.state?.content_id === "string" ? selectedSession.state.content_id.trim() : "";
 
       const isCampaignEvent = payload.eventType.startsWith("campaign_");
       const isContentEvent = payload.eventType.startsWith("content_");
       if (isCampaignEvent && !activeCampaignId) {
-        setChatNotice("Active session campaign_id is missing. Refresh session and retry.");
+        setChatNotice("Selected session campaign_id is missing. Switch session or retry.");
         return;
       }
       if (isContentEvent && !activeContentId) {
-        setChatNotice("Active session content_id is missing. Refresh session and retry.");
+        setChatNotice("Selected session content_id is missing. Switch session or retry.");
         return;
       }
 
@@ -542,7 +567,7 @@ export const ChatProvider = ({
         });
       });
     },
-    [activeSession, runChatAction, runtime]
+    [isSessionMutating, runChatAction, runtime, selectedSession, selectedSessionId]
   );
 
   const value = useMemo<ChatContextValue>(
@@ -558,8 +583,10 @@ export const ChatProvider = ({
       clearChatInput,
       chatNotice,
       chatConfigMessage: chatConfig?.message ?? "",
-      activeSessionId: activeSession?.id ?? null,
+      selectedSessionId,
+      selectedSession,
       isActionPending,
+      isSessionMutating,
       sendMessage,
       dispatchCardAction
     }),
@@ -574,8 +601,10 @@ export const ChatProvider = ({
       clearChatInput,
       chatNotice,
       chatConfig,
-      activeSession,
+      selectedSessionId,
+      selectedSession,
       isActionPending,
+      isSessionMutating,
       sendMessage,
       dispatchCardAction
     ]

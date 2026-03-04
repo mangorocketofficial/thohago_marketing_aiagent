@@ -41,3 +41,4 @@
 | 4-4 | Orchestrator Modularization (P2) | Done | 2026-03-03 | [phase-4-4-completion.md](./phase-4-4-completion.md) |
 | 1-7 Patch | Historical Content Persistence | Done | 2026-03-02 | [phase-1-7-patch-completion.md](./phase-1-7-patch-completion.md) |
 | Session-S1 | Multi-Session Foundation (DB/API) | Done | 2026-03-04 | [phase-session-s1-completion.md](./phase-session-s1-completion.md) |
+| Session-S2 | Desktop Session Selector (UI/State Wiring) | Done | 2026-03-04 | [phase-session-s2-completion.md](./phase-session-s2-completion.md) |
