@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OrchestratorSession } from "@repo/types";
 import { useChatContext } from "../context/ChatContext";
+import { useNavigation } from "../context/NavigationContext";
 import { useSessionSelector } from "../context/SessionSelectorContext";
+import { SessionList } from "./session/SessionList";
 import type { PageId } from "../types/navigation";
 
 type AgentChatWidgetProps = {
@@ -29,19 +31,9 @@ const sessionTitle = (session: OrchestratorSession | null): string => {
   return workspaceLabel(session);
 };
 
-const formatUpdatedAt = (value: string | null | undefined): string => {
-  if (!value) {
-    return "-";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
-};
-
 export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
   const { t } = useTranslation();
+  const { navigate } = useNavigation();
   const { messages, chatNotice, selectedSessionId, isActionPending, isSessionMutating, sendMessage } = useChatContext();
   const {
     selectedSession,
@@ -149,6 +141,9 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
           <button type="button" onClick={() => void createSessionForCurrentWorkspace()} disabled={isUiBusy}>
             {t("chat.sessionSelector.newSession")}
           </button>
+          <button type="button" onClick={() => navigate("agent-chat")} disabled={isUiBusy}>
+            {t("chat.sessionSelector.openHub")}
+          </button>
         </div>
 
         {recommendedSession && recommendedSession.id !== selectedSessionId ? (
@@ -218,35 +213,20 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
             </div>
 
             <div className="ui-session-modal-body">
-              {reviewAllSessions.length === 0 && isReviewAllLoading ? (
-                <p className="empty">{t("chat.sessionSelector.loading")}</p>
-              ) : null}
-              {reviewAllSessions.length === 0 && !isReviewAllLoading ? (
-                <p className="empty">{t("chat.sessionSelector.empty")}</p>
-              ) : null}
-
-              {reviewAllSessions.map((session) => (
-                <div key={session.id} className="ui-session-modal-row">
-                  <div className="ui-session-modal-meta">
-                    <strong>{sessionTitle(session)}</strong>
-                    <p>{workspaceLabel(session)}</p>
-                    <p>
-                      {session.status} / {formatUpdatedAt(session.updated_at)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={isUiBusy}
-                    onClick={() => {
-                      selectSession(session);
-                      setIsReviewModalOpen(false);
-                    }}
-                  >
-                    {t("chat.sessionSelector.select")}
-                  </button>
-                </div>
-              ))}
+              <SessionList
+                sessions={reviewAllSessions}
+                selectedSessionId={selectedSessionId}
+                isBusy={isUiBusy}
+                isLoading={isReviewAllLoading}
+                emptyMessage={t("chat.sessionSelector.empty")}
+                loadingLabel={t("chat.sessionSelector.loading")}
+                selectLabel={t("chat.sessionSelector.select")}
+                selectedLabel={t("chat.sessionSelector.selected")}
+                onSelect={(session) => {
+                  selectSession(session);
+                  setIsReviewModalOpen(false);
+                }}
+              />
             </div>
 
             <div className="ui-session-modal-footer">

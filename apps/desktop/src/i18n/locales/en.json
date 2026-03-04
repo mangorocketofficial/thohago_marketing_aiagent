@@ -193,22 +193,30 @@
   },
   "chat": {
     "sessionSelector": {
+      "hubTitle": "Session Hub",
+      "recentTitle": "Recent Sessions",
       "currentSession": "Current Session",
       "status": "Status",
+      "updatedAt": "Updated At",
       "workspaceContext": "Workspace",
       "selectRecent": "Select recent session",
       "reviewAll": "Review all tasks",
       "reviewAllTitle": "All Sessions",
       "newSession": "New session",
+      "openHub": "Open Agent Chat Hub",
+      "refreshList": "Refresh session list",
       "recommendedLabel": "Recommended",
       "continueCurrent": "Continue current",
       "switchRecommended": "Switch to recommended",
       "noSelection": "No selected session.",
       "select": "Select",
+      "selected": "Selected",
       "close": "Close",
       "loading": "Loading...",
       "empty": "No sessions found.",
       "loadMore": "Load more",
+      "inputPlaceholder": "Type a reply for the assistant...",
+      "send": "Send",
       "error": {
         "loadFailed": "Failed to load session data."
       }

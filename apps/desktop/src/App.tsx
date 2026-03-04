@@ -25,26 +25,6 @@ type ChatConfig = Awaited<ReturnType<Runtime["chat"]["getConfig"]>>;
 type DesktopAppConfig = Awaited<ReturnType<Runtime["app"]["getConfig"]>>;
 const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 
-const formatSessionStatus = (session: OrchestratorSession | null): string => {
-  if (!session) {
-    return "-";
-  }
-  if (session.status !== "paused") {
-    return session.status;
-  }
-
-  if (session.current_step === "await_user_input") {
-    return "paused (awaiting user input)";
-  }
-  if (session.current_step === "await_campaign_approval") {
-    return "paused (awaiting campaign approval)";
-  }
-  if (session.current_step === "await_content_approval") {
-    return "paused (awaiting content approval)";
-  }
-  return "paused (waiting for next event)";
-};
-
 const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) {
     return "-";
@@ -178,9 +158,7 @@ const App = () => {
     watchPath: status?.watchPath,
     isRunning: status?.isRunning,
     fileCount: status?.fileCount,
-    scanCount,
-    activeSession,
-    formatSessionStatus
+    scanCount
   });
   const enterOnboarding = useCallback((watchPath: string | null | undefined, explicitStep?: OnboardingStep) => {
     setOnboardingEntryStep(explicitStep ?? resolveOnboardingEntryStep(watchPath));

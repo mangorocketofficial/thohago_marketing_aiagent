@@ -43,3 +43,4 @@
 | Session-S1 | Multi-Session Foundation (DB/API) | Done | 2026-03-04 | [phase-session-s1-completion.md](./phase-session-s1-completion.md) |
 | Session-S2 | Desktop Session Selector (UI/State Wiring) | Done | 2026-03-04 | [phase-session-s2-completion.md](./phase-session-s2-completion.md) |
 | Session-S3 | Session-Scoped Chat Data Cutover | Done | 2026-03-04 | [phase-session-s3-completion.md](./phase-session-s3-completion.md) |
+| Session-S4 | Agent Chat Session Hub Consolidation | Done | 2026-03-04 | [phase-session-s4-completion.md](./phase-session-s4-completion.md) |

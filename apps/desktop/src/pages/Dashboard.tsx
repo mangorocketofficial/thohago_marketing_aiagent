@@ -91,18 +91,6 @@ export const DashboardPage = ({
           <p>
             Last Scan Count: <strong>{runtimeSummary.scanCount}</strong>
           </p>
-          <p>
-            Active Session: <strong>{runtimeSummary.activeSessionId}</strong>{" "}
-            <span className="meta-compatibility">({t("ui.common.compatibilityOnly")})</span>
-          </p>
-          <p>
-            Session Step: <strong>{runtimeSummary.sessionStep}</strong>{" "}
-            <span className="meta-compatibility">({t("ui.common.compatibilityOnly")})</span>
-          </p>
-          <p>
-            Session Status: <strong>{runtimeSummary.sessionStatus}</strong>{" "}
-            <span className="meta-compatibility">({t("ui.common.compatibilityOnly")})</span>
-          </p>
         </div>
         <div className="button-row">
           <button onClick={onOpenWatchFolder}>Open Watch Folder</button>

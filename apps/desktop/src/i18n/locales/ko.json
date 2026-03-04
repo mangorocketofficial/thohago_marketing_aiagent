@@ -193,22 +193,30 @@
   },
   "chat": {
     "sessionSelector": {
+      "hubTitle": "세션 허브",
+      "recentTitle": "최근 세션",
       "currentSession": "현재 세션",
       "status": "상태",
+      "updatedAt": "업데이트 시각",
       "workspaceContext": "워크스페이스",
       "selectRecent": "최근 세션 선택",
       "reviewAll": "전체 작업 보기",
       "reviewAllTitle": "전체 세션",
       "newSession": "새 세션",
+      "openHub": "에이전트 채팅 허브 열기",
+      "refreshList": "세션 목록 새로고침",
       "recommendedLabel": "추천 세션",
       "continueCurrent": "현재 유지",
       "switchRecommended": "추천으로 전환",
       "noSelection": "선택된 세션이 없습니다.",
       "select": "선택",
+      "selected": "선택됨",
       "close": "닫기",
       "loading": "불러오는 중...",
       "empty": "세션이 없습니다.",
       "loadMore": "더 불러오기",
+      "inputPlaceholder": "어시스턴트에게 보낼 답변을 입력하세요...",
+      "send": "전송",
       "error": {
         "loadFailed": "세션 데이터를 불러오지 못했습니다."
       }

@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import type { OrchestratorSession } from "@repo/types";
 import type { RuntimeSummary } from "../types/runtime";
 
 type RuntimeSummaryInput = {
@@ -8,8 +7,6 @@ type RuntimeSummaryInput = {
   isRunning: boolean | null | undefined;
   fileCount: number | null | undefined;
   scanCount: number | null | undefined;
-  activeSession: OrchestratorSession | null;
-  formatSessionStatus: (session: OrchestratorSession | null) => string;
 };
 
 export const useRuntime = ({
@@ -17,9 +14,7 @@ export const useRuntime = ({
   watchPath,
   isRunning,
   fileCount,
-  scanCount,
-  activeSession,
-  formatSessionStatus
+  scanCount
 }: RuntimeSummaryInput): RuntimeSummary =>
   useMemo(
     () => ({
@@ -27,10 +22,7 @@ export const useRuntime = ({
       watchPath: watchPath ?? "-",
       isRunning: isRunning === true,
       fileCount: fileCount ?? 0,
-      scanCount: scanCount ?? 0,
-      activeSessionId: activeSession?.id ?? "None",
-      sessionStep: activeSession?.current_step ?? "-",
-      sessionStatus: formatSessionStatus(activeSession)
+      scanCount: scanCount ?? 0
     }),
-    [activeSession, fileCount, formatSessionStatus, isRunning, runtimePlatform, scanCount, watchPath]
+    [fileCount, isRunning, runtimePlatform, scanCount, watchPath]
   );

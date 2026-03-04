@@ -876,7 +876,7 @@ th {
 
 .ui-session-selector-actions {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto;
+  grid-template-columns: minmax(120px, 1fr) auto auto auto;
   gap: 6px;
 }
 
@@ -1072,6 +1072,63 @@ th {
 
 .chat-legacy-toggle-row {
   margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-chat-hub-panel {
+  width: min(1360px, 100%);
+}
+
+.agent-chat-hub-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+}
+
+.agent-chat-session-hub,
+.agent-chat-timeline-panel {
+  min-height: 660px;
+}
+
+.agent-chat-session-hub {
+  align-content: start;
+}
+
+.agent-chat-session-block {
+  display: grid;
+  gap: 8px;
+}
+
+.ui-session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ui-session-list-row {
+  border: 1px solid #d9e2ef;
+  border-radius: 9px;
+  background: #f8fbff;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ui-session-list-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-session-list-meta strong {
+  font-size: 13px;
+}
+
+.ui-session-list-meta p {
+  font-size: 12px;
+  color: #4b5565;
 }
 
 @media (max-width: 1320px) {
@@ -1092,5 +1149,14 @@ th {
 
   .ui-session-selector-actions {
     grid-template-columns: 1fr;
+  }
+
+  .agent-chat-hub-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-chat-session-hub,
+  .agent-chat-timeline-panel {
+    min-height: auto;
   }
 }

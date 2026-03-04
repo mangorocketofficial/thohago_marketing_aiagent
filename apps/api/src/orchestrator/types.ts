@@ -89,7 +89,7 @@ export type OrchestratorSessionRow = {
   trigger_id: string | null;
   workspace_type: SessionWorkspaceType;
   scope_id: string | null;
-  workspace_key: string;
+  workspace_key?: string | null;
   title: string | null;
   created_by_user_id: string | null;
   archived_at: string | null;

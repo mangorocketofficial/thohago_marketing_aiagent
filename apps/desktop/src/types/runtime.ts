@@ -4,7 +4,4 @@ export type RuntimeSummary = {
   isRunning: boolean;
   fileCount: number;
   scanCount: number;
-  activeSessionId: string;
-  sessionStep: string;
-  sessionStatus: string;
 };
