@@ -80,7 +80,7 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
                       })
                     }
                   >
-                    View in Inbox
+                    {t("campaignPlan.viewInInbox")}
                   </button>
                 ) : null}
               </div>

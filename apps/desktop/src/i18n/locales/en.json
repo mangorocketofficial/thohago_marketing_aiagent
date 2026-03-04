@@ -119,7 +119,7 @@
         "title": "Workspace",
         "description": "Inbox approvals, session chat, and session rail in one surface.",
         "inboxTitle": "Inbox",
-        "inboxDescription": "Approve, request revision, or reject pending workflow items.",
+        "inboxDescription": "Approve or reject pending workflow items. Request revisions in chat.",
         "inboxEmpty": "No pending workflow items.",
         "chatTitle": "Chat",
         "sessionRailTitle": "Session Rail"
@@ -215,5 +215,17 @@
       "loading": "Loading legacy messages...",
       "empty": "No legacy messages found."
     }
+  },
+  "campaignPlan": {
+    "notificationReady": "Campaign plan is ready.",
+    "notificationReview": "Review and approve it in Inbox.",
+    "viewInInbox": "View in Inbox",
+    "expandDetail": "View Plan Detail",
+    "collapseDetail": "Hide Plan Detail",
+    "actionApprove": "Approve",
+    "actionReject": "Reject",
+    "revisionViaChatHint": "Need changes? Ask in chat with natural language.",
+    "planGenerating": "Generating campaign plan...",
+    "planFailed": "Campaign plan generation failed. Please try again."
   }
 }

@@ -24,16 +24,9 @@ const REFRESH_ACTIVE_SESSION_DEBOUNCE_MS = 250;
 
 type ChatConfig = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["getConfig"]>>;
 type ChatTimelineScope = "session" | "org";
-
-type WorkflowItemLinkRow = {
-  id: string;
-  source_campaign_id: string | null;
-  source_content_id: string | null;
-  session_id: string | null;
-  display_title: string | null;
-  status: WorkflowStatus;
-  version: number | string;
-};
+type ChatInboxItem = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["listInboxItems"]>>["items"][number];
+type ChatInboxCampaign = NonNullable<ChatInboxItem["campaign"]>;
+type ChatInboxContent = NonNullable<ChatInboxItem["content"]>;
 
 export type WorkflowLinkHint = {
   workflowItemId: string;
@@ -137,6 +130,24 @@ const buildVersionConflictNotice = (error: RuntimeActionError): string => {
 
 const isWorkflowStatus = (value: unknown): value is WorkflowStatus =>
   value === "proposed" || value === "revision_requested" || value === "approved" || value === "rejected";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+const normalizeCampaignFromInbox = (value: ChatInboxCampaign): Campaign | null => {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim()) {
+    return null;
+  }
+
+  return value as Campaign;
+};
+
+const normalizeContentFromInbox = (value: ChatInboxContent): Content | null => {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim()) {
+    return null;
+  }
+  return value as Content;
+};
 
 const toPositiveIntOrDefault = (value: unknown, fallback: number): number => {
   const normalized =
@@ -287,141 +298,95 @@ export const ChatProvider = ({
     }
   }, [chatConfig, supabase]);
 
-  const refreshDraftCampaigns = useCallback(async () => {
-    if (!supabase || !chatConfig) {
+  const refreshWorkspaceInbox = useCallback(async () => {
+    if (!chatConfig) {
       setDraftCampaigns([]);
       setCampaignWorkflowHints({});
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .eq("status", "draft")
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (error) {
-      setChatNotice(`Failed to load campaigns: ${error.message}`);
-      return;
-    }
-
-    const campaigns = (data ?? []) as Campaign[];
-    setDraftCampaigns(campaigns);
-
-    const campaignIds = campaigns
-      .map((campaign) => campaign.id)
-      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
-    if (campaignIds.length === 0) {
-      setCampaignWorkflowHints({});
-      return;
-    }
-
-    const { data: workflowRows, error: workflowError } = await supabase
-      .from("workflow_items")
-      .select("id,source_campaign_id,session_id,display_title,status,version")
-      .eq("org_id", chatConfig.orgId)
-      .eq("type", "campaign_plan")
-      .in("source_campaign_id", campaignIds);
-
-    if (workflowError || !workflowRows) {
-      setCampaignWorkflowHints({});
-      return;
-    }
-
-    const nextHints: Record<string, WorkflowLinkHint> = {};
-    for (const row of workflowRows as WorkflowItemLinkRow[]) {
-      const sourceCampaignId =
-        typeof row.source_campaign_id === "string" && row.source_campaign_id.trim()
-          ? row.source_campaign_id.trim()
-          : "";
-      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
-      if (!sourceCampaignId || !workflowItemId || !isWorkflowStatus(row.status)) {
-        continue;
-      }
-      const workflowSessionId = typeof row.session_id === "string" && row.session_id.trim() ? row.session_id.trim() : null;
-      const displayTitle =
-        typeof row.display_title === "string" && row.display_title.trim() ? row.display_title.trim() : null;
-      nextHints[sourceCampaignId] = {
-        workflowItemId,
-        workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1),
-        sessionId: workflowSessionId,
-        displayTitle
-      };
-    }
-
-    setCampaignWorkflowHints(nextHints);
-  }, [chatConfig, supabase]);
-
-  const refreshPendingContents = useCallback(async () => {
-    if (!supabase || !chatConfig) {
       setPendingContents([]);
       setPendingContentWorkflowHints({});
       return;
     }
 
-    const { data, error } = await supabase
-      .from("contents")
-      .select("*")
-      .eq("org_id", chatConfig.orgId)
-      .eq("status", "pending_approval")
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const result = await runtime.chat.listInboxItems({
+      limit: 80
+    });
 
-    if (error) {
-      setChatNotice(`Failed to load pending contents: ${error.message}`);
+    if (!result.ok) {
+      setChatNotice(result.message ?? "Failed to load workspace inbox items.");
       return;
     }
 
-    const contents = (data ?? []) as Content[];
-    setPendingContents(contents);
+    const nextCampaigns: Campaign[] = [];
+    const nextCampaignHints: Record<string, WorkflowLinkHint> = {};
+    const seenCampaignIds = new Set<string>();
 
-    const contentIds = contents
-      .map((content) => content.id)
-      .filter((entry): entry is string => typeof entry === "string" && !!entry.trim());
-    if (contentIds.length === 0) {
-      setPendingContentWorkflowHints({});
-      return;
-    }
+    const nextContents: Content[] = [];
+    const nextContentHints: Record<string, WorkflowLinkHint> = {};
+    const seenContentIds = new Set<string>();
 
-    const { data: workflowRows, error: workflowError } = await supabase
-      .from("workflow_items")
-      .select("id,source_content_id,session_id,display_title,status,version")
-      .eq("org_id", chatConfig.orgId)
-      .eq("type", "content_draft")
-      .in("source_content_id", contentIds);
-
-    if (workflowError || !workflowRows) {
-      setPendingContentWorkflowHints({});
-      return;
-    }
-
-    const nextHints: Record<string, WorkflowLinkHint> = {};
-    for (const row of workflowRows as WorkflowItemLinkRow[]) {
-      const sourceContentId =
-        typeof row.source_content_id === "string" && row.source_content_id.trim()
-          ? row.source_content_id.trim()
-          : "";
-      const workflowItemId = typeof row.id === "string" && row.id.trim() ? row.id.trim() : "";
-      if (!sourceContentId || !workflowItemId || !isWorkflowStatus(row.status)) {
+    for (const rawItem of result.items) {
+      const item = rawItem as ChatInboxItem;
+      const status = item.status;
+      if (!isWorkflowStatus(status)) {
         continue;
       }
-      const workflowSessionId = typeof row.session_id === "string" && row.session_id.trim() ? row.session_id.trim() : null;
+
+      const workflowItemId =
+        typeof item.workflow_item_id === "string" && item.workflow_item_id.trim()
+          ? item.workflow_item_id.trim()
+          : "";
+      if (!workflowItemId) {
+        continue;
+      }
+
+      const version = toPositiveIntOrDefault(item.expected_version, 1);
+      const sessionId =
+        typeof item.session_id === "string" && item.session_id.trim() ? item.session_id.trim() : null;
       const displayTitle =
-        typeof row.display_title === "string" && row.display_title.trim() ? row.display_title.trim() : null;
-      nextHints[sourceContentId] = {
-        workflowItemId,
-        workflowStatus: row.status,
-        version: toPositiveIntOrDefault(row.version, 1),
-        sessionId: workflowSessionId,
-        displayTitle
-      };
+        typeof item.display_title === "string" && item.display_title.trim() ? item.display_title.trim() : null;
+
+      if (item.type === "campaign_plan") {
+        const campaign = normalizeCampaignFromInbox(item.campaign as ChatInboxCampaign);
+        if (!campaign || !campaign.id || seenCampaignIds.has(campaign.id)) {
+          continue;
+        }
+        seenCampaignIds.add(campaign.id);
+        nextCampaigns.push(campaign);
+        nextCampaignHints[campaign.id] = {
+          workflowItemId,
+          workflowStatus: status,
+          version,
+          sessionId,
+          displayTitle
+        };
+        continue;
+      }
+
+      if (item.type === "content_draft") {
+        const content = normalizeContentFromInbox(item.content as ChatInboxContent);
+        if (!content || !content.id || seenContentIds.has(content.id)) {
+          continue;
+        }
+        seenContentIds.add(content.id);
+        nextContents.push(content);
+        nextContentHints[content.id] = {
+          workflowItemId,
+          workflowStatus: status,
+          version,
+          sessionId,
+          displayTitle
+        };
+      }
     }
 
-    setPendingContentWorkflowHints(nextHints);
-  }, [chatConfig, supabase]);
+    nextCampaigns.sort((left, right) => right.created_at.localeCompare(left.created_at));
+    nextContents.sort((left, right) => right.created_at.localeCompare(left.created_at));
+
+    setDraftCampaigns(nextCampaigns);
+    setCampaignWorkflowHints(nextCampaignHints);
+    setPendingContents(nextContents);
+    setPendingContentWorkflowHints(nextContentHints);
+  }, [chatConfig, runtime]);
 
   const scheduleRefreshActiveSession = useCallback(
     (delayMs = REFRESH_ACTIVE_SESSION_DEBOUNCE_MS) => {
@@ -463,7 +428,7 @@ export const ChatProvider = ({
   }, [runtime]);
 
   useEffect(() => {
-    if (!supabase || !chatConfig) {
+    if (!chatConfig) {
       setDraftCampaigns([]);
       setCampaignWorkflowHints({});
       setPendingContents([]);
@@ -471,8 +436,11 @@ export const ChatProvider = ({
       return;
     }
 
-    void refreshDraftCampaigns();
-    void refreshPendingContents();
+    void refreshWorkspaceInbox();
+
+    if (!supabase) {
+      return;
+    }
 
     const contentsChannel = supabase
       .channel(`desktop-contents-${chatConfig.orgId}`)
@@ -485,7 +453,7 @@ export const ChatProvider = ({
           filter: `org_id=eq.${chatConfig.orgId}`
         },
         () => {
-          void refreshPendingContents();
+          void refreshWorkspaceInbox();
           scheduleRefreshActiveSession();
         }
       )
@@ -502,7 +470,7 @@ export const ChatProvider = ({
           filter: `org_id=eq.${chatConfig.orgId}`
         },
         () => {
-          void refreshDraftCampaigns();
+          void refreshWorkspaceInbox();
           scheduleRefreshActiveSession();
         }
       )
@@ -512,7 +480,7 @@ export const ChatProvider = ({
       void supabase.removeChannel(contentsChannel);
       void supabase.removeChannel(campaignsChannel);
     };
-  }, [chatConfig, refreshDraftCampaigns, refreshPendingContents, scheduleRefreshActiveSession, supabase]);
+  }, [chatConfig, refreshWorkspaceInbox, scheduleRefreshActiveSession, supabase]);
 
   useEffect(() => {
     if (!supabase || !chatConfig) {
@@ -621,7 +589,7 @@ export const ChatProvider = ({
         await action();
         await refreshMessages();
         await refreshActiveSession();
-        await Promise.all([refreshDraftCampaigns(), refreshPendingContents()]);
+        await refreshWorkspaceInbox();
       } catch (error) {
         const runtimeError = toRuntimeActionError(error, "Action failed.");
         if (
@@ -636,7 +604,7 @@ export const ChatProvider = ({
         }
         if (runtimeError.code === "version_conflict") {
           setChatNotice(buildVersionConflictNotice(runtimeError));
-          await Promise.all([refreshMessages(), refreshActiveSession(), refreshDraftCampaigns(), refreshPendingContents()]);
+          await Promise.all([refreshMessages(), refreshActiveSession(), refreshWorkspaceInbox()]);
         } else {
           setChatNotice(runtimeError.message);
         }
@@ -644,7 +612,7 @@ export const ChatProvider = ({
         setIsActionPending(false);
       }
     },
-    [invalidateSelectedSession, refreshActiveSession, refreshDraftCampaigns, refreshMessages, refreshPendingContents]
+    [invalidateSelectedSession, refreshActiveSession, refreshMessages, refreshWorkspaceInbox]
   );
 
   const sendMessage = useCallback(

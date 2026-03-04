@@ -493,6 +493,20 @@ button.primary {
   font-size: 14px;
 }
 
+.queue-plan-doc {
+  max-height: 280px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+  overflow: auto;
+}
+
+.queue-chat-revision-hint {
+  color: #4b5563;
+  font-size: 12px;
+}
+
 .queue-item-actions {
   display: flex;
   justify-content: flex-start;

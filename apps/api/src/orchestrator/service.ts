@@ -193,6 +193,31 @@ const parseContextLevel = (value: unknown): RagContextMeta["context_level"] => {
   return "minimal";
 };
 
+const buildCampaignPlanSummary = (params: {
+  plan: SessionState["campaign_plan"] | null;
+  planChainData?: unknown;
+}): Record<string, unknown> | null => {
+  if (!params.plan) {
+    return null;
+  }
+  const planChainData = asRecord(params.planChainData);
+  const calendar = asRecord(planChainData.calendar);
+  const weeks = Array.isArray(calendar.weeks) ? calendar.weeks : [];
+
+  return {
+    channels: Array.isArray(params.plan.channels) ? params.plan.channels : [],
+    duration_days:
+      typeof params.plan.duration_days === "number" && Number.isFinite(params.plan.duration_days)
+        ? Math.max(1, Math.floor(params.plan.duration_days))
+        : null,
+    post_count:
+      typeof params.plan.post_count === "number" && Number.isFinite(params.plan.post_count)
+        ? Math.max(1, Math.floor(params.plan.post_count))
+        : null,
+    week_count: Math.max(0, weeks.length)
+  };
+};
+
 const parseRagContextMeta = (value: unknown): RagContextMeta | null => {
   if (!value || typeof value !== "object") {
     return null;
@@ -732,6 +757,238 @@ export const listPendingFolderUpdatesForOrg = async (params: {
     .slice(0, safeLimit);
 };
 
+type WorkspaceInboxItemType = "campaign_plan" | "content_draft";
+
+type WorkspaceInboxCampaign = {
+  id: string;
+  org_id: string;
+  title: string;
+  activity_folder: string;
+  status: string;
+  channels: string[];
+  plan: CampaignPlan;
+  plan_chain_data: unknown;
+  plan_document: string | null;
+  created_at: string;
+  updated_at: string;
+  plan_summary: Record<string, unknown> | null;
+};
+
+type WorkspaceInboxContent = {
+  id: string;
+  org_id: string;
+  campaign_id: string | null;
+  channel: string;
+  content_type: string;
+  status: string;
+  body: string | null;
+  metadata: Record<string, unknown>;
+  scheduled_at: string | null;
+  published_at: string | null;
+  embedded_at: string | null;
+  created_by: string;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkspaceInboxItem = {
+  workflow_item_id: string;
+  type: WorkspaceInboxItemType;
+  status: WorkflowStatus;
+  expected_version: number;
+  session_id: string | null;
+  display_title: string | null;
+  created_at: string;
+  campaign: WorkspaceInboxCampaign | null;
+  content: WorkspaceInboxContent | null;
+};
+
+const toSafeCampaignPlan = (value: unknown): CampaignPlan => {
+  const parsed = parseCampaignPlan(value);
+  if (parsed) {
+    return parsed;
+  }
+  return {
+    objective: "",
+    channels: [],
+    duration_days: 7,
+    post_count: 1,
+    content_types: [],
+    suggested_schedule: []
+  };
+};
+
+export const listWorkspaceInboxItemsForOrg = async (params: {
+  orgId: string;
+  limit?: number;
+}): Promise<WorkspaceInboxItem[]> => {
+  const safeLimit =
+    typeof params.limit === "number" && Number.isFinite(params.limit)
+      ? Math.max(1, Math.min(100, Math.floor(params.limit)))
+      : 50;
+
+  const { data: workflowRowsRaw, error: workflowError } = await supabaseAdmin
+    .from("workflow_items")
+    .select("id,type,status,version,session_id,display_title,source_campaign_id,source_content_id,created_at,payload")
+    .eq("org_id", params.orgId)
+    .eq("status", "proposed")
+    .in("type", ["campaign_plan", "content_draft"])
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (workflowError) {
+    throw new HttpError(500, "db_error", `Failed to query workspace inbox workflow items: ${workflowError.message}`);
+  }
+
+  const workflowRows = Array.isArray(workflowRowsRaw) ? (workflowRowsRaw as Record<string, unknown>[]) : [];
+  const campaignIds = [
+    ...new Set(
+      workflowRows
+        .map((row) => asString(row.source_campaign_id, "").trim())
+        .filter((entry): entry is string => !!entry)
+    )
+  ];
+  const contentIds = [
+    ...new Set(
+      workflowRows
+        .map((row) => asString(row.source_content_id, "").trim())
+        .filter((entry): entry is string => !!entry)
+    )
+  ];
+
+  const campaignById = new Map<string, WorkspaceInboxCampaign>();
+  if (campaignIds.length > 0) {
+    const { data: campaignsRaw, error: campaignsError } = await supabaseAdmin
+      .from("campaigns")
+      .select("id,org_id,title,activity_folder,status,channels,plan,plan_chain_data,plan_document,created_at,updated_at")
+      .eq("org_id", params.orgId)
+      .in("id", campaignIds);
+
+    if (campaignsError) {
+      throw new HttpError(500, "db_error", `Failed to query workspace inbox campaigns: ${campaignsError.message}`);
+    }
+
+    for (const row of (campaignsRaw as Record<string, unknown>[] | null) ?? []) {
+      const id = asString(row.id, "").trim();
+      if (!id) {
+        continue;
+      }
+      const plan = toSafeCampaignPlan(row.plan);
+      campaignById.set(id, {
+        id,
+        org_id: asString(row.org_id, params.orgId),
+        title: asString(row.title, ""),
+        activity_folder: asString(row.activity_folder, ""),
+        status: asString(row.status, "draft"),
+        channels: asStringArray(row.channels).map((entry) => entry.toLowerCase()),
+        plan,
+        plan_chain_data: row.plan_chain_data ?? null,
+        plan_document: typeof row.plan_document === "string" ? row.plan_document : null,
+        created_at: asString(row.created_at, ""),
+        updated_at: asString(row.updated_at, ""),
+        plan_summary: buildCampaignPlanSummary({ plan, planChainData: row.plan_chain_data })
+      });
+    }
+  }
+
+  const contentById = new Map<string, WorkspaceInboxContent>();
+  if (contentIds.length > 0) {
+    const { data: contentsRaw, error: contentsError } = await supabaseAdmin
+      .from("contents")
+      .select(
+        "id,org_id,campaign_id,channel,content_type,status,body,metadata,scheduled_at,published_at,embedded_at,created_by,approved_by,created_at,updated_at"
+      )
+      .eq("org_id", params.orgId)
+      .in("id", contentIds);
+
+    if (contentsError) {
+      throw new HttpError(500, "db_error", `Failed to query workspace inbox contents: ${contentsError.message}`);
+    }
+
+    for (const row of (contentsRaw as Record<string, unknown>[] | null) ?? []) {
+      const id = asString(row.id, "").trim();
+      if (!id) {
+        continue;
+      }
+      contentById.set(id, {
+        id,
+        org_id: asString(row.org_id, params.orgId),
+        campaign_id: asString(row.campaign_id, "").trim() || null,
+        channel: asString(row.channel, ""),
+        content_type: asString(row.content_type, ""),
+        status: asString(row.status, ""),
+        body: typeof row.body === "string" ? row.body : null,
+        metadata: asRecord(row.metadata),
+        scheduled_at: asString(row.scheduled_at, "").trim() || null,
+        published_at: asString(row.published_at, "").trim() || null,
+        embedded_at: asString(row.embedded_at, "").trim() || null,
+        created_by: asString(row.created_by, "ai"),
+        approved_by: asString(row.approved_by, "").trim() || null,
+        created_at: asString(row.created_at, ""),
+        updated_at: asString(row.updated_at, "")
+      });
+    }
+  }
+
+  const items: WorkspaceInboxItem[] = [];
+  for (const row of workflowRows) {
+    const typeRaw = asString(row.type, "").trim();
+    if (typeRaw !== "campaign_plan" && typeRaw !== "content_draft") {
+      continue;
+    }
+    const workflowItemId = asString(row.id, "").trim();
+    if (!workflowItemId) {
+      continue;
+    }
+    const payload = asRecord(row.payload);
+    const sourceCampaignId = asString(row.source_campaign_id, "").trim();
+    const sourceContentId = asString(row.source_content_id, "").trim();
+    const campaignFromDb = sourceCampaignId ? campaignById.get(sourceCampaignId) ?? null : null;
+    const contentFromDb = sourceContentId ? contentById.get(sourceContentId) ?? null : null;
+
+    const fallbackPlan = toSafeCampaignPlan(payload.plan);
+    const fallbackPlanSummary =
+      payload.plan_summary && typeof payload.plan_summary === "object" && !Array.isArray(payload.plan_summary)
+        ? (payload.plan_summary as Record<string, unknown>)
+        : null;
+    const campaign =
+      typeRaw === "campaign_plan" && sourceCampaignId
+        ? (campaignFromDb ?? {
+            id: sourceCampaignId,
+            org_id: params.orgId,
+            title: asString(payload.display_title, asString(row.display_title, "")),
+            activity_folder: asString(payload.activity_folder, ""),
+            status: "draft",
+            channels: fallbackPlan.channels,
+            plan: fallbackPlan,
+            plan_chain_data: payload.plan_chain_data ?? null,
+            plan_document: typeof payload.plan_document === "string" ? payload.plan_document : null,
+            created_at: asString(row.created_at, ""),
+            updated_at: asString(row.created_at, ""),
+            plan_summary: fallbackPlanSummary ?? buildCampaignPlanSummary({ plan: fallbackPlan, planChainData: payload.plan_chain_data })
+          })
+        : null;
+
+    items.push({
+      workflow_item_id: workflowItemId,
+      type: typeRaw,
+      status: asString(row.status, "proposed") as WorkflowStatus,
+      expected_version:
+        typeof row.version === "number" && Number.isFinite(row.version)
+          ? Math.max(1, Math.floor(row.version))
+          : 1,
+      session_id: asString(row.session_id, "").trim() || null,
+      display_title: asString(row.display_title, "").trim() || null,
+      created_at: asString(row.created_at, ""),
+      campaign,
+      content: typeRaw === "content_draft" ? contentFromDb : null
+    });
+  }
+
+  return items;
+};
+
 export const acknowledgePendingFolderUpdatesForFolder = async (params: {
   orgId: string;
   activityFolder: string;
@@ -984,7 +1241,16 @@ const ensureCampaignWorkflowItemForState = async (params: {
   state: SessionState;
   campaignId: string;
   eventIdempotencyKey: string | null;
+  campaignPlan?: SessionState["campaign_plan"] | null;
+  planChainData?: unknown;
+  planDocument?: string | null;
 }): Promise<WorkflowItemRow> => {
+  const campaignPlan = params.campaignPlan ?? params.state.campaign_plan;
+  const planSummary = buildCampaignPlanSummary({
+    plan: campaignPlan,
+    planChainData: params.planChainData
+  });
+
   const workflowItem = await ensureCampaignWorkflowItem({
     orgId: params.session.org_id,
     sessionId: params.session.id,
@@ -994,7 +1260,11 @@ const ensureCampaignWorkflowItemForState = async (params: {
       campaign_id: params.campaignId,
       activity_folder: params.state.activity_folder,
       user_message: params.state.user_message,
-      plan: params.state.campaign_plan
+      plan: campaignPlan,
+      plan_document:
+        typeof params.planDocument === "string" && params.planDocument.trim() ? params.planDocument : null,
+      plan_summary: planSummary,
+      ...(params.planChainData ? { plan_chain_data: params.planChainData } : {})
     },
     idempotencyKey: buildWorkflowCreateIdempotencyKey(
       params.session.id,

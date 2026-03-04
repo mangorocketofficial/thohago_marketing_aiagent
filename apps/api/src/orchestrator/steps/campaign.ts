@@ -24,6 +24,9 @@ type EnsureCampaignWorkflowItemForStateInput = {
   state: SessionState;
   campaignId: string;
   eventIdempotencyKey: string | null;
+  campaignPlan?: SessionState["campaign_plan"] | null;
+  planChainData?: CampaignPlanChainData | null;
+  planDocument?: string | null;
 };
 
 type EnsureContentWorkflowItemForStateInput = {
@@ -61,6 +64,32 @@ const parseRerunFromStep = (value: unknown): "step_a" | "step_b" | "step_c" | "s
     return normalized;
   }
   return undefined;
+};
+
+const buildPlanSummaryPayload = (params: {
+  plan: SessionState["campaign_plan"] | null;
+  chainData?: CampaignPlanChainData | null;
+}): Record<string, unknown> | null => {
+  if (!params.plan) {
+    return null;
+  }
+  const weekCount =
+    Array.isArray(params.chainData?.calendar?.weeks) && params.chainData?.calendar?.weeks
+      ? params.chainData.calendar.weeks.length
+      : null;
+
+  return {
+    channels: Array.isArray(params.plan.channels) ? params.plan.channels : [],
+    duration_days:
+      typeof params.plan.duration_days === "number" && Number.isFinite(params.plan.duration_days)
+        ? Math.max(1, Math.floor(params.plan.duration_days))
+        : null,
+    post_count:
+      typeof params.plan.post_count === "number" && Number.isFinite(params.plan.post_count)
+        ? Math.max(1, Math.floor(params.plan.post_count))
+        : null,
+    week_count: typeof weekCount === "number" && Number.isFinite(weekCount) ? Math.max(0, Math.floor(weekCount)) : null
+  };
 };
 
 export type CampaignStepResult = {
@@ -185,7 +214,10 @@ export const applyUserMessageStep = async (
     session,
     state,
     campaignId,
-    eventIdempotencyKey
+    eventIdempotencyKey,
+    campaignPlan: plan,
+    planChainData: chainData,
+    planDocument
   });
   const summaryMessageId = await deps.emitCampaignActionCardProjection({
     orgId: session.org_id,
@@ -370,6 +402,7 @@ export const applyCampaignRevisionStep = async (
   if (!reason) {
     throw new HttpError(400, "invalid_payload", "payload.reason is required when payload.mode is revision.");
   }
+  const rerunFromStep = parseRerunFromStep(payload?.rerun_from_step);
 
   const campaignWorkflowItem = await deps.ensureCampaignWorkflowItemForState({
     session,
@@ -383,7 +416,7 @@ export const applyCampaignRevisionStep = async (
     itemId: campaignWorkflowItem.id,
     action: "request_revision",
     actorType: "user",
-    payload: { mode: "revision", reason },
+    payload: { mode: "revision", reason, ...(rerunFromStep ? { rerun_from_step: rerunFromStep } : {}) },
     expectedVersion,
     idempotencyKey: deps.buildWorkflowActionIdempotencyKey(
       session.id,
@@ -431,7 +464,6 @@ export const applyCampaignRevisionStep = async (
       ? (snapshotPlanRaw as SessionState["campaign_plan"])
       : null);
   const previousChainData = parseCampaignChainData(snapshotRow.plan_chain_data);
-  const rerunFromStep = parseRerunFromStep(payload?.rerun_from_step);
 
   const { plan, ragMeta, chainData, planDocument } = await generateCampaignPlan(
     session.org_id,
@@ -475,7 +507,14 @@ export const applyCampaignRevisionStep = async (
     itemId: campaignWorkflowItem.id,
     action: "resubmitted",
     actorType: "assistant",
-    payload: { mode: "revision", reason, plan },
+    payload: {
+      mode: "revision",
+      reason,
+      ...(rerunFromStep ? { rerun_from_step: rerunFromStep } : {}),
+      plan,
+      plan_document: planDocument,
+      plan_summary: buildPlanSummaryPayload({ plan, chainData })
+    },
     expectedVersion: revisionRequested.item.version,
     idempotencyKey: deps.buildWorkflowActionIdempotencyKey(
       session.id,

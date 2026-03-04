@@ -216,7 +216,7 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
                       })
                     }
                   >
-                    View in Inbox
+                    {t("campaignPlan.viewInInbox")}
                   </button>
                 ) : null}
               </div>

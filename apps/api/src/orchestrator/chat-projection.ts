@@ -108,10 +108,10 @@ const patchSystemWorkflowMetadataStatus = (params: {
 
 const buildCampaignSummary = (activityFolder: string, plan: CampaignPlan): string =>
   [
-    `캠페인 초안이 준비되었습니다: ${activityFolder}`,
+    `📋 ${activityFolder} 캠페인 계획이 완료되었습니다.`,
     `- 채널: ${plan.channels.join(", ")}`,
     `- 기간: ${plan.duration_days}일 / ${plan.post_count}개 포스트`,
-    "확인하면 첫 콘텐츠 초안을 생성하겠습니다."
+    "인박스에서 확인하고 승인해 주세요."
   ].join("\n");
 
 const buildContentSummary = (channel: string, forbiddenCheck: ForbiddenCheckMeta): string =>

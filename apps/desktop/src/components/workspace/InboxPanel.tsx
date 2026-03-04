@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Campaign, Content, WorkflowStatus } from "@repo/types";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
 import { useChatContext } from "../../context/ChatContext";
 import { useNavigation } from "../../context/NavigationContext";
 import { useSessionSelector } from "../../context/SessionSelectorContext";
@@ -36,6 +37,41 @@ type InboxItem =
 
 const compareByCreatedDesc = (left: InboxItem, right: InboxItem): number => right.createdAt.localeCompare(left.createdAt);
 
+const asSummaryRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const asSummaryNumber = (value: unknown): number | null => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(parsed));
+};
+
+const resolveCampaignSummary = (
+  campaign: Campaign
+): { channels: string[]; durationDays: number | null; postCount: number | null; weekCount: number | null } => {
+  const maybeSummary = asSummaryRecord((campaign as Campaign & { plan_summary?: unknown }).plan_summary);
+  const channelsFromSummary = Array.isArray(maybeSummary.channels)
+    ? maybeSummary.channels.filter((entry): entry is string => typeof entry === "string" && !!entry.trim())
+    : [];
+  const durationFromSummary = asSummaryNumber(maybeSummary.duration_days);
+  const postCountFromSummary = asSummaryNumber(maybeSummary.post_count);
+  const weekCountFromSummary = asSummaryNumber(maybeSummary.week_count);
+
+  return {
+    channels: channelsFromSummary.length > 0 ? channelsFromSummary : campaign.channels,
+    durationDays: durationFromSummary ?? campaign.plan.duration_days ?? null,
+    postCount: postCountFromSummary ?? campaign.plan.post_count ?? null,
+    weekCount: weekCountFromSummary
+  };
+};
+
 export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
   const { t } = useTranslation();
   const {
@@ -53,6 +89,7 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
   const [editOpenByItem, setEditOpenByItem] = useState<Record<string, boolean>>({});
   const [editByItem, setEditByItem] = useState<Record<string, string>>({});
   const [noticeByItem, setNoticeByItem] = useState<Record<string, string>>({});
+  const [campaignDetailOpenByItem, setCampaignDetailOpenByItem] = useState<Record<string, boolean>>({});
   const [highlightedWorkflowItemId, setHighlightedWorkflowItemId] = useState<string | null>(null);
   const itemRefByWorkflowItemId = useRef<Record<string, HTMLDivElement | null>>({});
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -226,6 +263,8 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
             const reason = reasonByItem[item.key] ?? "";
             const notice = noticeByItem[item.key] ?? "";
             const isHighlighted = highlightedWorkflowItemId === item.workflowItemId;
+            const isCampaignDetailOpen = campaignDetailOpenByItem[item.key] ?? false;
+            const campaignSummary = item.type === "campaign" ? resolveCampaignSummary(item.campaign) : null;
             return (
               <div
                 key={item.key}
@@ -241,15 +280,36 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                         <strong>{resolveInboxTitle(item)}</strong>
                       </p>
                       <p>Session: {item.sessionId ?? "-"}</p>
-                      <p>Channels: {item.campaign.channels.join(", ") || "-"}</p>
+                      <p>Channels: {campaignSummary?.channels.join(", ") || "-"}</p>
                       <p>
-                        Posts: {item.campaign.plan.post_count} / Days: {item.campaign.plan.duration_days}
+                        Posts: {campaignSummary?.postCount ?? "-"} / Days: {campaignSummary?.durationDays ?? "-"}
                       </p>
+                      {campaignSummary?.weekCount !== null ? (
+                        <p>Calendar weeks: {campaignSummary?.weekCount}</p>
+                      ) : null}
                       <p>Created: {formatDateTime(item.campaign.created_at)}</p>
                     </div>
                     <span className={`queue-badge is-${item.workflowStatus}`}>
                       {getWorkflowStatusLabel(item.workflowStatus)} v{item.expectedVersion}
                     </span>
+                    <button
+                      type="button"
+                      className="chat-card-editor-toggle"
+                      disabled={isActionPending}
+                      onClick={() =>
+                        setCampaignDetailOpenByItem((previous) => ({
+                          ...previous,
+                          [item.key]: !isCampaignDetailOpen
+                        }))
+                      }
+                    >
+                      {isCampaignDetailOpen ? t("campaignPlan.collapseDetail") : t("campaignPlan.expandDetail")}
+                    </button>
+                    {isCampaignDetailOpen ? (
+                      <div className="queue-plan-doc markdown-viewer ui-markdown-viewer">
+                        <ReactMarkdown>{(item.campaign.plan_document ?? "").trim() || "-"}</ReactMarkdown>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -272,7 +332,11 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
 
                 <textarea
                   className="chat-card-reason"
-                  placeholder="Optional reason (required for Request Revision)"
+                  placeholder={
+                    item.type === "campaign"
+                      ? "Optional reason for reject"
+                      : "Optional reason (required for Request Revision)"
+                  }
                   value={reason}
                   onChange={(event) =>
                     setReasonByItem((previous) => ({ ...previous, [item.key]: event.target.value }))
@@ -322,22 +386,24 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                       })
                     }
                   >
-                    Approve
+                    {item.type === "campaign" ? t("campaignPlan.actionApprove") : "Approve"}
                   </button>
-                  <button
-                    type="button"
-                    disabled={isActionPending}
-                    onClick={() =>
-                      void submitItemAction({
-                        item,
-                        actionId: "request_revision",
-                        eventType: item.type === "campaign" ? "campaign_rejected" : "content_rejected",
-                        mode: "revision"
-                      })
-                    }
-                  >
-                    Request Revision
-                  </button>
+                  {item.type === "content" ? (
+                    <button
+                      type="button"
+                      disabled={isActionPending}
+                      onClick={() =>
+                        void submitItemAction({
+                          item,
+                          actionId: "request_revision",
+                          eventType: "content_rejected",
+                          mode: "revision"
+                        })
+                      }
+                    >
+                      Request Revision
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     disabled={isActionPending}
@@ -349,9 +415,13 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
                       })
                     }
                   >
-                    Reject
+                    {item.type === "campaign" ? t("campaignPlan.actionReject") : "Reject"}
                   </button>
                 </div>
+
+                {item.type === "campaign" ? (
+                  <p className="queue-chat-revision-hint">{t("campaignPlan.revisionViaChatHint")}</p>
+                ) : null}
 
                 {notice ? <p className="notice">{notice}</p> : null}
               </div>

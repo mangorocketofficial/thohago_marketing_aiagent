@@ -1,14 +1,17 @@
 export {};
 import type {
+  Campaign,
   BrandProfile,
   ChatActionCardAction,
   ChatActionCardEventType,
+  Content,
   InterviewAnswers,
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
   OnboardingResultDocument,
   OrgEntitlement,
-  OrchestratorSession
+  OrchestratorSession,
+  WorkflowStatus
 } from "@repo/types";
 
 type RendererFileType = "image" | "video" | "document";
@@ -102,6 +105,35 @@ type ChatSessionListResult = {
   ok: boolean;
   sessions: OrchestratorSession[];
   next_cursor: string | null;
+  message?: string;
+};
+
+type ChatInboxPlanSummary = {
+  channels: string[];
+  duration_days: number | null;
+  post_count: number | null;
+  week_count: number | null;
+};
+
+type ChatInboxCampaign = Campaign & {
+  plan_summary?: ChatInboxPlanSummary | null;
+};
+
+type ChatInboxItem = {
+  workflow_item_id: string;
+  type: "campaign_plan" | "content_draft";
+  status: WorkflowStatus;
+  expected_version: number;
+  session_id: string | null;
+  display_title: string | null;
+  created_at: string;
+  campaign: ChatInboxCampaign | null;
+  content: Content | null;
+};
+
+type ChatInboxListResult = {
+  ok: boolean;
+  items: ChatInboxItem[];
   message?: string;
 };
 
@@ -313,6 +345,7 @@ declare global {
         getConfig: () => Promise<ChatConfig>;
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
+        listInboxItems: (payload?: { limit?: number }) => Promise<ChatInboxListResult>;
         listFolderUpdates: (payload?: { limit?: number }) => Promise<ChatFolderUpdateListResult>;
         acknowledgeFolderUpdates: (payload: {
           activityFolder: string;
