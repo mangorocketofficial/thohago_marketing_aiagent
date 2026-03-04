@@ -16,6 +16,7 @@ export type ChatChannel = "dashboard" | "telegram";
 
 export type InsertChatMessageInput = {
   orgId: string;
+  sessionId?: string | null;
   role: "user" | "assistant";
   content: string;
   channel?: ChatChannel;
@@ -91,6 +92,7 @@ const readChatMessageIdByProjectionKey = async (orgId: string, projectionKey: st
 export const insertChatMessage = async (input: InsertChatMessageInput): Promise<string> => {
   const payload = {
     org_id: input.orgId,
+    session_id: input.sessionId ?? null,
     role: input.role,
     content: input.content,
     channel: input.channel ?? DEFAULT_CHAT_CHANNEL,
@@ -192,6 +194,7 @@ export const emitCampaignActionCardProjection = async (
 
   return insertChatMessage({
     orgId: params.orgId,
+    sessionId: params.sessionId,
     role: "assistant",
     content: buildCampaignSummary(params.activityFolder, params.plan),
     channel: DEFAULT_CHAT_CHANNEL,
@@ -217,6 +220,7 @@ export const emitContentActionCardProjection = async (params: EmitContentActionC
 
   return insertChatMessage({
     orgId: params.orgId,
+    sessionId: params.sessionId,
     role: "assistant",
     content: buildContentSummary(params.channel, params.forbiddenCheck),
     channel: DEFAULT_CHAT_CHANNEL,

@@ -132,6 +132,7 @@ export const applyUserMessageStep = async (
 
   await deps.insertChatMessage({
     orgId: session.org_id,
+    sessionId: session.id,
     role: "user",
     content: userMessage,
     ...(uiContextMetadata ? { metadata: { ui_context: uiContextMetadata } } : {})
@@ -476,6 +477,7 @@ const applyCampaignTerminalRejectStep = async (
 
   await deps.insertChatMessage({
     orgId: session.org_id,
+    sessionId: session.id,
     role: "assistant",
     content: reason
       ? `요청을 반영했습니다. 세션을 종료합니다. 사유: ${reason}`

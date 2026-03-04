@@ -24,8 +24,11 @@ import { generateContentDraft, generateDetectMessage } from "./ai";
 import { checkForbiddenWords } from "./forbidden-check";
 import type {
   CampaignPlan,
+  CreateSessionParams,
+  CreateSessionResult,
   EnqueueTriggerResult,
   ForbiddenCheckMeta,
+  ListSessionsParams,
   OrchestratorSessionRow,
   OrchestratorStep,
   PipelineTriggerRow,
@@ -38,6 +41,9 @@ import type {
 
 const ACTIVE_SESSION_STATUSES: SessionStatus[] = ["running", "paused"];
 const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const DEFAULT_WORKSPACE_TYPE = "general";
+const DEFAULT_SCOPE_ID = "default";
+const DEFAULT_WORKSPACE_KEY = `${DEFAULT_WORKSPACE_TYPE}:${DEFAULT_SCOPE_ID}`;
 
 const lockQueueByKey = new Map<string, Promise<void>>();
 
@@ -68,6 +74,22 @@ const asString = (value: unknown, fallback = ""): string => {
     return value;
   }
   return fallback;
+};
+
+const normalizeWorkspaceType = (value: unknown, fallback = DEFAULT_WORKSPACE_TYPE): string => {
+  const normalized = asString(value, fallback).trim().toLowerCase();
+  return normalized || fallback;
+};
+
+const normalizeScopeId = (value: unknown): string | null => {
+  const normalized = asString(value, "").trim();
+  return normalized ? normalized : null;
+};
+
+const buildWorkspaceKey = (workspaceType: string, scopeId?: string | null): string => {
+  const normalizedType = normalizeWorkspaceType(workspaceType);
+  const normalizedScope = normalizeScopeId(scopeId) ?? DEFAULT_SCOPE_ID;
+  return `${normalizedType}:${normalizedScope}`;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -277,18 +299,64 @@ const messageFromError = (error: unknown): string => {
   return "Unknown orchestration error";
 };
 
+const buildManualSessionState = (workspaceType: string, scopeId: string | null, title: string | null): SessionState => {
+  const preferredScope = normalizeScopeId(scopeId);
+  const titleValue = title ? title.trim() : "";
+  const activityFolder = preferredScope ?? (titleValue || workspaceType || DEFAULT_WORKSPACE_TYPE);
+  return {
+    trigger_id: "",
+    activity_folder: activityFolder,
+    file_name: "",
+    file_type: "document",
+    user_message: null,
+    campaign_id: null,
+    campaign_workflow_item_id: null,
+    campaign_plan: null,
+    content_id: null,
+    content_workflow_item_id: null,
+    content_draft: null,
+    rag_context: null,
+    forbidden_check: null,
+    processed_event_ids: [],
+    last_error: null
+  };
+};
+
 const getActiveSessionByOrg = async (orgId: string): Promise<OrchestratorSessionRow | null> => {
   const { data, error } = await supabaseAdmin
     .from("orchestrator_sessions")
     .select("*")
     .eq("org_id", orgId)
     .in("status", ACTIVE_SESSION_STATUSES)
-    .order("created_at", { ascending: false })
+    .is("archived_at", null)
+    .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (error) {
     throw new HttpError(500, "db_error", `Failed to query active session: ${error.message}`);
+  }
+
+  return (data as OrchestratorSessionRow | null) ?? null;
+};
+
+const getActiveSessionByWorkspace = async (
+  orgId: string,
+  workspaceKey: string
+): Promise<OrchestratorSessionRow | null> => {
+  const { data, error } = await supabaseAdmin
+    .from("orchestrator_sessions")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("workspace_key", workspaceKey)
+    .in("status", ACTIVE_SESSION_STATUSES)
+    .is("archived_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to query workspace active session: ${error.message}`);
   }
 
   return (data as OrchestratorSessionRow | null) ?? null;
@@ -309,7 +377,138 @@ export const getSessionById = async (sessionId: string): Promise<OrchestratorSes
 };
 
 export const getActiveSessionForOrg = async (orgId: string): Promise<OrchestratorSessionRow | null> =>
-  getActiveSessionByOrg(orgId);
+  getActiveSessionByWorkspace(orgId, DEFAULT_WORKSPACE_KEY);
+
+export const listSessionsForOrg = async (params: ListSessionsParams): Promise<OrchestratorSessionRow[]> => {
+  const safeLimit = Math.max(1, Math.min(50, Math.floor(params.limit)));
+  let query = supabaseAdmin.from("orchestrator_sessions").select("*").eq("org_id", params.orgId);
+
+  if (!params.includeArchived) {
+    query = query.is("archived_at", null);
+  }
+
+  const workspaceType = asString(params.workspaceType, "").trim() ? normalizeWorkspaceType(params.workspaceType) : null;
+  if (workspaceType) {
+    query = query.eq("workspace_type", workspaceType);
+  }
+
+  if (params.scopeId !== undefined) {
+    const scopeId = normalizeScopeId(params.scopeId);
+    query = scopeId ? query.eq("scope_id", scopeId) : query.is("scope_id", null);
+  }
+
+  if (Array.isArray(params.statuses) && params.statuses.length > 0) {
+    query = query.in("status", params.statuses);
+  }
+
+  if (params.cursor?.updated_at && params.cursor?.id) {
+    const updatedAt = params.cursor.updated_at.trim();
+    const id = params.cursor.id.trim();
+    if (updatedAt && id) {
+      query = query.or(`updated_at.lt.${updatedAt},and(updated_at.eq.${updatedAt},id.lt.${id})`);
+    }
+  }
+
+  const { data, error } = await query
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to list sessions: ${error.message}`);
+  }
+
+  return (data as OrchestratorSessionRow[] | null) ?? [];
+};
+
+export const createSessionForOrg = async (params: CreateSessionParams): Promise<CreateSessionResult> => {
+  const workspaceType = normalizeWorkspaceType(params.workspaceType);
+  const scopeId = normalizeScopeId(params.scopeId) ?? DEFAULT_SCOPE_ID;
+  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
+  const title = normalizeScopeId(params.title);
+  const createdByUserId = normalizeScopeId(params.createdByUserId);
+  const startPaused = params.startPaused !== false;
+
+  return withLock(`org:${params.orgId}`, async () => {
+    const active = await getActiveSessionByWorkspace(params.orgId, workspaceKey);
+    if (active) {
+      return {
+        session: active,
+        reused: true
+      };
+    }
+
+    const state = buildManualSessionState(workspaceType, scopeId, title);
+
+    const { data, error } = await supabaseAdmin
+      .from("orchestrator_sessions")
+      .insert({
+        org_id: params.orgId,
+        trigger_id: null,
+        workspace_type: workspaceType,
+        scope_id: scopeId,
+        workspace_key: workspaceKey,
+        title,
+        created_by_user_id: createdByUserId,
+        archived_at: null,
+        state,
+        current_step: "await_user_input",
+        status: startPaused ? "paused" : "running"
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      if ((error as { code?: string }).code === "23505") {
+        const existing = await getActiveSessionByWorkspace(params.orgId, workspaceKey);
+        if (existing) {
+          return {
+            session: existing,
+            reused: true
+          };
+        }
+        throw new HttpError(409, "session_conflict", "An active session already exists for this workspace.");
+      }
+      throw new HttpError(500, "db_error", `Failed to create session: ${error.message}`);
+    }
+
+    return {
+      session: data as OrchestratorSessionRow,
+      reused: false
+    };
+  });
+};
+
+export const getRecommendedSessionForWorkspace = async (params: {
+  orgId: string;
+  workspaceType: string;
+  scopeId?: string | null;
+}): Promise<OrchestratorSessionRow | null> => {
+  const workspaceType = normalizeWorkspaceType(params.workspaceType);
+  const scopeId = normalizeScopeId(params.scopeId) ?? DEFAULT_SCOPE_ID;
+  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
+
+  const active = await getActiveSessionByWorkspace(params.orgId, workspaceKey);
+  if (active) {
+    return active;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("orchestrator_sessions")
+    .select("*")
+    .eq("org_id", params.orgId)
+    .eq("workspace_key", workspaceKey)
+    .is("archived_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(500, "db_error", `Failed to query recommended session: ${error.message}`);
+  }
+
+  return (data as OrchestratorSessionRow | null) ?? null;
+};
 
 const getPendingTrigger = async (orgId: string): Promise<PipelineTriggerRow | null> => {
   const { data, error } = await supabaseAdmin
@@ -359,12 +558,19 @@ const updateSession = async (
 
 const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<string> => {
   const state = emptyStateFromTrigger(trigger);
+  const workspaceType = DEFAULT_WORKSPACE_TYPE;
+  const scopeId = DEFAULT_SCOPE_ID;
+  const workspaceKey = buildWorkspaceKey(workspaceType, scopeId);
 
   const { data: createdSession, error: insertError } = await supabaseAdmin
     .from("orchestrator_sessions")
     .insert({
       org_id: trigger.org_id,
       trigger_id: trigger.id,
+      workspace_type: workspaceType,
+      scope_id: scopeId,
+      workspace_key: workspaceKey,
+      archived_at: null,
       state,
       current_step: "detect",
       status: "running"
@@ -374,9 +580,9 @@ const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<stri
 
   if (insertError) {
     if ((insertError as { code?: string }).code === "23505") {
-      const activeSession = await getActiveSessionByOrg(trigger.org_id);
+      const activeSession = await getActiveSessionByWorkspace(trigger.org_id, workspaceKey);
       if (!activeSession) {
-        throw new HttpError(409, "session_conflict", "Active session already exists for this org.");
+        throw new HttpError(409, "session_conflict", "Active session already exists for this workspace.");
       }
       return activeSession.id;
     }
@@ -393,6 +599,7 @@ const startSessionForTrigger = async (trigger: PipelineTriggerRow): Promise<stri
     const detectMessage = await generateDetectMessage(trigger.activity_folder, trigger.file_name);
     await insertChatMessage({
       orgId: trigger.org_id,
+      sessionId: session.id,
       role: "assistant",
       content: detectMessage
     });
@@ -713,7 +920,7 @@ const processResumeEvent = async (
 
 const tryStartNextPendingForOrg = async (orgId: string): Promise<void> => {
   await withLock(`org:${orgId}`, async () => {
-    const active = await getActiveSessionByOrg(orgId);
+    const active = await getActiveSessionByWorkspace(orgId, DEFAULT_WORKSPACE_KEY);
     if (active) {
       return;
     }
@@ -729,7 +936,7 @@ const tryStartNextPendingForOrg = async (orgId: string): Promise<void> => {
 
 export const enqueueTrigger = async (trigger: PipelineTriggerRow): Promise<EnqueueTriggerResult> =>
   withLock(`org:${trigger.org_id}`, async () => {
-    const active = await getActiveSessionByOrg(trigger.org_id);
+    const active = await getActiveSessionByWorkspace(trigger.org_id, DEFAULT_WORKSPACE_KEY);
     if (active) {
       return {
         mode: "queued",

@@ -17,6 +17,7 @@ export type PipelineTriggerRow = {
 export type CampaignStatus = "draft" | "approved" | "active" | "completed" | "cancelled";
 
 export type SessionStatus = "running" | "paused" | "done" | "failed";
+export type SessionWorkspaceType = "general" | "campaign_plan" | "content_create" | "folder" | string;
 export type OrchestratorStep =
   | "detect"
   | "await_user_input"
@@ -86,11 +87,46 @@ export type OrchestratorSessionRow = {
   id: string;
   org_id: string;
   trigger_id: string | null;
+  workspace_type: SessionWorkspaceType;
+  scope_id: string | null;
+  workspace_key: string;
+  title: string | null;
+  created_by_user_id: string | null;
+  archived_at: string | null;
   state: unknown;
   current_step: OrchestratorStep;
   status: SessionStatus;
   created_at: string;
   updated_at: string;
+};
+
+export type SessionListCursor = {
+  updated_at: string;
+  id: string;
+};
+
+export type ListSessionsParams = {
+  orgId: string;
+  limit: number;
+  cursor?: SessionListCursor | null;
+  workspaceType?: string | null;
+  scopeId?: string | null;
+  statuses?: SessionStatus[];
+  includeArchived?: boolean;
+};
+
+export type CreateSessionParams = {
+  orgId: string;
+  workspaceType: string;
+  scopeId?: string | null;
+  title?: string | null;
+  createdByUserId?: string | null;
+  startPaused?: boolean;
+};
+
+export type CreateSessionResult = {
+  session: OrchestratorSessionRow;
+  reused: boolean;
 };
 
 export type ResumeEventType =

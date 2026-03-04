@@ -1,10 +1,17 @@
-import { Router } from "express";
-import { requireApiSecret } from "../lib/auth";
+import { Router, type Response } from "express";
+import { requireApiSecret, requireUserJwt } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
-import { parseRequiredString } from "../lib/request-parsers";
+import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
-import { getActiveSessionForOrg, getSessionById, resumeSession } from "../orchestrator/service";
-import type { ResumeEventRequest, ResumeEventType } from "../orchestrator/types";
+import {
+  createSessionForOrg,
+  getActiveSessionForOrg,
+  getRecommendedSessionForWorkspace,
+  getSessionById,
+  listSessionsForOrg,
+  resumeSession
+} from "../orchestrator/service";
+import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionStatus } from "../orchestrator/types";
 
 const SUPPORTED_EVENTS = new Set<ResumeEventType>([
   "user_message",
@@ -13,6 +20,28 @@ const SUPPORTED_EVENTS = new Set<ResumeEventType>([
   "campaign_rejected",
   "content_rejected"
 ]);
+
+const SESSION_STATUSES: SessionStatus[] = ["running", "paused", "done", "failed"];
+const SESSION_STATUS_SET = new Set<SessionStatus>(SESSION_STATUSES);
+
+const asQueryString = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry !== "string") {
+        continue;
+      }
+      const trimmed = entry.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return null;
+};
 
 const parseOptionalPositiveInt = (value: unknown, field: string): number | undefined => {
   if (value === undefined || value === null || value === "") {
@@ -30,6 +59,99 @@ const parseOptionalPositiveInt = (value: unknown, field: string): number | undef
   }
   return candidate;
 };
+
+const parseBoundedInt = (value: unknown, field: string, defaults: { fallback: number; min: number; max: number }): number => {
+  const parsed = parseOptionalPositiveInt(value, field);
+  if (parsed === undefined) {
+    return defaults.fallback;
+  }
+  return Math.max(defaults.min, Math.min(defaults.max, parsed));
+};
+
+const parseBooleanQuery = (value: unknown, fallback: boolean): boolean => {
+  const normalized = asQueryString(value);
+  if (!normalized) {
+    return fallback;
+  }
+  const lowered = normalized.toLowerCase();
+  if (lowered === "true" || lowered === "1") {
+    return true;
+  }
+  if (lowered === "false" || lowered === "0") {
+    return false;
+  }
+  throw new HttpError(400, "invalid_payload", "archived must be true/false.");
+};
+
+const parseOptionalBoolean = (value: unknown, field: string, fallback: boolean): boolean => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = `${value}`.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  throw new HttpError(400, "invalid_payload", `${field} must be true/false.`);
+};
+
+const parseSessionStatuses = (value: unknown): SessionStatus[] => {
+  const candidates: string[] = [];
+
+  if (typeof value === "string") {
+    candidates.push(...value.split(",").map((entry) => entry.trim()).filter(Boolean));
+  } else if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry !== "string") {
+        continue;
+      }
+      candidates.push(...entry.split(",").map((piece) => piece.trim()).filter(Boolean));
+    }
+  }
+
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const result: SessionStatus[] = [];
+  for (const entry of candidates) {
+    if (!SESSION_STATUS_SET.has(entry as SessionStatus)) {
+      throw new HttpError(400, "invalid_payload", `Unsupported status filter: ${entry}`);
+    }
+    result.push(entry as SessionStatus);
+  }
+
+  return [...new Set(result)];
+};
+
+const parseCursor = (value: unknown): SessionListCursor | null => {
+  const encoded = asQueryString(value);
+  if (!encoded) {
+    return null;
+  }
+
+  try {
+    const raw = Buffer.from(encoded, "base64url").toString("utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const updatedAt = parseRequiredString(parsed.updated_at, "cursor.updated_at");
+    const id = parseRequiredString(parsed.id, "cursor.id");
+    return {
+      updated_at: updatedAt,
+      id
+    };
+  } catch {
+    throw new HttpError(400, "invalid_payload", "cursor is invalid.");
+  }
+};
+
+const encodeCursor = (cursor: SessionListCursor): string =>
+  Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 
 const parseResumeEvent = (body: unknown): ResumeEventRequest => {
   if (!body || typeof body !== "object") {
@@ -81,7 +203,136 @@ const parseResumeEvent = (body: unknown): ResumeEventRequest => {
   };
 };
 
+const sendError = (res: Response, error: unknown): void => {
+  const httpError = toHttpError(error);
+  const body: {
+    ok: false;
+    error: string;
+    message: string;
+    details?: Record<string, unknown>;
+  } = {
+    ok: false,
+    error: httpError.code,
+    message: httpError.message
+  };
+  if (httpError.details) {
+    body.details = httpError.details;
+  }
+
+  res.status(httpError.status).json({
+    ...body
+  });
+};
+
 export const sessionsRouter: Router = Router();
+
+sessionsRouter.get("/orgs/:orgId/sessions", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const limit = parseBoundedInt(req.query.limit, "limit", { fallback: 20, min: 1, max: 50 });
+    const cursor = parseCursor(req.query.cursor);
+    const workspaceType = parseOptionalString(asQueryString(req.query.workspace_type));
+    const scopeIdRaw = asQueryString(req.query.scope_id);
+    const scopeId = scopeIdRaw === null ? undefined : parseOptionalString(scopeIdRaw);
+    const statuses = parseSessionStatuses(req.query.status);
+    const includeArchived = parseBooleanQuery(req.query.archived, false);
+
+    const rows = await listSessionsForOrg({
+      orgId,
+      limit: limit + 1,
+      cursor,
+      workspaceType,
+      scopeId,
+      statuses,
+      includeArchived
+    });
+
+    const hasMore = rows.length > limit;
+    const sessions = hasMore ? rows.slice(0, limit) : rows;
+    const last = sessions[sessions.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor({ updated_at: last.updated_at, id: last.id }) : null;
+
+    res.json({
+      ok: true,
+      sessions,
+      next_cursor: nextCursor
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.post("/orgs/:orgId/sessions", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const workspaceType = parseRequiredString(req.body?.workspace_type, "workspace_type");
+    const scopeId = parseOptionalString(req.body?.scope_id);
+    const title = parseOptionalString(req.body?.title);
+    const startPaused = parseOptionalBoolean(req.body?.start_paused, "start_paused", true);
+
+    let createdByUserId: string | null = null;
+    if ((req.header("authorization") ?? "").trim()) {
+      const user = await requireUserJwt(req, res);
+      if (!user) {
+        return;
+      }
+      createdByUserId = user.userId;
+    }
+
+    const result = await createSessionForOrg({
+      orgId,
+      workspaceType,
+      scopeId,
+      title,
+      createdByUserId,
+      startPaused
+    });
+
+    res.status(result.reused ? 200 : 201).json({
+      ok: true,
+      reused: result.reused,
+      session: result.session
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.get("/orgs/:orgId/sessions/recommended", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const workspaceType = parseRequiredString(asQueryString(req.query.workspace_type), "workspace_type");
+    const scopeId = parseOptionalString(asQueryString(req.query.scope_id));
+    const session = await getRecommendedSessionForWorkspace({
+      orgId,
+      workspaceType,
+      scopeId
+    });
+
+    res.json({
+      ok: true,
+      session
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
 sessionsRouter.post("/sessions/:sessionId/resume", async (req, res) => {
   if (!requireApiSecret(req, res)) {
@@ -106,24 +357,7 @@ sessionsRouter.post("/sessions/:sessionId/resume", async (req, res) => {
       ...result
     });
   } catch (error) {
-    const httpError = toHttpError(error);
-    const body: {
-      ok: false;
-      error: string;
-      message: string;
-      details?: Record<string, unknown>;
-    } = {
-      ok: false,
-      error: httpError.code,
-      message: httpError.message
-    };
-    if (httpError.details) {
-      body.details = httpError.details;
-    }
-
-    res.status(httpError.status).json({
-      ...body
-    });
+    sendError(res, error);
   }
 });
 
@@ -144,24 +378,7 @@ sessionsRouter.get("/sessions/:sessionId", async (req, res) => {
       session
     });
   } catch (error) {
-    const httpError = toHttpError(error);
-    const body: {
-      ok: false;
-      error: string;
-      message: string;
-      details?: Record<string, unknown>;
-    } = {
-      ok: false,
-      error: httpError.code,
-      message: httpError.message
-    };
-    if (httpError.details) {
-      body.details = httpError.details;
-    }
-
-    res.status(httpError.status).json({
-      ...body
-    });
+    sendError(res, error);
   }
 });
 
@@ -178,23 +395,6 @@ sessionsRouter.get("/orgs/:orgId/sessions/active", async (req, res) => {
       session
     });
   } catch (error) {
-    const httpError = toHttpError(error);
-    const body: {
-      ok: false;
-      error: string;
-      message: string;
-      details?: Record<string, unknown>;
-    } = {
-      ok: false,
-      error: httpError.code,
-      message: httpError.message
-    };
-    if (httpError.details) {
-      body.details = httpError.details;
-    }
-
-    res.status(httpError.status).json({
-      ...body
-    });
+    sendError(res, error);
   }
 });

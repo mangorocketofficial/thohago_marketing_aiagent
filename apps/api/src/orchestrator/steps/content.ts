@@ -151,6 +151,7 @@ export const applyContentApprovedStep = async (
 
   await deps.insertChatMessage({
     orgId: session.org_id,
+    sessionId: session.id,
     role: "assistant",
     content: "콘텐츠 게시가 완료되었습니다(시뮬레이션)."
   });
@@ -379,6 +380,7 @@ const applyContentTerminalRejectStep = async (
 
   await deps.insertChatMessage({
     orgId: session.org_id,
+    sessionId: session.id,
     role: "assistant",
     content: reason
       ? `요청을 반영했습니다. 세션을 종료합니다. 사유: ${reason}`

@@ -186,6 +186,7 @@ export type ChatMessageMetadata = Record<string, unknown> | WorkflowActionCardMe
 export type ChatMessage = {
   id: string;
   org_id: string;
+  session_id?: string | null;
   role: ChatRole;
   content: string;
   channel: ChatChannel;
@@ -261,6 +262,12 @@ export type OrchestratorSession = {
   id: string;
   org_id: string;
   trigger_id: string | null;
+  workspace_type?: string;
+  scope_id?: string | null;
+  workspace_key?: string;
+  title?: string | null;
+  created_by_user_id?: string | null;
+  archived_at?: string | null;
   state: OrchestratorState;
   current_step: OrchestratorStep;
   status: SessionStatus;
