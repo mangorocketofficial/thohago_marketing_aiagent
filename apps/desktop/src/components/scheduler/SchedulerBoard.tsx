@@ -1,15 +1,16 @@
 ﻿import type { DragEvent } from "react";
-import type { Content } from "@repo/types";
-import type { WorkflowLinkHint } from "../../context/ChatContext";
 import { SLOT_STATUS_LABEL, type SlotStatus } from "./status-model";
 
 type SchedulerBoardItem = {
   slotId: string | null;
-  content: Content;
-  workflowHint: WorkflowLinkHint | null;
+  contentId: string | null;
+  hasContent: boolean;
   slotStatus: SlotStatus;
   dateKey: string;
   scheduledTime: string | null;
+  channel: string;
+  contentType: string;
+  title: string;
 };
 
 type SchedulerBoardProps = {
@@ -116,14 +117,16 @@ const renderCard = (params: {
   onSelectContent: (contentId: string) => void;
 }) => {
   const { item, isSelected, isRescheduling, onSelectContent } = params;
-  const title = item.content.body?.trim() ? item.content.body.slice(0, 72) : "(No body)";
+  const canOpen = item.hasContent && !!item.contentId;
+  const key = item.contentId ?? `slot:${item.slotId ?? `${item.dateKey}:${item.title}`}`;
 
   return (
     <button
-      key={item.content.id}
+      key={key}
       type="button"
       className={`ui-scheduler-card ${isSelected ? "is-selected" : ""}`}
       draggable={!!item.slotId && !isRescheduling}
+      disabled={!canOpen}
       onDragStart={(event) => {
         if (!item.slotId) {
           return;
@@ -136,14 +139,19 @@ const renderCard = (params: {
           })
         );
       }}
-      onClick={() => onSelectContent(item.content.id)}
+      onClick={() => {
+        if (!item.contentId) {
+          return;
+        }
+        onSelectContent(item.contentId);
+      }}
     >
       <span className="ui-scheduler-card-head">
-        <strong>{item.content.channel}</strong>
+        <strong>{item.channel}</strong>
         <span className={`ui-slot-badge is-${item.slotStatus}`}>{SLOT_STATUS_LABEL[item.slotStatus]}</span>
       </span>
-      <span className="ui-scheduler-card-body">{title}</span>
-      <span className="ui-scheduler-card-meta">{item.content.content_type}</span>
+      <span className="ui-scheduler-card-body">{item.title}</span>
+      <span className="ui-scheduler-card-meta">{item.contentType}</span>
     </button>
   );
 };
@@ -177,7 +185,7 @@ export const SchedulerBoard = ({
           {items.map((item) =>
             renderCard({
               item,
-              isSelected: selectedContentId === item.content.id,
+              isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
               isRescheduling,
               onSelectContent
             })
@@ -214,7 +222,7 @@ export const SchedulerBoard = ({
                   {visibleItems.map((item) =>
                     renderCard({
                       item,
-                      isSelected: selectedContentId === item.content.id,
+                      isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
                       isRescheduling,
                       onSelectContent
                     })
@@ -258,7 +266,7 @@ export const SchedulerBoard = ({
                 {dayItems.map((item) =>
                   renderCard({
                     item,
-                    isSelected: selectedContentId === item.content.id,
+                    isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
                     isRescheduling,
                     onSelectContent
                   })

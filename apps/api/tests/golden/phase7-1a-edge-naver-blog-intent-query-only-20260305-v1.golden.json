@@ -1,0 +1,14 @@
+{
+  "scenario": "edge_naver_blog_intent_query_only_non_match",
+  "description": "Query-only wording around naver blog status should not route to generation intent.",
+  "input": {
+    "message": "네이버 블로그 상태 확인",
+    "current_step": "await_user_input",
+    "active_skill": null
+  },
+  "output": null,
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

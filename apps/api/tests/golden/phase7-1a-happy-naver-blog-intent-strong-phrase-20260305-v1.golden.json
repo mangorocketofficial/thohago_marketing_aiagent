@@ -1,0 +1,17 @@
+{
+  "scenario": "happy_naver_blog_intent_strong_phrase",
+  "description": "Strong Korean phrase for naver blog generation maps to high-confidence generation intent.",
+  "input": {
+    "message": "네이버 블로그 글 써줘",
+    "current_step": "await_user_input",
+    "active_skill": null
+  },
+  "output": {
+    "confidence": 0.95,
+    "reason": "strong_blog_generation_phrase"
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

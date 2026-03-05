@@ -43,3 +43,14 @@ Adopt explicit-choice-first survey with mandatory direct-input option and direct
 
 Reason  
 Campaign survey reliability required deterministic state progression; explicit canonical choices remove ambiguous parsing loops while still allowing flexible user input through a controlled direct-input path.
+
+## D-005
+
+Phase  
+7-1a
+
+Decision  
+Deliver Naver Blog generation as backend-contract-first (intent/slot/persistence/fallback/metadata) and defer renderer local-save execution to follow-up.
+
+Reason  
+Stabilizing deterministic backend outputs first lowers integration risk across API, orchestrator routing, IPC metadata, and upcoming 7-1b/7-2 UI flows.

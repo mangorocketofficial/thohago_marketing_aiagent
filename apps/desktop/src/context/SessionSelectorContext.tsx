@@ -609,7 +609,8 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       const response = await runtime.chat.createSession({
         workspaceType: workspaceContext.workspaceType,
         scopeId: workspaceContext.scopeId,
-        startPaused: true
+        startPaused: true,
+        forceNew: true
       });
       if (requestId !== latestCreateRequestIdRef.current) {
         return;

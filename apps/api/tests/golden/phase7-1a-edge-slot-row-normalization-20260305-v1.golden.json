@@ -1,0 +1,38 @@
+{
+  "scenario": "edge_parse_slot_row_normalization_defaults",
+  "description": "Slot row parser trims strings, lowercases channel, and applies default values for invalid fields.",
+  "input": {
+    "row": {
+      "id": " slot-01 ",
+      "org_id": " org-1 ",
+      "campaign_id": "",
+      "session_id": "",
+      "channel": " NAVER_BLOG ",
+      "content_type": " text ",
+      "title": " ",
+      "scheduled_date": "2026-03-18",
+      "slot_status": 123,
+      "content_id": "",
+      "metadata": null,
+      "lock_version": "0"
+    }
+  },
+  "output": {
+    "id": "slot-01",
+    "org_id": "org-1",
+    "campaign_id": null,
+    "session_id": null,
+    "channel": "naver_blog",
+    "content_type": "text",
+    "title": null,
+    "scheduled_date": "2026-03-18",
+    "slot_status": "scheduled",
+    "content_id": null,
+    "metadata": {},
+    "lock_version": 1
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

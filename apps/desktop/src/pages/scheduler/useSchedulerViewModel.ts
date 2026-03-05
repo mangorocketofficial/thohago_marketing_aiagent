@@ -26,11 +26,16 @@ const getScheduledSlotStatus = (item: ScheduledContentItem, content: Content): S
 
 type SchedulerItem = {
   slotId: string | null;
-  content: Content;
+  contentId: string | null;
+  content: Content | null;
+  hasContent: boolean;
   workflowHint: WorkflowLinkHint | null;
   slotStatus: SlotStatus;
   dateKey: string;
   scheduledTime: string | null;
+  channel: string;
+  contentType: string;
+  title: string;
 };
 
 type SchedulerViewModelParams = {
@@ -77,26 +82,40 @@ export const useSchedulerViewModel = ({
     const byId = new Map<string, SchedulerItem>();
 
     for (const raw of scheduledItems) {
-      if (!raw.content?.id) {
-        continue;
-      }
-      const content = raw.content;
-      const workflowHint = pendingContentWorkflowHints[content.id] ?? null;
-      const slotStatus = getScheduledSlotStatus(raw, content);
-      const dateKey = raw.scheduled_date || formatDateKey(content.scheduled_at || content.created_at);
+      const content = raw.content ?? null;
+      const contentId = (content?.id ?? raw.content_id ?? "").trim() || null;
+      const workflowHint = contentId ? pendingContentWorkflowHints[contentId] ?? null : null;
+      const slotStatus = content
+        ? getScheduledSlotStatus(raw, content)
+        : isSlotStatus(raw.slot_status)
+          ? raw.slot_status
+          : "scheduled";
+      const dateKey = raw.scheduled_date || formatDateKey(content?.scheduled_at || content?.created_at);
       if (!withinWindow(dateKey)) {
         continue;
       }
-      if (!matchesStatus(slotStatus) || !matchesChannel(content.channel) || !matchesCampaign(raw.campaign_id ?? content.campaign_id)) {
+      const channel = (content?.channel ?? raw.channel ?? "instagram").toLowerCase();
+      const contentType = content?.content_type ?? raw.content_type ?? "text";
+      if (!matchesStatus(slotStatus) || !matchesChannel(channel) || !matchesCampaign(raw.campaign_id ?? content?.campaign_id ?? null)) {
         continue;
       }
-      byId.set(content.id, {
+      const title =
+        content?.body?.trim() ||
+        (typeof raw.title === "string" && raw.title.trim()) ||
+        "(Scheduled slot)";
+      const itemKey = contentId ?? `slot:${raw.slot_id}`;
+      byId.set(itemKey, {
         slotId: raw.slot_id,
+        contentId,
         content,
+        hasContent: !!content,
         workflowHint,
         slotStatus,
         dateKey,
-        scheduledTime: raw.scheduled_time || content.scheduled_at || null
+        scheduledTime: raw.scheduled_time || content?.scheduled_at || null,
+        channel,
+        contentType,
+        title: title.slice(0, 72)
       });
     }
 
@@ -118,11 +137,16 @@ export const useSchedulerViewModel = ({
       }
       byId.set(content.id, {
         slotId: null,
+        contentId: content.id,
         content,
+        hasContent: true,
         workflowHint,
         slotStatus,
         dateKey,
-        scheduledTime: content.scheduled_at || null
+        scheduledTime: content.scheduled_at || null,
+        channel: content.channel,
+        contentType: content.content_type,
+        title: (content.body?.trim() || "(No body)").slice(0, 72)
       });
     }
 
@@ -147,14 +171,14 @@ export const useSchedulerViewModel = ({
     if (!selectedContentId) {
       return null;
     }
-    return schedulerItems.find((item) => item.content.id === selectedContentId) ?? null;
+    return schedulerItems.find((item) => item.contentId === selectedContentId && !!item.content) ?? null;
   }, [schedulerItems, selectedContentId]);
 
   useEffect(() => {
     if (!selectedContentId) {
       return;
     }
-    if (schedulerItems.some((item) => item.content.id === selectedContentId)) {
+    if (schedulerItems.some((item) => item.contentId === selectedContentId)) {
       return;
     }
     setSelectedContentId(null);
@@ -170,8 +194,8 @@ export const useSchedulerViewModel = ({
       return;
     }
     const target = schedulerItems.find((item) => item.workflowHint?.workflowItemId === workflowItemId);
-    if (target) {
-      setSelectedContentId(target.content.id);
+    if (target?.contentId) {
+      setSelectedContentId(target.contentId);
     }
     clearWorkspaceHandoff();
   }, [clearWorkspaceHandoff, schedulerItems, workspaceHandoff]);

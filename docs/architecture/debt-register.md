@@ -43,3 +43,14 @@ Reason
 
 Affects  
 Phase 6-4b
+
+DEBT-005
+
+Description  
+Naver blog generation returns `local_save_suggestion` metadata, but desktop renderer does not auto-execute local save yet.
+
+Reason  
+7-1a prioritized backend contract stability and IPC hardening first; renderer interaction wiring is scheduled in 7-1b.
+
+Affects  
+Phase 7-1b

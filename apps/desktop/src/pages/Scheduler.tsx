@@ -54,6 +54,8 @@ export const SchedulerPage = () => {
     workspaceHandoff,
     clearWorkspaceHandoff
   });
+  const selectedEditorItem = viewModel.selectedItem;
+  const selectedEditorContent = selectedEditorItem?.content ?? null;
 
   const [dayDetailDate, setDayDetailDate] = useState<string | null>(null);
   const [dayDetailItems, setDayDetailItems] = useState<ScheduledContentItem[]>([]);
@@ -223,7 +225,7 @@ export const SchedulerPage = () => {
 
         {scheduleNotice ? <p className="notice">{scheduleNotice}</p> : null}
 
-        {!viewModel.selectedItem ? (
+        {!selectedEditorItem || !selectedEditorContent ? (
           <>
             <SchedulerBoard
               items={viewModel.schedulerItems}
@@ -265,9 +267,9 @@ export const SchedulerPage = () => {
           </>
         ) : (
           <ContentEditor
-            content={viewModel.selectedItem.content}
-            workflowHint={viewModel.selectedItem.workflowHint}
-            slotStatus={viewModel.selectedItem.slotStatus}
+            content={selectedEditorContent}
+            workflowHint={selectedEditorItem.workflowHint}
+            slotStatus={selectedEditorItem.slotStatus}
             selectedSessionId={selectedSessionId}
             isActionPending={isActionPending}
             onBack={() => viewModel.setSelectedContentId(null)}
