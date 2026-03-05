@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
-import { generateContentDraft, generateGeneralAssistantReply } from "./ai";
+import { detectSkillIntentForRouting, generateContentDraft, generateGeneralAssistantReply } from "./ai";
 import {
   emitCampaignActionCardProjection,
   emitContentActionCardProjection,
@@ -35,7 +35,7 @@ import { applyContentApprovedStep, applyContentRejectStep } from "./steps/conten
 import { syncSlotStatusFromWorkflow } from "./scheduler-slot-transition";
 import type { CampaignStepDeps } from "./steps/campaign";
 import type { ContentStepDeps } from "./steps/content";
-import { routeSkill } from "./skills/router";
+import { getSkillRegistry, routeSkill } from "./skills/router";
 import type { SkillDeps, SkillOutcome, SkillRouteDecision } from "./skills/types";
 export { listWorkspaceInboxItemsForOrg, type WorkspaceInboxItem } from "./workspace-inbox";
 import {
@@ -213,14 +213,31 @@ export const createSessionForOrg = async (params: CreateSessionParams): Promise<
   const title = normalizeScopeId(params.title);
   const createdByUserId = normalizeScopeId(params.createdByUserId);
   const startPaused = params.startPaused !== false;
+  const forceNew = params.forceNew === true;
+
+  const finalizeActiveSessionForNewCreate = async (session: OrchestratorSessionRow): Promise<void> => {
+    const { error } = await supabaseAdmin
+      .from("orchestrator_sessions")
+      .update({
+        status: "done",
+        current_step: "done"
+      })
+      .eq("id", session.id);
+    if (error) {
+      throw new HttpError(500, "db_error", `Failed to finalize existing active session: ${error.message}`);
+    }
+  };
 
   return withLock(`org:${params.orgId}`, async () => {
     const active = await getActiveSessionByWorkspace(params.orgId, workspaceType, scopeId);
-    if (active) {
+    if (active && !forceNew) {
       return {
         session: active,
         reused: true
       };
+    }
+    if (active && forceNew) {
+      await finalizeActiveSessionForNewCreate(active);
     }
 
     const state = buildManualSessionState(workspaceType, scopeId, title);
@@ -258,6 +275,24 @@ export const createSessionForOrg = async (params: CreateSessionParams): Promise<
         if ((fallbackError as { code?: string }).code === "23505") {
           const existing = await getActiveSessionByWorkspace(params.orgId, workspaceType, scopeId);
           if (existing) {
+            if (forceNew) {
+              await finalizeActiveSessionForNewCreate(existing);
+              const { data: retryData, error: retryError } = await supabaseAdmin
+                .from("orchestrator_sessions")
+                .insert(insertBasePayload)
+                .select("*")
+                .single();
+              if (!retryError) {
+                return {
+                  session: retryData as OrchestratorSessionRow,
+                  reused: false
+                };
+              }
+              if ((retryError as { code?: string }).code === "23505") {
+                throw new HttpError(409, "session_conflict", "Failed to create a new session. Please retry.");
+              }
+              throw new HttpError(500, "db_error", `Failed to create session: ${retryError.message}`);
+            }
             return {
               session: existing,
               reused: true
@@ -278,6 +313,27 @@ export const createSessionForOrg = async (params: CreateSessionParams): Promise<
       if ((error as { code?: string }).code === "23505") {
         const existing = await getActiveSessionByWorkspace(params.orgId, workspaceType, scopeId);
         if (existing) {
+          if (forceNew) {
+            await finalizeActiveSessionForNewCreate(existing);
+            const { data: retryData, error: retryError } = await supabaseAdmin
+              .from("orchestrator_sessions")
+              .insert({
+                ...insertBasePayload,
+                workspace_key: workspaceKey
+              })
+              .select("*")
+              .single();
+            if (!retryError) {
+              return {
+                session: retryData as OrchestratorSessionRow,
+                reused: false
+              };
+            }
+            if ((retryError as { code?: string }).code === "23505") {
+              throw new HttpError(409, "session_conflict", "Failed to create a new session. Please retry.");
+            }
+            throw new HttpError(500, "db_error", `Failed to create session: ${retryError.message}`);
+          }
           return {
             session: existing,
             reused: true
@@ -879,18 +935,91 @@ const applySkillStatePatch = (params: {
       active_skill: null,
       active_skill_started_at: null,
       active_skill_version: null,
-      active_skill_confidence: null
+      active_skill_confidence: null,
+      skill_lock_id: null,
+      skill_lock_source: null,
+      skill_lock_at: null
     };
   }
 
   const now = new Date().toISOString();
   const isSameSkill = params.state.active_skill === params.route.skill.id;
+  const shouldLock =
+    params.route.reason === "explicit_trigger" || params.route.reason === "llm_intent" || params.route.reason === "intent";
+  const nextSkillLockSource =
+    params.route.reason === "explicit_trigger"
+      ? "manual"
+      : params.route.reason === "llm_intent"
+        ? "llm_auto"
+        : params.route.reason === "intent"
+          ? params.state.skill_lock_source ?? "manual"
+          : params.state.skill_lock_source;
   return {
     ...merged,
     active_skill: params.route.skill.id,
     active_skill_started_at: isSameSkill ? params.state.active_skill_started_at ?? now : now,
     active_skill_version: params.route.skill.version,
-    active_skill_confidence: params.route.confidence ?? params.state.active_skill_confidence
+    active_skill_confidence: params.route.confidence ?? params.state.active_skill_confidence,
+    skill_lock_id: shouldLock ? params.route.skill.id : params.state.skill_lock_id,
+    skill_lock_source: shouldLock ? nextSkillLockSource : params.state.skill_lock_source,
+    skill_lock_at: shouldLock ? now : params.state.skill_lock_at
+  };
+};
+
+const LLM_SKILL_ROUTE_CONFIDENCE_THRESHOLD = 0.9;
+
+const resolveRoutedSkill = async (params: {
+  event: ResumeEventRequest;
+  session: OrchestratorSessionRow;
+  state: SessionState;
+}): Promise<SkillRouteDecision | null> => {
+  const routed = routeSkill(params);
+  if (routed) {
+    return routed;
+  }
+
+  if (params.event.event_type !== "user_message") {
+    return null;
+  }
+
+  if (params.session.current_step !== "await_user_input" || params.state.active_skill || params.state.skill_lock_id) {
+    return null;
+  }
+
+  const userMessage = asString(params.event.payload?.content, "").trim();
+  if (!userMessage) {
+    return null;
+  }
+
+  const registry = getSkillRegistry();
+  const availableSkills = registry
+    .getAll()
+    .filter((skill) => skill.handlesEvents.includes("user_message"))
+    .map((skill) => ({
+      id: skill.id,
+      description: `${skill.displayName} (${skill.id})`
+    }));
+  const detected = await detectSkillIntentForRouting({
+    orgId: params.session.org_id,
+    sessionId: params.session.id,
+    currentStep: params.session.current_step,
+    userMessage,
+    availableSkills
+  });
+  if (!detected || detected.confidence < LLM_SKILL_ROUTE_CONFIDENCE_THRESHOLD) {
+    return null;
+  }
+
+  const skill = registry.findById(detected.skillId);
+  if (!skill || !skill.handlesEvents.includes("user_message")) {
+    return null;
+  }
+
+  return {
+    skill,
+    reason: "llm_intent",
+    confidence: detected.confidence,
+    note: `llm_skill_intent:${detected.reason}`
   };
 };
 
@@ -910,7 +1039,7 @@ const processResumeEvent = async (
     generateGeneralAssistantReply
   };
 
-  const routedSkill = routeSkill({
+  const routedSkill = await resolveRoutedSkill({
     event,
     session,
     state

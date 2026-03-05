@@ -1,6 +1,7 @@
 import type { OrchestratorSessionRow, ResumeEventRequest, SessionState } from "../types";
 import { SkillRegistry } from "./registry";
 import { createCampaignPlanSkill } from "./campaign-plan/index";
+import { createNaverBlogGenerationSkill } from "./naverblog-generation/index";
 import type { SkillRouteDecision } from "./types";
 
 const INTENT_CONFIDENCE_THRESHOLD = 0.8;
@@ -11,6 +12,9 @@ const asString = (value: unknown, fallback = ""): string => {
   }
   return fallback;
 };
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 const normalizeMessage = (value: string): string =>
   value
@@ -38,6 +42,7 @@ export const getSkillRegistry = (): SkillRegistry => {
 
   const registry = new SkillRegistry();
   registry.register(createCampaignPlanSkill());
+  registry.register(createNaverBlogGenerationSkill());
   singletonRegistry = registry;
   return registry;
 };
@@ -75,6 +80,30 @@ export const routeSkill = (params: {
 
   const content = asString(params.event.payload?.content, "").trim();
   const normalized = normalizeMessage(content);
+
+  const lockedSkill = registry.findById(params.state.skill_lock_id);
+  if (lockedSkill && lockedSkill.handlesEvents.includes("user_message")) {
+    return {
+      skill: lockedSkill,
+      reason: "skill_lock",
+      confidence: 1,
+      note: "skill_lock_continuation"
+    };
+  }
+
+  const payload = asRecord(params.event.payload);
+  const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
+  if (explicitTrigger) {
+    const explicitSkill = registry.findById(explicitTrigger);
+    if (explicitSkill && explicitSkill.handlesEvents.includes("user_message")) {
+      return {
+        skill: explicitSkill,
+        reason: "explicit_trigger",
+        confidence: 1,
+        note: "user_selected_skill_trigger"
+      };
+    }
+  }
 
   if (activeSkill && activeSkill.handlesEvents.includes("user_message")) {
     return {

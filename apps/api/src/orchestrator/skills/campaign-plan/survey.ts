@@ -9,20 +9,14 @@ const CHANNEL_CATALOG = [
   { id: "youtube", label: "YouTube", tokens: ["youtube", "유튜브"] }
 ] as const;
 
-const EARLY_EXIT_TERMS = [
-  "진행",
-  "바로",
-  "이정도면",
-  "그만",
-  "skip",
-  "proceed",
-  "go ahead",
-  "enough"
-];
-
+const EARLY_EXIT_TERMS = ["진행", "바로", "이정도면", "그만", "skip", "proceed", "go ahead", "enough"];
 const AFFIRMATIVE_TERMS = ["네", "예", "응", "좋아", "ok", "okay", "yes", "맞아", "그대로", "진행"];
+const DIRECT_INPUT_HINT = '직접 입력이 필요하면 "직접입력: 내용" 형식으로 답변해 주세요.';
+const DIRECT_INPUT_PREFIXES = ["직접입력", "직접 입력", "direct input", "custom", "other"];
+const DIRECT_INPUT_CHOICE = "직접 입력";
 
 const REQUIRED_QUESTION_IDS: SurveyQuestionId[] = ["campaign_goal", "channels"];
+const QUESTION_ORDER: SurveyQuestionId[] = ["campaign_goal", "channels", "duration", "content_source"];
 
 const normalizeText = (value: string): string =>
   value
@@ -102,7 +96,6 @@ const detectDuration = (text: string): string | null => {
   if (/(1주|일주일|one week)/.test(text)) {
     return "1주";
   }
-
   return null;
 };
 
@@ -110,13 +103,16 @@ const detectContentSource = (text: string): string | null => {
   if (!text) {
     return null;
   }
-  if (/(없|없음|none|no asset|no assets)/.test(text)) {
+  if (/(없음|없어|없습니다|없어요|none|no asset|no assets|without asset|without assets)/.test(text)) {
     return "없음";
   }
-  if (/(일부|조금|some)/.test(text)) {
+  if (/(일부|조금|몇|some|partial)/.test(text)) {
     return "일부 있음";
   }
-  if (/(사진|영상|비디오|문서|자료|asset|assets|content)/.test(text)) {
+  if (/(있음|있어|있습니다|있어요|보유|have|has|available)/.test(text)) {
+    return "있음";
+  }
+  if (/(사진|영상|비디오|문서|자료|폴더|asset|assets|content|folder)/.test(text)) {
     return "있음";
   }
   return null;
@@ -148,34 +144,193 @@ const upsertAnswers = (base: SurveyAnswer[], updates: SurveyAnswer[]): SurveyAns
   return [...map.values()];
 };
 
+const parseChoiceIndex = (normalizedMessage: string, choiceCount: number): number | null => {
+  const indexMatch = normalizedMessage.match(/^(?:선택\s*)?(\d+)(?:\s*번)?$/);
+  if (!indexMatch) {
+    return null;
+  }
+  const parsed = Number.parseInt(indexMatch[1] ?? "", 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  if (parsed < 1 || parsed > choiceCount) {
+    return null;
+  }
+  return parsed - 1;
+};
+
+const isDirectInputChoice = (value: string): boolean => normalizeText(value) === normalizeText(DIRECT_INPUT_CHOICE);
+
+const extractDirectInput = (
+  rawMessage: string
+): {
+  isDirectInput: boolean;
+  value: string;
+} => {
+  const trimmed = rawMessage.trim();
+  if (!trimmed) {
+    return {
+      isDirectInput: false,
+      value: ""
+    };
+  }
+
+  const lower = trimmed.toLowerCase();
+  for (const prefix of DIRECT_INPUT_PREFIXES) {
+    const normalizedPrefix = prefix.toLowerCase();
+    if (lower.startsWith(`${normalizedPrefix}:`) || lower.startsWith(`${normalizedPrefix} :`)) {
+      const index = trimmed.indexOf(":");
+      return {
+        isDirectInput: true,
+        value: index >= 0 ? trimmed.slice(index + 1).trim() : ""
+      };
+    }
+  }
+
+  return {
+    isDirectInput: false,
+    value: trimmed
+  };
+};
+
+const parseGoalByChoice = (question: SurveyQuestion, normalizedMessage: string): string | null => {
+  const choices = Array.isArray(question.choices) ? question.choices : [];
+  const idx = parseChoiceIndex(normalizedMessage, choices.length);
+  if (idx !== null) {
+    const selected = choices[idx] ?? null;
+    if (selected && !isDirectInputChoice(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  for (const choice of choices) {
+    if (normalizeText(choice) === normalizedMessage && !isDirectInputChoice(choice)) {
+      return choice;
+    }
+  }
+  return detectGoal(normalizedMessage);
+};
+
+const parseChannelsByChoice = (question: SurveyQuestion, normalizedMessage: string): string | null => {
+  const choices = Array.isArray(question.choices) ? question.choices : [];
+  const idx = parseChoiceIndex(normalizedMessage, choices.length);
+  if (idx !== null) {
+    const selected = choices[idx] ?? null;
+    if (selected && !isDirectInputChoice(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  for (const choice of choices) {
+    if (normalizeText(choice) === normalizedMessage && !isDirectInputChoice(choice)) {
+      return choice;
+    }
+  }
+
+  const channels = detectChannels(normalizedMessage);
+  if (channels.length > 0) {
+    return formatChannels(channels);
+  }
+  return null;
+};
+
+const parseDurationByChoice = (question: SurveyQuestion, normalizedMessage: string): string | null => {
+  const choices = Array.isArray(question.choices) ? question.choices : [];
+  const idx = parseChoiceIndex(normalizedMessage, choices.length);
+  if (idx !== null) {
+    const selected = choices[idx] ?? null;
+    if (selected && !isDirectInputChoice(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  const normalizedChoices = choices.map((entry) => normalizeText(entry));
+  const exactChoice = choices.find((choice, index) => normalizedChoices[index] === normalizedMessage);
+  if (exactChoice && !isDirectInputChoice(exactChoice)) {
+    return exactChoice;
+  }
+  return detectDuration(normalizedMessage);
+};
+
+const parseContentSourceByChoice = (question: SurveyQuestion, normalizedMessage: string): string | null => {
+  const choices = Array.isArray(question.choices) ? question.choices : [];
+  const idx = parseChoiceIndex(normalizedMessage, choices.length);
+  if (idx !== null) {
+    const selected = choices[idx] ?? null;
+    if (selected && !isDirectInputChoice(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  for (const choice of choices) {
+    if (normalizeText(choice) === normalizedMessage && !isDirectInputChoice(choice)) {
+      return choice;
+    }
+  }
+  return detectContentSource(normalizedMessage);
+};
+
 export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: "campaign_goal",
     priority: "required",
     label: "이번 캠페인의 핵심 목표는 무엇인가요?",
-    choices: ["Awareness", "Engagement", "Conversion", "Other"]
+    choices: ["Awareness", "Engagement", "Conversion", DIRECT_INPUT_CHOICE]
   },
   {
     id: "channels",
     priority: "required",
     label: "어떤 채널에서 운영할까요?",
-    choices: ["Instagram", "Naver Blog", "Facebook", "Threads", "YouTube"],
+    choices: ["Instagram", "Naver Blog", "Facebook", "Threads", "YouTube", DIRECT_INPUT_CHOICE],
     auto_fill_source: "brand_review"
   },
   {
     id: "duration",
     priority: "optional",
     label: "캠페인 기간은 어느 정도로 잡을까요?",
-    choices: ["1주", "2주", "1개월", "직접 입력"]
+    choices: ["1주", "2주", "1개월", DIRECT_INPUT_CHOICE]
   },
   {
     id: "content_source",
     priority: "optional",
     label: "활용할 기존 콘텐츠 자산(사진/영상/문서)이 있나요?",
-    choices: ["있음", "없음", "일부 있음"],
+    choices: ["있음", "없음", "일부 있음", DIRECT_INPUT_CHOICE],
     auto_fill_source: "folder_summary"
   }
 ];
+
+const QUESTION_MAP: Record<SurveyQuestionId, SurveyQuestion> = {
+  campaign_goal: SURVEY_QUESTIONS[0],
+  channels: SURVEY_QUESTIONS[1],
+  duration: SURVEY_QUESTIONS[2],
+  content_source: SURVEY_QUESTIONS[3]
+};
+
+const parseAnswerByQuestion = (
+  questionId: SurveyQuestionId,
+  normalizedMessage: string
+): string | null => {
+  const question = QUESTION_MAP[questionId];
+  if (!question) {
+    return null;
+  }
+  switch (questionId) {
+    case "campaign_goal":
+      return parseGoalByChoice(question, normalizedMessage);
+    case "channels":
+      return parseChannelsByChoice(question, normalizedMessage);
+    case "duration":
+      return parseDurationByChoice(question, normalizedMessage);
+    case "content_source":
+      return parseContentSourceByChoice(question, normalizedMessage);
+    default:
+      return null;
+  }
+};
 
 export const buildSurveyAutoFillData = (
   ragContext: EnrichedCampaignContext
@@ -190,18 +345,12 @@ export const buildSurveyAutoFillData = (
   }
 
   const totalFiles = parseTotalFiles(ragContext.folderSummary);
-  if (totalFiles > 0 || (ragContext.documentExtracts && ragContext.documentExtracts.trim())) {
-    autoFill.content_source = "있음";
-  } else {
-    autoFill.content_source = "없음";
-  }
+  autoFill.content_source = totalFiles > 0 || (ragContext.documentExtracts && ragContext.documentExtracts.trim()) ? "있음" : "없음";
 
   return autoFill;
 };
 
-export const extractAnswersFromInitialMessage = async (
-  message: string
-): Promise<SurveyAnswer[]> => {
+export const extractAnswersFromInitialMessage = async (message: string): Promise<SurveyAnswer[]> => {
   const normalized = normalizeText(message);
   const answers: SurveyAnswer[] = [];
   const answeredAt = new Date().toISOString();
@@ -257,10 +406,20 @@ export const buildPendingQuestions = (
   return allQuestions.map((question) => question.id).filter((questionId) => !answeredIds.has(questionId));
 };
 
-const formatQuestionChoices = (question: SurveyQuestion): string =>
-  Array.isArray(question.choices) && question.choices.length > 0
-    ? `선택 예시: ${question.choices.join(" / ")}`
-    : "자유롭게 답변해 주세요.";
+const formatQuestionChoices = (question: SurveyQuestion): string => {
+  if (!Array.isArray(question.choices) || question.choices.length === 0) {
+    return "자유롭게 답변해 주세요.";
+  }
+  return question.choices.map((choice, index) => `${index + 1}. ${choice}`).join("\n");
+};
+
+const buildAnsweredSummaryLines = (answers: SurveyAnswer[]): string[] => {
+  const answerMap = toAnswerMap(answers);
+  return QUESTION_ORDER.filter((questionId) => answerMap[questionId]).map((questionId) => {
+    const question = QUESTION_MAP[questionId];
+    return `- ${question.label}: ${answerMap[questionId]?.answer ?? ""}`;
+  });
+};
 
 export const buildSurveyPrompt = (params: {
   pendingQuestions: SurveyQuestionId[];
@@ -272,83 +431,143 @@ export const buildSurveyPrompt = (params: {
     return "필수 정보는 충분합니다. 원하시면 '진행'이라고 답해 주세요. 바로 계획 초안을 만들겠습니다.";
   }
 
-  const question = SURVEY_QUESTIONS.find((entry) => entry.id === nextQuestionId);
+  const question = QUESTION_MAP[nextQuestionId];
   if (!question) {
     return "다음 정보를 알려주세요.";
   }
 
   const suggestion = params.autoFillData[nextQuestionId];
-  const answerMap = toAnswerMap(params.answeredSoFar);
-  const summaryLines = SURVEY_QUESTIONS.filter((entry) => answerMap[entry.id]).map(
-    (entry) => `- ${entry.label}: ${answerMap[entry.id]?.answer ?? ""}`
-  );
-
+  const summaryLines = buildAnsweredSummaryLines(params.answeredSoFar);
   const summaryBlock = summaryLines.length > 0 ? `현재까지 정리:\n${summaryLines.join("\n")}\n\n` : "";
-  if (suggestion) {
-    return `${summaryBlock}${question.label}\n기존 설정 기준 추천값: ${suggestion}\n이대로 진행하면 "네"라고 답하고, 변경하려면 원하는 값을 알려주세요.\n${formatQuestionChoices(
-      question
-    )}`;
-  }
+  const recommendationBlock = suggestion ? `기존 설정 기준 추천값: ${suggestion}\n` : "";
 
-  return `${summaryBlock}${question.label}\n${formatQuestionChoices(question)}`;
+  return [
+    `${summaryBlock}${question.label}`,
+    recommendationBlock,
+    "아래 선택지에서 번호나 값을 그대로 답변해 주세요.",
+    formatQuestionChoices(question),
+    DIRECT_INPUT_HINT
+  ]
+    .filter((line) => !!line)
+    .join("\n");
 };
 
-const parseSingleAnswer = (
-  questionId: SurveyQuestionId,
-  normalizedMessage: string,
-  rawMessage: string
-): string | null => {
-  switch (questionId) {
-    case "campaign_goal":
-      return detectGoal(normalizedMessage) ?? null;
-    case "channels": {
-      const channels = detectChannels(normalizedMessage);
-      return channels.length > 0 ? formatChannels(channels) : null;
-    }
-    case "duration":
-      return detectDuration(normalizedMessage) ?? null;
-    case "content_source":
-      return detectContentSource(normalizedMessage) ?? null;
-    default: {
-      const trimmed = rawMessage.trim();
-      return trimmed || null;
-    }
+export const buildSurveyPromptMetadata = (params: {
+  pendingQuestions: SurveyQuestionId[];
+  autoFillData: Partial<Record<SurveyQuestionId, string>>;
+  answeredSoFar: SurveyAnswer[];
+}): Record<string, unknown> => {
+  const nextQuestionId = params.pendingQuestions[0];
+  if (!nextQuestionId) {
+    return {};
   }
+  const question = QUESTION_MAP[nextQuestionId];
+  if (!question) {
+    return {};
+  }
+
+  const suggestion = params.autoFillData[nextQuestionId] ?? null;
+  const summaryLines = buildAnsweredSummaryLines(params.answeredSoFar);
+  return {
+    survey_prompt: {
+      type: "campaign_plan_survey",
+      question_id: nextQuestionId,
+      label: question.label,
+      choices: question.choices ?? [],
+      suggested_value: suggestion,
+      allow_direct_input: true,
+      direct_input_hint: DIRECT_INPUT_HINT,
+      answered_summary: summaryLines,
+      selection_mode: nextQuestionId === "channels" ? "single_or_multi" : "single"
+    }
+  };
 };
 
 export const parseSurveyAnswer = async (params: {
   userMessage: string;
   pendingQuestions: SurveyQuestionId[];
   autoFillData: Partial<Record<SurveyQuestionId, string>>;
+  classifyDirectInput?: (input: {
+    questionId: SurveyQuestionId;
+    userMessage: string;
+    choices: string[];
+    suggestedValue: string | null;
+    answeredSoFar?: SurveyAnswer[];
+  }) => Promise<{ answer: string; confidence: number; reason?: string } | null>;
+  answeredSoFar?: SurveyAnswer[];
 }): Promise<SurveyAnswer[]> => {
-  const normalized = normalizeText(params.userMessage);
   const answeredAt = new Date().toISOString();
-  const parsed: SurveyAnswer[] = [];
+  const nextQuestionId = params.pendingQuestions[0];
+  if (!nextQuestionId) {
+    return [];
+  }
 
-  for (const questionId of params.pendingQuestions) {
-    const parsedValue = parseSingleAnswer(questionId, normalized, params.userMessage);
-    if (parsedValue) {
-      parsed.push({
-        question_id: questionId,
+  const suggestion = params.autoFillData[nextQuestionId] ?? null;
+  const question = QUESTION_MAP[nextQuestionId];
+  if (!question) {
+    return [];
+  }
+
+  const directInput = extractDirectInput(params.userMessage);
+  const normalizedDirect = normalizeText(directInput.value);
+  const normalizedRaw = normalizeText(params.userMessage);
+  const parsedValue = parseAnswerByQuestion(nextQuestionId, normalizedDirect || normalizedRaw);
+
+  if (parsedValue) {
+    return [
+      {
+        question_id: nextQuestionId,
         answer: parsedValue,
         source: "user",
         answered_at: answeredAt
-      });
-      continue;
-    }
+      }
+    ];
+  }
 
-    const suggestion = params.autoFillData[questionId];
-    if (suggestion && hasAny(normalized, AFFIRMATIVE_TERMS)) {
-      parsed.push({
-        question_id: questionId,
+  if (!directInput.isDirectInput && suggestion && hasAny(normalizedRaw, AFFIRMATIVE_TERMS)) {
+    return [
+      {
+        question_id: nextQuestionId,
         answer: suggestion,
         source: "auto_filled",
         answered_at: answeredAt
-      });
+      }
+    ];
+  }
+
+  if (directInput.isDirectInput && params.classifyDirectInput && directInput.value.trim()) {
+    const llmResult = await params.classifyDirectInput({
+      questionId: nextQuestionId,
+      userMessage: directInput.value.trim(),
+      choices: question.choices ?? [],
+      suggestedValue: suggestion,
+      answeredSoFar: params.answeredSoFar
+    });
+
+    if (llmResult && llmResult.answer.trim()) {
+      return [
+        {
+          question_id: nextQuestionId,
+          answer: llmResult.answer.trim(),
+          source: "user",
+          answered_at: answeredAt
+        }
+      ];
     }
   }
 
-  return upsertAnswers([], parsed);
+  if (directInput.isDirectInput && directInput.value.trim()) {
+    return [
+      {
+        question_id: nextQuestionId,
+        answer: directInput.value.trim(),
+        source: "user",
+        answered_at: answeredAt
+      }
+    ];
+  }
+
+  return [];
 };
 
 export const applyAutoFillToPendingOptional = (params: {
@@ -417,4 +636,3 @@ export const buildChainInputFromSurvey = (answers: SurveyAnswer[]): string => {
     "위 정보를 기반으로 실행 가능한 캠페인 계획을 작성하세요."
   ].join("\n");
 };
-

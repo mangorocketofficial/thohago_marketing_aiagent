@@ -464,11 +464,122 @@ button.primary {
   gap: 8px;
 }
 
+.chat-input-row.chat-input-with-skill {
+  display: flex;
+  align-items: center;
+}
+
+.chat-input-row.chat-input-with-skill input {
+  flex: 1;
+  min-width: 0;
+}
+
 .chat-input-row input {
   border: 1px solid #c8d2e1;
   border-radius: 9px;
   padding: 10px;
   font-size: 14px;
+}
+
+.chat-skill-picker {
+  position: relative;
+}
+
+.chat-skill-plus {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #c8d2e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-skill-plus.is-active {
+  border-color: #7aa9ff;
+  background: #edf4ff;
+}
+
+.chat-skill-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  min-width: 220px;
+  border: 1px solid #d9e2ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+  z-index: 20;
+}
+
+.chat-skill-menu-item {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.chat-skill-menu-item strong {
+  font-size: 13px;
+}
+
+.chat-skill-menu-item span {
+  font-size: 12px;
+  color: #475467;
+}
+
+.chat-skill-menu-item.is-selected {
+  border-color: #8fb8ff;
+  background: #edf4ff;
+}
+
+.chat-skill-chip {
+  border: 1px solid #b8cff8;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #1d4f9f;
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.chat-survey-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.chat-survey-option {
+  margin: 0;
+  border: 1px solid #bfd2f2;
+  border-radius: 999px;
+  background: #f1f6ff;
+  color: #1f3d72;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 10px;
+}
+
+.chat-survey-option.is-direct-input {
+  border-color: #d1d5db;
+  background: #f8fafc;
+  color: #374151;
+}
+
+.chat-survey-direct-hint {
+  width: 100%;
+  font-size: 11px;
+  color: #64748b;
 }
 
 .queue-item {

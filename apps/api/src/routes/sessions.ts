@@ -22,6 +22,7 @@ import {
   resumeSession
 } from "../orchestrator/service";
 import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionStatus } from "../orchestrator/types";
+import { getSkillRegistry } from "../orchestrator/skills/router";
 
 const SUPPORTED_EVENTS = new Set<ResumeEventType>([
   "user_message",
@@ -201,6 +202,16 @@ const parseResumeEvent = (body: unknown): ResumeEventRequest => {
     payload.expected_version = expectedVersion;
   }
 
+  const skillTriggerRaw = typeof payload.skill_trigger === "string" ? payload.skill_trigger.trim().toLowerCase() : "";
+  if (!skillTriggerRaw) {
+    delete payload.skill_trigger;
+  } else {
+    if (!/^[a-z0-9_:-]{2,64}$/.test(skillTriggerRaw)) {
+      throw new HttpError(400, "invalid_payload", "payload.skill_trigger format is invalid.");
+    }
+    payload.skill_trigger = skillTriggerRaw;
+  }
+
   const idempotencyKey =
     typeof row.idempotency_key === "string" && row.idempotency_key.trim() ? row.idempotency_key.trim() : undefined;
 
@@ -289,6 +300,7 @@ sessionsRouter.post("/orgs/:orgId/sessions", async (req, res) => {
     const scopeId = parseOptionalString(req.body?.scope_id);
     const title = parseOptionalString(req.body?.title);
     const startPaused = parseOptionalBoolean(req.body?.start_paused, "start_paused", true);
+    const forceNew = parseOptionalBoolean(req.body?.force_new, "force_new", false);
 
     let createdByUserId: string | null = null;
     if ((req.header("authorization") ?? "").trim()) {
@@ -305,7 +317,8 @@ sessionsRouter.post("/orgs/:orgId/sessions", async (req, res) => {
       scopeId,
       title,
       createdByUserId,
-      startPaused
+      startPaused,
+      forceNew
     });
 
     res.status(result.reused ? 200 : 201).json({
@@ -486,6 +499,24 @@ sessionsRouter.get("/orgs/:orgId/campaigns/active-summaries", async (req, res) =
   } catch (error) {
     sendError(res, error);
   }
+});
+
+sessionsRouter.get("/skills", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  const registry = getSkillRegistry();
+  const items = registry.getAll().map((skill) => ({
+    id: skill.id,
+    display_name: skill.displayName,
+    version: skill.version
+  }));
+
+  res.json({
+    ok: true,
+    items
+  });
 });
 
 sessionsRouter.post("/sessions/:sessionId/resume", async (req, res) => {

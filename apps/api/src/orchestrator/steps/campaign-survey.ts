@@ -1,6 +1,6 @@
 import { HttpError } from "../../lib/errors";
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { generateCampaignPlan } from "../ai";
+import { classifyCampaignSurveyDirectInput, generateCampaignPlan } from "../ai";
 import { buildEnrichedCampaignContext } from "../rag-context";
 import { buildCampaignPlanSummary } from "../service-helpers";
 import type { CampaignPlanChainData, ChainStepName } from "../skills/campaign-plan/chain-types";
@@ -11,6 +11,7 @@ import {
   buildPendingQuestions,
   buildSurveyAutoFillData,
   buildSurveyPrompt,
+  buildSurveyPromptMetadata,
   canEarlyExit,
   extractAnswersFromInitialMessage,
   isEarlyExitIntent,
@@ -422,12 +423,18 @@ export const handleSurveyStart = async (context: SkillExecutionContext): Promise
     autoFillData,
     answeredSoFar: nextAnswers
   });
+  const promptMetadata = buildSurveyPromptMetadata({
+    pendingQuestions: nextPending,
+    autoFillData,
+    answeredSoFar: nextAnswers
+  });
 
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
     role: "assistant",
-    content: prompt
+    content: prompt,
+    ...(Object.keys(promptMetadata).length > 0 ? { metadata: promptMetadata } : {})
   });
 
   return {
@@ -475,7 +482,19 @@ export const handleSurveyAnswer = async (context: SkillExecutionContext): Promis
   const parsedAnswers = await parseSurveyAnswer({
     userMessage: content,
     pendingQuestions: survey.pending_questions,
-    autoFillData
+    autoFillData,
+    answeredSoFar: survey.answers,
+    classifyDirectInput: async (input) =>
+      classifyCampaignSurveyDirectInput({
+        questionId: input.questionId,
+        userMessage: input.userMessage,
+        choices: input.choices,
+        suggestedValue: input.suggestedValue,
+        answeredSoFar: (input.answeredSoFar ?? []).map((entry) => ({
+          question_id: entry.question_id,
+          answer: entry.answer
+        }))
+      })
   });
   const parsedIds = new Set(parsedAnswers.map((answer) => answer.question_id));
 
@@ -530,11 +549,17 @@ export const handleSurveyAnswer = async (context: SkillExecutionContext): Promis
     autoFillData,
     answeredSoFar: nextAnswers
   });
+  const promptMetadata = buildSurveyPromptMetadata({
+    pendingQuestions: nextPending,
+    autoFillData,
+    answeredSoFar: nextAnswers
+  });
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
     role: "assistant",
-    content: prompt
+    content: prompt,
+    ...(Object.keys(promptMetadata).length > 0 ? { metadata: promptMetadata } : {})
   });
 
   return {

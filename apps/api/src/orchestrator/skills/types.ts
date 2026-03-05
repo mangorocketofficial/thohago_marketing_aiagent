@@ -15,7 +15,7 @@ export type SkillOutcome =
   | "session_done"
   | "session_failed";
 
-export type SkillRouteReason = "active_skill" | "event_type" | "intent";
+export type SkillRouteReason = "active_skill" | "event_type" | "intent" | "explicit_trigger" | "skill_lock" | "llm_intent";
 
 export type SkillResult = {
   handled: boolean;

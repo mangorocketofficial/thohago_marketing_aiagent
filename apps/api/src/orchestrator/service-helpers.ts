@@ -243,6 +243,9 @@ const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   active_skill_started_at: null,
   active_skill_version: null,
   active_skill_confidence: null,
+  skill_lock_id: null,
+  skill_lock_source: null,
+  skill_lock_at: null,
   user_message: null,
   campaign_id: null,
   campaign_survey: null,
@@ -288,6 +291,12 @@ export const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): Se
         ? row.active_skill_version.trim()
         : null,
     active_skill_confidence: row.active_skill_confidence === null ? null : parseSkillConfidence(row.active_skill_confidence),
+    skill_lock_id:
+      typeof row.skill_lock_id === "string" && row.skill_lock_id.trim() ? row.skill_lock_id.trim() : null,
+    skill_lock_source:
+      row.skill_lock_source === "manual" || row.skill_lock_source === "llm_auto" ? row.skill_lock_source : null,
+    skill_lock_at:
+      typeof row.skill_lock_at === "string" && row.skill_lock_at.trim() ? row.skill_lock_at.trim() : null,
     user_message: row.user_message === null ? null : asString(row.user_message, ""),
     campaign_id: row.campaign_id === null ? null : asString(row.campaign_id, ""),
     campaign_survey:
@@ -381,6 +390,9 @@ export const buildManualSessionState = (
     active_skill_started_at: null,
     active_skill_version: null,
     active_skill_confidence: null,
+    skill_lock_id: null,
+    skill_lock_source: null,
+    skill_lock_at: null,
     user_message: null,
     campaign_id: null,
     campaign_survey: null,

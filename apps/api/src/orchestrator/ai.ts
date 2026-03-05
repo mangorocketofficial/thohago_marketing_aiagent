@@ -2,6 +2,7 @@ import { truncateToTokenBudget } from "@repo/rag";
 import { env } from "../lib/env";
 import { getSessionRollingSummaryText, loadWorkingMemoryForSession, refreshSessionMemorySnapshot } from "./conversation-memory";
 import { buildLlmRequestHash, readLlmResponseCache, writeLlmResponseCache } from "./llm-cache";
+import { callOpenAi, callWithFallback, isAnthropicCreditExhaustedError } from "./llm-client";
 import { buildPreferenceContextText } from "./preference-memory";
 import { buildContentGenerationContext, buildEnrichedCampaignContext } from "./rag-context";
 import { assembleCampaignPlanDocument } from "./skills/campaign-plan/assembler";
@@ -14,29 +15,12 @@ import {
   type CampaignPlanChainData,
   type ChainStepName
 } from "./skills/campaign-plan/chain-types";
-import type { CampaignPlan, RagContextMeta } from "./types";
+import type { CampaignPlan, RagContextMeta, SurveyQuestionId } from "./types";
 
-const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_GENERAL_CHAT_MODEL = "gpt-4o-mini";
 const SUPPORTED_CONTENT_CHANNELS = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
 const CHAIN_TARGET_LATENCY_MS = 30_000;
-
-type AnthropicTextBlock = {
-  type?: string;
-  text?: string;
-};
-
-type AnthropicResponse = {
-  content?: AnthropicTextBlock[];
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  error?: {
-    message?: string;
-  };
-};
 
 type OpenAiChatCompletionResponse = {
   choices?: Array<{
@@ -351,188 +335,224 @@ export const classifyCampaignDraftReviewIntent = async (params: {
   };
 };
 
-const callAnthropicWithUsage = async (
-  prompt: string,
-  maxTokens: number,
-  options?: {
-    orgId?: string | null;
-  }
-): Promise<CampaignChainModelCallResult> => {
-  if (!env.anthropicApiKey) {
-    return {
-      text: null,
-      promptTokens: null,
-      completionTokens: null,
-      errorCode: "missing_api_key",
-      errorMessage: "ANTHROPIC_API_KEY is missing."
-    };
+export const detectSkillIntentForRouting = async (params: {
+  orgId: string;
+  sessionId: string;
+  currentStep: string;
+  userMessage: string;
+  availableSkills: Array<{ id: string; description: string }>;
+}): Promise<{ skillId: string; confidence: number; reason: string } | null> => {
+  const userMessage = String(params.userMessage ?? "").trim();
+  if (!userMessage) {
+    return null;
   }
 
-  const orgId = typeof options?.orgId === "string" && options.orgId.trim() ? options.orgId.trim() : null;
-  const requestHash = buildLlmRequestHash({
-    provider: "anthropic",
-    model: env.anthropicModel,
-    prompt,
-    max_tokens: maxTokens
-  });
-  const cacheKey =
-    orgId === null
-      ? null
-      : buildLlmRequestHash({
-          provider: "anthropic",
-          org_id: orgId,
-          request_hash: requestHash
-        });
+  const supportedSkills = params.availableSkills
+    .map((entry) => ({
+      id: String(entry.id ?? "").trim(),
+      description: String(entry.description ?? "").trim()
+    }))
+    .filter((entry) => entry.id);
+  if (supportedSkills.length === 0) {
+    return null;
+  }
 
-  if (orgId && cacheKey) {
-    const cached = await readLlmResponseCache({
-      orgId,
-      cacheKey
-    });
-    if (cached?.text) {
-      return {
-        text: cached.text,
-        promptTokens: cached.promptTokens,
-        completionTokens: cached.completionTokens,
-        errorCode: null,
-        errorMessage: null
-      };
+  const response = await callOpenAiGeneralChat(
+    [
+      {
+        role: "system",
+        content: [
+          "You classify whether a user message should enter a skill mode.",
+          "Return JSON only.",
+          "If uncertain, choose none.",
+          'Output schema: {"skill_id":"campaign_plan|none","confidence":0..1,"reason":"short"}'
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: [
+          `[current_step] ${params.currentStep}`,
+          `[available_skills] ${safeJson(supportedSkills)}`,
+          `[user_message] ${userMessage}`
+        ].join("\n")
+      }
+    ],
+    {
+      temperature: 0,
+      maxTokens: 120,
+      cache: {
+        orgId: params.orgId,
+        scope: "skill_intent_router",
+        payload: {
+          session_id: params.sessionId,
+          current_step: params.currentStep,
+          available_skills: supportedSkills,
+          user_message: userMessage
+        },
+        ttlSeconds: env.llmResponseCacheTtlSeconds
+      }
     }
+  );
+
+  if (!response) {
+    return null;
   }
 
-  const requestHeaders = {
-    "content-type": "application/json",
-    "x-api-key": env.anthropicApiKey,
-    "anthropic-version": "2023-06-01"
+  const parsed = parseLooseJsonObject(response);
+  if (!parsed) {
+    return null;
+  }
+
+  const skillId = typeof parsed.skill_id === "string" ? parsed.skill_id.trim().toLowerCase() : "";
+  if (!skillId || skillId === "none" || !supportedSkills.some((entry) => entry.id === skillId)) {
+    return null;
+  }
+
+  const confidenceRaw =
+    typeof parsed.confidence === "number"
+      ? parsed.confidence
+      : typeof parsed.confidence === "string"
+        ? Number.parseFloat(parsed.confidence)
+        : Number.NaN;
+  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0.5;
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "llm_skill_intent";
+
+  return {
+    skillId,
+    confidence,
+    reason
   };
-
-  const buildRequestBody = (usePromptCaching: boolean) => {
-    if (!usePromptCaching) {
-      return {
-        model: env.anthropicModel,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }]
-      };
-    }
-
-    return {
-      model: env.anthropicModel,
-      max_tokens: maxTokens,
-      system: [
-        {
-          type: "text",
-          text: "Follow the user instruction exactly. Return only the requested output.",
-          cache_control: {
-            type: "ephemeral"
-          }
-        }
-      ],
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: prompt,
-              cache_control: {
-                type: "ephemeral"
-              }
-            }
-          ]
-        }
-      ]
-    };
-  };
-
-  const callAnthropicApi = async (usePromptCaching: boolean) => {
-    const response = await fetch(ANTHROPIC_MESSAGES_URL, {
-      method: "POST",
-      headers: requestHeaders,
-      body: JSON.stringify(buildRequestBody(usePromptCaching))
-    });
-    const payload = (await response.json().catch(() => ({}))) as AnthropicResponse;
-    return {
-      response,
-      payload
-    };
-  };
-
-  try {
-    let current = await callAnthropicApi(env.anthropicPromptCachingEnabled);
-    if (
-      !current.response.ok &&
-      env.anthropicPromptCachingEnabled &&
-      current.response.status === 400
-    ) {
-      current = await callAnthropicApi(false);
-    }
-
-    const payload = current.payload;
-    const promptTokens =
-      typeof payload.usage?.input_tokens === "number" && Number.isFinite(payload.usage.input_tokens)
-        ? payload.usage.input_tokens
-        : null;
-    const completionTokens =
-      typeof payload.usage?.output_tokens === "number" && Number.isFinite(payload.usage.output_tokens)
-        ? payload.usage.output_tokens
-        : null;
-
-    if (!current.response.ok) {
-      const errorMessage = payload.error?.message ?? "unknown";
-      console.error(`[AI] Anthropic request failed (${current.response.status}): ${errorMessage}`);
-      return {
-        text: null,
-        promptTokens,
-        completionTokens,
-        errorCode: `http_${current.response.status}`,
-        errorMessage
-      };
-    }
-
-    const block = payload.content?.find((entry) => entry.type === "text" && !!entry.text?.trim());
-    const text = block?.text?.trim() ?? null;
-    if (text && orgId && cacheKey) {
-      await writeLlmResponseCache({
-        orgId,
-        provider: "anthropic",
-        model: env.anthropicModel,
-        cacheKey,
-        requestHash,
-        responseText: text,
-        promptTokens,
-        completionTokens
-      });
-    }
-
-    return {
-      text,
-      promptTokens,
-      completionTokens,
-      errorCode: null,
-      errorMessage: null
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[AI] Anthropic request error:", error);
-    return {
-      text: null,
-      promptTokens: null,
-      completionTokens: null,
-      errorCode: "request_error",
-      errorMessage: message
-    };
-  }
 };
 
-const callAnthropic = async (
-  prompt: string,
-  maxTokens: number,
-  options?: {
-    orgId?: string | null;
+const mapSurveyChoiceValue = (raw: string, choices: string[]): string | null => {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) {
+    return null;
   }
-): Promise<string | null> => {
-  const result = await callAnthropicWithUsage(prompt, maxTokens, options);
-  return result.text;
+  for (const choice of choices) {
+    if (choice.trim().toLowerCase() === normalized) {
+      return choice;
+    }
+  }
+  return null;
+};
+
+const normalizeSurveyClassifierAnswer = (
+  questionId: SurveyQuestionId,
+  rawAnswer: string,
+  choices: string[]
+): string | null => {
+  const trimmed = rawAnswer.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const directChoice = mapSurveyChoiceValue("직접 입력", choices);
+  const canonicalChoices = directChoice ? choices.filter((entry) => entry !== directChoice) : [...choices];
+  const exactChoice = mapSurveyChoiceValue(trimmed, canonicalChoices);
+  if (exactChoice) {
+    return exactChoice;
+  }
+
+  if (questionId === "channels") {
+    const normalized = trimmed.toLowerCase();
+    const matched = canonicalChoices.filter((choice) => normalized.includes(choice.toLowerCase()));
+    if (matched.length > 0) {
+      return [...new Set(matched)].join(", ");
+    }
+    return trimmed;
+  }
+
+  if (questionId === "content_source") {
+    const normalized = trimmed.toLowerCase();
+    if (/없음|없어|none|no/.test(normalized)) {
+      return "없음";
+    }
+    if (/일부|조금|partial|some/.test(normalized)) {
+      return "일부 있음";
+    }
+    if (/있음|있어|have|has|available/.test(normalized)) {
+      return "있음";
+    }
+  }
+
+  return trimmed;
+};
+
+export const classifyCampaignSurveyDirectInput = async (params: {
+  questionId: SurveyQuestionId;
+  userMessage: string;
+  choices: string[];
+  suggestedValue: string | null;
+  answeredSoFar?: Array<{ question_id: SurveyQuestionId; answer: string }>;
+}): Promise<{ answer: string; confidence: number; reason: string } | null> => {
+  const userMessage = String(params.userMessage ?? "").trim();
+  if (!userMessage) {
+    return null;
+  }
+
+  const response = await callOpenAiGeneralChat(
+    [
+      {
+        role: "system",
+        content: [
+          "You map a direct-input survey answer to a campaign planning survey value.",
+          "Return JSON only.",
+          "If a choice clearly matches, return that canonical choice.",
+          "If no choice matches but input is still valid, return a concise normalized answer.",
+          "Never return the literal '직접 입력'.",
+          'Output schema: {"answer":"string","confidence":0..1,"reason":"short"}'
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: [
+          `[question_id] ${params.questionId}`,
+          `[choices] ${safeJson(params.choices ?? [])}`,
+          `[suggested_value] ${params.suggestedValue ?? "none"}`,
+          `[answered_so_far] ${safeJson(params.answeredSoFar ?? [])}`,
+          `[user_input] ${userMessage}`
+        ].join("\n")
+      }
+    ],
+    {
+      temperature: 0,
+      maxTokens: 140
+    }
+  );
+
+  if (!response) {
+    return null;
+  }
+
+  const parsed = parseLooseJsonObject(response);
+  if (!parsed) {
+    return null;
+  }
+
+  const answerRaw = typeof parsed.answer === "string" ? parsed.answer.trim() : "";
+  const normalizedAnswer = normalizeSurveyClassifierAnswer(params.questionId, answerRaw, params.choices ?? []);
+  if (!normalizedAnswer) {
+    return null;
+  }
+
+  const confidenceRaw =
+    typeof parsed.confidence === "number"
+      ? parsed.confidence
+      : typeof parsed.confidence === "string"
+        ? Number.parseFloat(parsed.confidence)
+        : Number.NaN;
+  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0.5;
+  if (confidence < 0.7) {
+    return null;
+  }
+
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "llm_survey_mapper";
+  return {
+    answer: normalizedAnswer,
+    confidence,
+    reason
+  };
 };
 
 export const generateCampaignPlan = async (
@@ -553,16 +573,47 @@ export const generateCampaignPlan = async (
   planDocument: string | null;
 }> => {
   const ctx = await buildEnrichedCampaignContext(orgId, { activityFolder });
+  let shouldForceOpenAiFallback = false;
+
+  const invokeCampaignChainModel = async (
+    prompt: string,
+    tokens: number
+  ): Promise<CampaignChainModelCallResult> => {
+    if (shouldForceOpenAiFallback) {
+      return callOpenAi({
+        prompt,
+        maxTokens: tokens,
+        orgId
+      });
+    }
+
+    const result = await callWithFallback({
+      prompt,
+      maxTokens: tokens,
+      orgId,
+      onFallback: (anthropicResult) => {
+        if (isAnthropicCreditExhaustedError(anthropicResult)) {
+          shouldForceOpenAiFallback = true;
+          console.warn("[CAMPAIGN_CHAIN] Anthropic credits unavailable; falling back to OpenAI gpt-4o-mini.");
+        } else {
+          console.warn(
+            `[CAMPAIGN_CHAIN] Anthropic fallback triggered (${anthropicResult.errorCode ?? "unknown"}): ${
+              anthropicResult.errorMessage ?? "no_message"
+            }`
+          );
+        }
+      }
+    });
+
+    return result;
+  };
 
   try {
     const chain = await runCampaignPlanChain({
       activityFolder,
       userMessage,
       context: ctx,
-      invokeModel: (prompt, tokens) =>
-        callAnthropicWithUsage(prompt, tokens, {
-          orgId
-        }),
+      invokeModel: invokeCampaignChainModel,
       revisionReason: options?.revisionReason ?? null,
       previousChainData: options?.previousChainData ?? null,
       rerunFromStep: options?.rerunFromStep
@@ -682,12 +733,14 @@ export const generateContentDraft = async (
   }
 
   const maxTokens = normalizedChannel === "naver_blog" ? 1000 : 400;
-  const response = await callAnthropic(promptParts.filter(Boolean).join("\n"), maxTokens, {
+  const response = await callWithFallback({
+    prompt: promptParts.filter(Boolean).join("\n"),
+    maxTokens,
     orgId
   });
 
-  if (response) {
-    return { draft: response, ragMeta: ctx.meta };
+  if (response.text) {
+    return { draft: response.text, ragMeta: ctx.meta };
   }
 
   return {

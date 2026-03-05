@@ -56,6 +56,20 @@ type WatcherOpenFolderResult = {
   message: string | null;
 };
 
+type ContentSaveLocalPayload = {
+  relativePath: string;
+  fileName: string;
+  body: string;
+  encoding?: "utf8";
+};
+
+type ContentSaveLocalResult = {
+  ok: boolean;
+  filePath?: string;
+  error?: string;
+  message?: string;
+};
+
 type ChatAction =
   | "get-active-session"
   | "send-message"
@@ -258,6 +272,18 @@ type ChatActiveCampaignSummariesResult = {
   message?: string;
 };
 
+type ChatSkillSummary = {
+  id: string;
+  display_name: string;
+  version: string;
+};
+
+type ChatSkillListResult = {
+  ok: boolean;
+  items: ChatSkillSummary[];
+  message?: string;
+};
+
 type ChatPendingFolderUpdate = {
   activity_folder: string;
   pending_count: number;
@@ -288,6 +314,7 @@ type ChatCreateSessionPayload = {
   scopeId?: string | null;
   title?: string | null;
   startPaused?: boolean;
+  forceNew?: boolean;
 };
 
 type ChatCreateSessionResult = {
@@ -397,6 +424,9 @@ declare global {
         getFiles: () => Promise<RendererFileEntry[]>;
         openFolder: () => Promise<WatcherOpenFolderResult>;
       };
+      content: {
+        saveLocal: (payload: ContentSaveLocalPayload) => Promise<ContentSaveLocalResult>;
+      };
       onboarding: {
         onCrawlProgress: (cb: (payload: {
           source: "website" | "naver_blog" | "instagram" | null;
@@ -463,6 +493,7 @@ declare global {
         onActionResult: (cb: (payload: ChatActionResult) => void) => () => void;
         onActionError: (cb: (payload: ChatActionError) => void) => () => void;
         getConfig: () => Promise<ChatConfig>;
+        listSkills: () => Promise<ChatSkillListResult>;
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
         listInboxItems: (payload?: { limit?: number }) => Promise<ChatInboxListResult>;
@@ -480,6 +511,7 @@ declare global {
           sessionId: string;
           content: string;
           uiContext?: ChatSendUiContext;
+          skillTrigger?: string;
         }) => Promise<ChatResumeResult>;
         approveCampaign: (payload: { sessionId: string; campaignId: string }) => Promise<ChatResumeResult>;
         approveContent: (payload: { sessionId: string; contentId: string; editedBody?: string }) => Promise<ChatResumeResult>;

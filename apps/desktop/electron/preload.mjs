@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     getFiles: () => ipcRenderer.invoke("watcher:get-files"),
     openFolder: () => ipcRenderer.invoke("watcher:open-folder")
   },
+  content: {
+    saveLocal: (payload) => ipcRenderer.invoke("content:save-local", payload)
+  },
   onboarding: {
     onCrawlProgress: (cb) => subscribe("onboarding:crawl-progress", cb),
     onCrawlComplete: (cb) => subscribe("onboarding:crawl-complete", cb),
@@ -55,6 +58,7 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     onActionResult: (cb) => subscribe("chat:action-result", cb),
     onActionError: (cb) => subscribe("chat:action-error", cb),
     getConfig: () => ipcRenderer.invoke("chat:get-config"),
+    listSkills: () => ipcRenderer.invoke("chat:list-skills"),
     getActiveSession: () => ipcRenderer.invoke("chat:get-active-session"),
     listSessions: (payload) => ipcRenderer.invoke("chat:list-sessions", payload),
     listInboxItems: (payload) => ipcRenderer.invoke("chat:list-inbox-items", payload),

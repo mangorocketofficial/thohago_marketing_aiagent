@@ -48,6 +48,7 @@ export type ChatUiContext = {
 type SendMessageInput = {
   content?: string;
   uiContext?: ChatUiContext;
+  skillTrigger?: string;
 };
 
 type ChatProviderProps = PropsWithChildren<{
@@ -640,6 +641,9 @@ export const ChatProvider = ({
         await runtime.chat.sendMessage({
           sessionId,
           content,
+          ...(typeof input?.skillTrigger === "string" && input.skillTrigger.trim()
+            ? { skillTrigger: input.skillTrigger.trim() }
+            : {}),
           ...(input?.uiContext ? { uiContext: input.uiContext } : {})
         });
         if (input?.content === undefined) {

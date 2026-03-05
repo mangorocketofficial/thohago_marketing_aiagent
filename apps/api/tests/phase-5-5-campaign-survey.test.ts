@@ -12,8 +12,14 @@ import {
 import type { SurveyAnswer } from "../src/orchestrator/types";
 
 describe("Phase 5-5 campaign survey", () => {
+  it("includes direct input choice in every survey question", () => {
+    for (const question of SURVEY_QUESTIONS) {
+      assert.ok(Array.isArray(question.choices) && question.choices.includes("직접 입력"));
+    }
+  });
+
   it("extracts goal and channels from initial message", async () => {
-    const answers = await extractAnswersFromInitialMessage("인스타 중심 인지도 캠페인 기획해줘");
+    const answers = await extractAnswersFromInitialMessage("Please plan an awareness campaign on Instagram.");
     const goal = answers.find((entry) => entry.question_id === "campaign_goal");
     const channels = answers.find((entry) => entry.question_id === "channels");
 
@@ -51,7 +57,7 @@ describe("Phase 5-5 campaign survey", () => {
 
   it("accepts auto-fill suggestion on affirmative answer", async () => {
     const parsed = await parseSurveyAnswer({
-      userMessage: "네, 그렇게 진행해줘",
+      userMessage: "네",
       pendingQuestions: ["channels"],
       autoFillData: {
         channels: "Instagram, Threads"
@@ -62,6 +68,60 @@ describe("Phase 5-5 campaign survey", () => {
     assert.equal(parsed[0]?.question_id, "channels");
     assert.equal(parsed[0]?.answer, "Instagram, Threads");
     assert.equal(parsed[0]?.source, "auto_filled");
+  });
+
+  it("parses indexed explicit choice", async () => {
+    const parsed = await parseSurveyAnswer({
+      userMessage: "2",
+      pendingQuestions: ["campaign_goal"],
+      autoFillData: {}
+    });
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.question_id, "campaign_goal");
+    assert.equal(parsed[0]?.answer, "Engagement");
+  });
+
+  it("keeps pending when direct-input option is selected without payload", async () => {
+    const parsed = await parseSurveyAnswer({
+      userMessage: "4",
+      pendingQuestions: ["campaign_goal"],
+      autoFillData: {}
+    });
+
+    assert.equal(parsed.length, 0);
+  });
+
+  it("uses llm helper for direct input mapping", async () => {
+    const parsed = await parseSurveyAnswer({
+      userMessage: "직접입력: 브랜드 인지도 확대",
+      pendingQuestions: ["campaign_goal"],
+      autoFillData: {},
+      classifyDirectInput: async () => ({
+        answer: "Awareness",
+        confidence: 0.91,
+        reason: "mapped_to_goal"
+      })
+    });
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.question_id, "campaign_goal");
+    assert.equal(parsed[0]?.answer, "Awareness");
+  });
+
+  it("accepts explicit content source yes answer", async () => {
+    const parsed = await parseSurveyAnswer({
+      userMessage: "있음, 마케팅 폴더 확인",
+      pendingQuestions: ["content_source"],
+      autoFillData: {
+        content_source: "없음"
+      }
+    });
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.question_id, "content_source");
+    assert.equal(parsed[0]?.answer, "있음");
+    assert.equal(parsed[0]?.source, "user");
   });
 
   it("builds chain input from survey answers", () => {
@@ -84,4 +144,3 @@ describe("Phase 5-5 campaign survey", () => {
     assert.match(chainInput, /채널: Instagram, Naver Blog/);
   });
 });
-

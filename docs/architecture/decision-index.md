@@ -32,3 +32,14 @@ Ship session continuity defaults and deterministic session titles together with 
 
 Reason  
 Users needed immediate relaunch continuity and readable multi-session context; coupling default-session restore, fixed title generation, and control alignment removed key navigation friction in one release slice.
+
+## D-004
+
+Phase  
+5-5
+
+Decision  
+Adopt explicit-choice-first survey with mandatory direct-input option and direct-input-only LLM mapping fallback.
+
+Reason  
+Campaign survey reliability required deterministic state progression; explicit canonical choices remove ambiguous parsing loops while still allowing flexible user input through a controlled direct-input path.

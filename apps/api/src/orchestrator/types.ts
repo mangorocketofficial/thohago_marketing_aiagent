@@ -116,6 +116,9 @@ export type SessionState = {
   active_skill_started_at: string | null;
   active_skill_version: string | null;
   active_skill_confidence: number | null;
+  skill_lock_id: string | null;
+  skill_lock_source: "manual" | "llm_auto" | null;
+  skill_lock_at: string | null;
   user_message: string | null;
   campaign_id: string | null;
   campaign_survey: CampaignSurveyState | null;
@@ -173,6 +176,7 @@ export type CreateSessionParams = {
   title?: string | null;
   createdByUserId?: string | null;
   startPaused?: boolean;
+  forceNew?: boolean;
 };
 
 export type CreateSessionResult = {

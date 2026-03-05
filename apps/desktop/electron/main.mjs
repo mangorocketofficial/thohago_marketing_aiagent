@@ -158,6 +158,94 @@ const parseOptionalIsoDateTime = (value, field) => {
   return normalized;
 };
 
+const WINDOWS_RESERVED_NAMES = new Set([
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9"
+]);
+
+const hasUnsafePathChars = (value) => /[<>:"|?*\u0000-\u001F]/.test(value);
+
+const sanitizeRelativeSegments = (value, field) => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    return [];
+  }
+
+  const normalized = raw.replace(/\\/g, "/");
+  if (path.isAbsolute(normalized)) {
+    throw new Error(`${field} must be a relative path.`);
+  }
+
+  const segments = normalized.split("/").filter(Boolean);
+  for (const segment of segments) {
+    const cleaned = segment.trim();
+    if (!cleaned || cleaned === "." || cleaned === "..") {
+      throw new Error(`${field} contains an invalid path segment.`);
+    }
+    if (hasUnsafePathChars(cleaned)) {
+      throw new Error(`${field} contains disallowed characters.`);
+    }
+    const reservedCandidate = cleaned.replace(/\.+$/, "").toLowerCase();
+    if (WINDOWS_RESERVED_NAMES.has(reservedCandidate)) {
+      throw new Error(`${field} contains a reserved file name.`);
+    }
+  }
+
+  return segments;
+};
+
+const sanitizeFileName = (value) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    throw new Error("fileName is required.");
+  }
+  if (normalized.includes("/") || normalized.includes("\\")) {
+    throw new Error("fileName must not include path separators.");
+  }
+  if (normalized === "." || normalized === "..") {
+    throw new Error("fileName is invalid.");
+  }
+  if (hasUnsafePathChars(normalized)) {
+    throw new Error("fileName contains disallowed characters.");
+  }
+
+  const reservedCandidate = normalized.replace(/\.+$/, "").toLowerCase();
+  if (WINDOWS_RESERVED_NAMES.has(reservedCandidate)) {
+    throw new Error("fileName is reserved.");
+  }
+
+  return normalized;
+};
+
+const ensurePathInsideRoot = (rootPath, targetPath) => {
+  const normalizedRoot = path.resolve(rootPath);
+  const normalizedTarget = path.resolve(targetPath);
+  const relative = path.relative(normalizedRoot, normalizedTarget);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Resolved file path escaped watch root.");
+  }
+};
+
 const parseOptionalSchedulerCursor = (value) => {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -1430,6 +1518,44 @@ const registerIpcHandlers = () => {
     };
   });
 
+  ipcMain.handle("content:save-local", async (_, payload) => {
+    const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
+    if (!watchPath) {
+      return {
+        ok: false,
+        error: "no_watch_path"
+      };
+    }
+
+    try {
+      const relativeSegments = sanitizeRelativeSegments(payload?.relativePath, "relativePath");
+      const fileName = sanitizeFileName(payload?.fileName);
+      const encoding = String(payload?.encoding ?? "utf8").trim().toLowerCase() === "utf8" ? "utf8" : "utf8";
+      const body = typeof payload?.body === "string" ? payload.body : "";
+
+      const rootPath = path.resolve(watchPath);
+      const targetDir = path.resolve(rootPath, ...relativeSegments);
+      ensurePathInsideRoot(rootPath, targetDir);
+      await fs.promises.mkdir(targetDir, { recursive: true });
+
+      const filePath = path.resolve(targetDir, fileName);
+      ensurePathInsideRoot(rootPath, filePath);
+      await fs.promises.writeFile(filePath, body, { encoding });
+
+      return {
+        ok: true,
+        filePath
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save local content.";
+      return {
+        ok: false,
+        error: "invalid_path",
+        message
+      };
+    }
+  });
+
   ipcMain.handle("onboarding:save-draft", async (_, payload) => {
     const rawPatch = payload?.draftPatch;
     const patch = rawPatch && typeof rawPatch === "object" ? rawPatch : {};
@@ -1720,6 +1846,26 @@ const registerIpcHandlers = () => {
   });
 
   ipcMain.handle("chat:get-config", () => getChatRuntimeConfig());
+
+  ipcMain.handle("chat:list-skills", async () => {
+    try {
+      const body = await callOrchestratorApi("/skills", {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        items: Array.isArray(body?.items) ? body.items : []
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load skills.";
+      return {
+        ok: false,
+        items: [],
+        message
+      };
+    }
+  });
 
   ipcMain.handle("chat:get-active-session", async () => {
     try {
@@ -2220,6 +2366,10 @@ const registerIpcHandlers = () => {
     if (startPausedRaw !== undefined && typeof startPausedRaw !== "boolean") {
       throw new Error("startPaused must be a boolean when provided.");
     }
+    const forceNewRaw = payload?.forceNew;
+    if (forceNewRaw !== undefined && typeof forceNewRaw !== "boolean") {
+      throw new Error("forceNew must be a boolean when provided.");
+    }
 
     if (!workspaceType) {
       throw new Error("workspaceType is required.");
@@ -2232,7 +2382,8 @@ const registerIpcHandlers = () => {
           workspace_type: workspaceType,
           ...(scopeId !== undefined ? { scope_id: scopeId } : {}),
           ...(title !== undefined ? { title } : {}),
-          ...(typeof startPausedRaw === "boolean" ? { start_paused: startPausedRaw } : {})
+          ...(typeof startPausedRaw === "boolean" ? { start_paused: startPausedRaw } : {}),
+          ...(typeof forceNewRaw === "boolean" ? { force_new: forceNewRaw } : {})
         })
       });
 
@@ -2297,6 +2448,7 @@ const registerIpcHandlers = () => {
     const sessionId = (payload?.sessionId ?? "").trim();
     const content = (payload?.content ?? "").trim();
     const uiContext = payload?.uiContext && typeof payload.uiContext === "object" ? payload.uiContext : null;
+    const skillTrigger = typeof payload?.skillTrigger === "string" ? payload.skillTrigger.trim().toLowerCase() : "";
     if (!sessionId) {
       throw new Error("sessionId is required.");
     }
@@ -2311,6 +2463,7 @@ const registerIpcHandlers = () => {
           event_type: "user_message",
           payload: {
             content,
+            ...(skillTrigger ? { skill_trigger: skillTrigger } : {}),
             ...(uiContext ? { ui_context: uiContext } : {})
           },
           idempotency_key: buildUserMessageIdempotencyKey(sessionId, content)

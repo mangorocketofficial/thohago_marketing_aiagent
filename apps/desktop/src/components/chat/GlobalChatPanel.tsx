@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "@repo/types";
 import { useChatContext } from "../../context/ChatContext";
 import { useNavigation } from "../../context/NavigationContext";
 import { useSessionSelector } from "../../context/SessionSelectorContext";
@@ -8,6 +9,27 @@ const PANEL_MIN_WIDTH = 280;
 const PANEL_MAX_WIDTH = 560;
 const WIDTH_STORAGE_KEY = "ddohago:globalChatWidth";
 const COLLAPSED_STORAGE_KEY = "ddohago:globalChatCollapsed";
+const DIRECT_INPUT_CHOICE = "직접 입력";
+
+type ChatSkillOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+type SurveyPromptMeta = {
+  questionId: string;
+  choices: string[];
+  directInputHint: string | null;
+};
+
+const DEFAULT_CHAT_SKILL_OPTIONS: ChatSkillOption[] = [
+  {
+    id: "campaign_plan",
+    label: "캠페인계획",
+    description: "캠페인 계획 스킬 모드로 시작"
+  }
+];
 
 const readStoredWidth = (): number => {
   const raw = window.localStorage.getItem(WIDTH_STORAGE_KEY);
@@ -22,6 +44,53 @@ const readStoredCollapsed = (): boolean => window.localStorage.getItem(COLLAPSED
 
 const clampWidth = (value: number): number =>
   Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, Math.round(value)));
+
+const isDirectInputChoice = (value: string): boolean => value.trim() === DIRECT_INPUT_CHOICE;
+
+const readSurveyPromptMeta = (message: ChatMessage): SurveyPromptMeta | null => {
+  if (message.role !== "assistant") {
+    return null;
+  }
+
+  const metadata = message.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const row = metadata as Record<string, unknown>;
+  const surveyPrompt =
+    row.survey_prompt && typeof row.survey_prompt === "object" && !Array.isArray(row.survey_prompt)
+      ? (row.survey_prompt as Record<string, unknown>)
+      : null;
+  if (!surveyPrompt) {
+    return null;
+  }
+
+  const questionId = typeof surveyPrompt.question_id === "string" ? surveyPrompt.question_id.trim() : "";
+  if (!questionId) {
+    return null;
+  }
+
+  const choices = Array.isArray(surveyPrompt.choices)
+    ? surveyPrompt.choices
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry) => !!entry)
+    : [];
+  if (choices.length === 0) {
+    return null;
+  }
+
+  const directInputHint =
+    typeof surveyPrompt.direct_input_hint === "string" && surveyPrompt.direct_input_hint.trim()
+      ? surveyPrompt.direct_input_hint.trim()
+      : null;
+
+  return {
+    questionId,
+    choices,
+    directInputHint
+  };
+};
 
 export const GlobalChatPanel = () => {
   const { activePage } = useNavigation();
@@ -54,8 +123,12 @@ export const GlobalChatPanel = () => {
 
   const [isCollapsed, setIsCollapsed] = useState(readStoredCollapsed);
   const [panelWidth, setPanelWidth] = useState(readStoredWidth);
+  const [isSkillMenuOpen, setIsSkillMenuOpen] = useState(false);
+  const [selectedSkillTrigger, setSelectedSkillTrigger] = useState<string | null>(null);
+  const [chatSkillOptions, setChatSkillOptions] = useState<ChatSkillOption[]>(DEFAULT_CHAT_SKILL_OPTIONS);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const skillMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isUiBusy = isActionPending || isSessionMutating;
 
@@ -71,6 +144,11 @@ export const GlobalChatPanel = () => {
     return recentSessions.slice(0, 6);
   }, [recentSessions, selectedSession]);
 
+  const selectedSkill = useMemo(
+    () => chatSkillOptions.find((entry) => entry.id === selectedSkillTrigger) ?? null,
+    [chatSkillOptions, selectedSkillTrigger]
+  );
+
   useEffect(() => {
     window.localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
   }, [panelWidth]);
@@ -83,6 +161,20 @@ export const GlobalChatPanel = () => {
     const onOpen = () => setIsCollapsed(false);
     window.addEventListener("ui:open-global-chat", onOpen);
     return () => window.removeEventListener("ui:open-global-chat", onOpen);
+  }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!skillMenuRef.current) {
+        return;
+      }
+      if (skillMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsSkillMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
   }, []);
 
   useEffect(() => {
@@ -111,6 +203,38 @@ export const GlobalChatPanel = () => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadSkills = async () => {
+      const response = await window.desktopRuntime.chat.listSkills();
+      if (cancelled || !response.ok) {
+        return;
+      }
+      const normalized = (response.items ?? [])
+        .map((entry) => {
+          const id = typeof entry.id === "string" ? entry.id.trim() : "";
+          if (!id) {
+            return null;
+          }
+          const displayName =
+            typeof entry.display_name === "string" && entry.display_name.trim() ? entry.display_name.trim() : id;
+          return {
+            id,
+            label: displayName,
+            description: `${displayName} 스킬 모드로 시작`
+          } satisfies ChatSkillOption;
+        })
+        .filter((entry): entry is ChatSkillOption => !!entry);
+      if (normalized.length > 0) {
+        setChatSkillOptions(normalized);
+      }
+    };
+    void loadSkills();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const node = timelineRef.current;
     if (!node) {
       return;
@@ -122,7 +246,7 @@ export const GlobalChatPanel = () => {
     return (
       <aside className="ui-global-chat-collapsed">
         <button type="button" onClick={() => setIsCollapsed(false)} aria-label="Open chat panel">
-          {'<'}
+          {"<"}
         </button>
       </aside>
     );
@@ -151,7 +275,7 @@ export const GlobalChatPanel = () => {
               + Session
             </button>
             <button type="button" onClick={() => setIsCollapsed(true)} aria-label="Collapse chat panel">
-              {'>'}
+              {">"}
             </button>
           </div>
         </header>
@@ -225,14 +349,86 @@ export const GlobalChatPanel = () => {
 
         <div className="ui-global-chat-timeline" ref={timelineRef}>
           {timelineMessages.length === 0 ? <p className="empty">No chat messages yet.</p> : null}
-          {timelineMessages.map((message) => (
-            <div key={message.id} className={`chat-item chat-${message.role}`}>
-              <p>{message.content || "-"}</p>
-            </div>
-          ))}
+          {timelineMessages.map((message) => {
+            const surveyPromptMeta = readSurveyPromptMeta(message);
+            return (
+              <div key={message.id} className={`chat-item chat-${message.role}`}>
+                <p>{message.content || "-"}</p>
+                {surveyPromptMeta ? (
+                  <div className="chat-survey-options">
+                    {surveyPromptMeta.choices.map((choice) => (
+                      <button
+                        key={`${message.id}:${surveyPromptMeta.questionId}:${choice}`}
+                        type="button"
+                        className={`chat-survey-option ${isDirectInputChoice(choice) ? "is-direct-input" : ""}`}
+                        disabled={isUiBusy || !selectedSessionId}
+                        onClick={() => {
+                          if (isDirectInputChoice(choice)) {
+                            setChatInput("직접입력: ");
+                            return;
+                          }
+                          void sendMessage({
+                            content: choice,
+                            uiContext: {
+                              source: "global-chat-panel",
+                              pageId: activePage
+                            }
+                          });
+                        }}
+                      >
+                        {choice}
+                      </button>
+                    ))}
+                    {surveyPromptMeta.directInputHint ? (
+                      <small className="chat-survey-direct-hint">{surveyPromptMeta.directInputHint}</small>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
-        <div className="chat-input-row">
+        <div className="chat-input-row chat-input-with-skill">
+          <div className="chat-skill-picker" ref={skillMenuRef}>
+            <button
+              type="button"
+              className={`chat-skill-plus ${selectedSkill ? "is-active" : ""}`}
+              aria-label="Select skill"
+              disabled={isUiBusy || !selectedSessionId}
+              onClick={() => setIsSkillMenuOpen((prev) => !prev)}
+            >
+              +
+            </button>
+            {isSkillMenuOpen ? (
+              <div className="chat-skill-menu">
+                {chatSkillOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`chat-skill-menu-item ${selectedSkillTrigger === option.id ? "is-selected" : ""}`}
+                    onClick={() => {
+                      setSelectedSkillTrigger(option.id);
+                      setIsSkillMenuOpen(false);
+                    }}
+                  >
+                    <strong>{option.label}</strong>
+                    <span>{option.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {selectedSkill ? (
+            <button
+              type="button"
+              className="chat-skill-chip"
+              title="Clear selected skill"
+              onClick={() => setSelectedSkillTrigger(null)}
+            >
+              {selectedSkill.label} ×
+            </button>
+          ) : null}
           <input
             value={chatInput}
             onChange={(event) => setChatInput(event.target.value)}
@@ -244,6 +440,7 @@ export const GlobalChatPanel = () => {
             disabled={isUiBusy || !selectedSessionId || !chatInput.trim()}
             onClick={() =>
               void sendMessage({
+                ...(selectedSkillTrigger ? { skillTrigger: selectedSkillTrigger } : {}),
                 uiContext: {
                   source: "global-chat-panel",
                   pageId: activePage
