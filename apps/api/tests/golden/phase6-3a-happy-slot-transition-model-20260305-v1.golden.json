@@ -1,0 +1,214 @@
+{
+  "scenario": "happy_scheduler_slot_transition_model_matrix",
+  "description": "Canonical transition checks and workflow/event mappings produce stable scheduler slot statuses.",
+  "input": {
+    "allowed_checks": [
+      {
+        "from": "scheduled",
+        "to": "generating"
+      },
+      {
+        "from": "generating",
+        "to": "pending_approval"
+      },
+      {
+        "from": "pending_approval",
+        "to": "approved"
+      },
+      {
+        "from": "approved",
+        "to": "published"
+      },
+      {
+        "from": "scheduled",
+        "to": "published"
+      },
+      {
+        "from": "pending_approval",
+        "to": "published"
+      },
+      {
+        "from": "published",
+        "to": "scheduled"
+      },
+      {
+        "from": "pending_approval",
+        "to": "pending_approval"
+      },
+      {
+        "from": "failed",
+        "to": "failed"
+      },
+      {
+        "from": "failed",
+        "to": "scheduled"
+      }
+    ],
+    "target_status_checks": [
+      {
+        "event": "generation_started"
+      },
+      {
+        "event": "generation_completed"
+      },
+      {
+        "event": "workflow_revision_requested"
+      },
+      {
+        "event": "workflow_resubmitted"
+      },
+      {
+        "event": "workflow_approved"
+      },
+      {
+        "event": "workflow_approved",
+        "publishedAt": "2026-03-05T09:00:00Z"
+      },
+      {
+        "event": "workflow_rejected"
+      },
+      {
+        "event": "content_published"
+      },
+      {
+        "event": "generation_failed"
+      },
+      {
+        "event": "publish_failed"
+      }
+    ],
+    "workflow_event_checks": [
+      {
+        "workflowStatus": "approved"
+      },
+      {
+        "workflowStatus": "rejected"
+      },
+      {
+        "workflowStatus": "revision_requested"
+      },
+      {
+        "workflowStatus": "proposed"
+      }
+    ]
+  },
+  "output": {
+    "allowed_checks": [
+      {
+        "from": "scheduled",
+        "to": "generating",
+        "allowed": true
+      },
+      {
+        "from": "generating",
+        "to": "pending_approval",
+        "allowed": true
+      },
+      {
+        "from": "pending_approval",
+        "to": "approved",
+        "allowed": true
+      },
+      {
+        "from": "approved",
+        "to": "published",
+        "allowed": true
+      },
+      {
+        "from": "scheduled",
+        "to": "published",
+        "allowed": false
+      },
+      {
+        "from": "pending_approval",
+        "to": "published",
+        "allowed": false
+      },
+      {
+        "from": "published",
+        "to": "scheduled",
+        "allowed": false
+      },
+      {
+        "from": "pending_approval",
+        "to": "pending_approval",
+        "allowed": true
+      },
+      {
+        "from": "failed",
+        "to": "failed",
+        "allowed": true
+      },
+      {
+        "from": "failed",
+        "to": "scheduled",
+        "allowed": false
+      }
+    ],
+    "target_status_checks": [
+      {
+        "event": "generation_started",
+        "target": "generating"
+      },
+      {
+        "event": "generation_completed",
+        "target": "pending_approval"
+      },
+      {
+        "event": "workflow_revision_requested",
+        "target": "pending_approval"
+      },
+      {
+        "event": "workflow_resubmitted",
+        "target": "pending_approval"
+      },
+      {
+        "event": "workflow_approved",
+        "target": "approved"
+      },
+      {
+        "event": "workflow_approved",
+        "publishedAt": "2026-03-05T09:00:00Z",
+        "target": "published"
+      },
+      {
+        "event": "workflow_rejected",
+        "target": "skipped"
+      },
+      {
+        "event": "content_published",
+        "target": "published"
+      },
+      {
+        "event": "generation_failed",
+        "target": "failed"
+      },
+      {
+        "event": "publish_failed",
+        "target": "failed"
+      }
+    ],
+    "workflow_event_checks": [
+      {
+        "workflowStatus": "approved",
+        "event": "workflow_approved"
+      },
+      {
+        "workflowStatus": "rejected",
+        "event": "workflow_rejected"
+      },
+      {
+        "workflowStatus": "revision_requested",
+        "event": "workflow_revision_requested"
+      },
+      {
+        "workflowStatus": "proposed",
+        "event": "workflow_resubmitted"
+      }
+    ]
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

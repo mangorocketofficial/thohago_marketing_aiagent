@@ -1,0 +1,20 @@
+{
+  "scenario": "error_scheduled_content_query_invalid_date_range",
+  "description": "Parser rejects requests where start_date is after end_date.",
+  "input": {
+    "query": {
+      "start_date": "2026-03-10",
+      "end_date": "2026-03-09",
+      "timezone": "Asia/Bangkok"
+    }
+  },
+  "output_error": {
+    "status": 400,
+    "code": "invalid_payload",
+    "message": "start_date must be on or before end_date."
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

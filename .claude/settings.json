@@ -1,11 +1,19 @@
 {
   "permissions": {
-    "deny": ["Read(.agent/history/**)"],
-    "allow": ["**"]
+    "allow": [
+      "**",
+      "mcp__sequential-thinking__sequentialthinking"
+    ],
+    "deny": [
+      "Read(.agent/history/**)"
+    ]
   },
-  "defaultMode": "acceptEdits",
   "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": ["playwright", "context7", "sequential-thinking"],
+  "enabledMcpjsonServers": [
+    "playwright",
+    "context7",
+    "sequential-thinking"
+  ],
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -39,5 +47,6 @@
         ]
       }
     ]
-  }
+  },
+  "defaultMode": "acceptEdits"
 }

@@ -1,0 +1,36 @@
+{
+  "scenario": "happy_scheduled_content_query_with_cursor",
+  "description": "Date window, timezone, filters, and cursor token are parsed into the canonical scheduler query contract.",
+  "input": {
+    "query": {
+      "start_date": "2026-03-03",
+      "end_date": "2026-03-09",
+      "timezone": "Asia/Bangkok",
+      "campaign_id": "adhoc",
+      "channel": "instagram",
+      "status": "pending_approval",
+      "limit": "220"
+    },
+    "cursor_payload": {
+      "scheduled_date": "2026-03-04",
+      "id": "11111111-1111-4111-8111-111111111111"
+    }
+  },
+  "output": {
+    "startDate": "2026-03-03",
+    "endDate": "2026-03-09",
+    "timezone": "Asia/Bangkok",
+    "campaignId": "adhoc",
+    "channel": "instagram",
+    "status": "pending_approval",
+    "limit": 220,
+    "cursor": {
+      "scheduled_date": "2026-03-04",
+      "id": "11111111-1111-4111-8111-111111111111"
+    }
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}
