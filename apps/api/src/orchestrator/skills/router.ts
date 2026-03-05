@@ -95,13 +95,13 @@ export const routeSkill = (params: {
   const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
   if (explicitTrigger) {
     const explicitSkill = registry.findById(explicitTrigger);
-    if (explicitSkill && explicitSkill.handlesEvents.includes("user_message")) {
-      return {
-        skill: explicitSkill,
-        reason: "explicit_trigger",
-        confidence: 1,
-        note: "user_selected_skill_trigger"
-      };
+    if (
+      explicitSkill &&
+      explicitSkill.handlesEvents.includes("user_message") &&
+      !params.state.active_skill &&
+      !params.state.skill_lock_id
+    ) {
+      return null;
     }
   }
 

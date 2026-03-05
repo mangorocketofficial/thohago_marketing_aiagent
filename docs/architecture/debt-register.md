@@ -65,3 +65,14 @@ Reason
 
 Affects  
 Phase 7-2a
+
+DEBT-007
+
+Description  
+Topic clarification copy for Naver blog generation is duplicated in both general-message fallback and skill handler paths.
+
+Reason  
+7-1b patch prioritized immediate routing safety fix over centralizing channel-specific clarification templates.
+
+Affects  
+Phase 7-2a

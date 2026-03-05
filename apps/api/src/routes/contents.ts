@@ -4,7 +4,7 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { asString, parseRequiredString } from "../lib/request-parsers";
 import { supabaseAdmin } from "../lib/supabase-admin";
 
-type ContentBodyPatchInput = {
+export type ContentBodyPatchInput = {
   body: string;
   expectedUpdatedAt: string | null;
 };
@@ -36,7 +36,7 @@ const parseOptionalIsoDateTime = (value: unknown, field: string): string | null 
   return normalized;
 };
 
-const parseBodyPatchInput = (body: unknown): ContentBodyPatchInput => {
+export const parseContentBodyPatchInput = (body: unknown): ContentBodyPatchInput => {
   if (!body || typeof body !== "object") {
     throw new HttpError(400, "invalid_payload", "Request body is required.");
   }
@@ -163,7 +163,7 @@ contentsRouter.patch("/orgs/:orgId/contents/:contentId/body", async (req, res) =
   try {
     const orgId = parseRequiredString(req.params.orgId, "orgId");
     const contentId = parseRequiredString(req.params.contentId, "contentId");
-    const input = parseBodyPatchInput(req.body);
+    const input = parseContentBodyPatchInput(req.body);
     const content = await updateContentBody({
       orgId,
       contentId,

@@ -23,7 +23,7 @@ const TOPIC_STOP_PHRASES = [
   "generate blog post"
 ];
 
-const extractTopicFromMessage = (message: string, fallback: string): string => {
+const extractTopicFromMessage = (message: string): string => {
   const normalized = normalizeMessage(message);
   let candidate = normalized;
 
@@ -32,16 +32,7 @@ const extractTopicFromMessage = (message: string, fallback: string): string => {
   }
 
   candidate = candidate.replace(/\s+/g, " ").trim();
-  if (candidate.length >= 2) {
-    return candidate.slice(0, 120);
-  }
-
-  const fallbackTopic = fallback.trim();
-  if (fallbackTopic) {
-    return fallbackTopic.slice(0, 120);
-  }
-
-  return "오늘의 소식";
+  return candidate.length >= 2 ? candidate.slice(0, 120) : "";
 };
 
 const withTelemetry = (context: SkillExecutionContext, result: SkillResult, note: string): SkillResult => ({
@@ -73,7 +64,28 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
     content: userMessage
   });
 
-  const topic = extractTopicFromMessage(userMessage, context.state.activity_folder);
+  const topic = extractTopicFromMessage(userMessage);
+  if (!topic) {
+    await context.deps.campaign.insertChatMessage({
+      orgId: context.session.org_id,
+      sessionId: context.session.id,
+      role: "assistant",
+      content: [
+        "네이버 블로그 글 생성을 시작할게요.",
+        "어떤 주제로 작성할까요?",
+        "예: `봄맞이 홈카페 인테리어 팁`, `초보 사장님을 위한 네이버 블로그 운영법`"
+      ].join("\n")
+    });
+
+    return {
+      handled: true,
+      outcome: "no_transition",
+      statePatch: {
+        last_error: null
+      },
+      completion: "none"
+    };
+  }
 
   try {
     const generated = await generateAndPersistNaverBlog({

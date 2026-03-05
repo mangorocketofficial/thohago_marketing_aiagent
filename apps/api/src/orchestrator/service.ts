@@ -842,6 +842,19 @@ const ensureSessionTitleFromFirstUserMessage = async (params: {
   });
 };
 
+const buildManualSkillClarificationReply = (skillId: string): string | null => {
+  const normalized = asString(skillId, "").trim().toLowerCase();
+  if (normalized === "naverblog_generation") {
+    return [
+      "네이버 블로그 글 작성을 시작할게요.",
+      "어떤 주제로 작성할까요?",
+      "예: `봄맞이 홈카페 인테리어 팁`, `초보 사장님을 위한 네이버 블로그 운영법`"
+    ].join("\n");
+  }
+
+  return null;
+};
+
 const handleGeneralUserMessage = async (params: {
   session: OrchestratorSessionRow;
   state: SessionState;
@@ -866,16 +879,21 @@ const handleGeneralUserMessage = async (params: {
     content
   });
 
-  const assistantReply = await generateGeneralAssistantReply({
-    orgId: params.session.org_id,
-    sessionId: params.session.id,
-    userId: params.session.created_by_user_id,
-    activityFolder: params.state.activity_folder,
-    currentStep: params.session.current_step,
-    userMessage: content,
-    campaignId: params.state.campaign_id,
-    contentId: params.state.content_id
-  });
+  const payload = asRecord(params.event.payload);
+  const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
+  const manualSkillClarification = buildManualSkillClarificationReply(explicitTrigger);
+  const assistantReply =
+    manualSkillClarification ??
+    (await generateGeneralAssistantReply({
+      orgId: params.session.org_id,
+      sessionId: params.session.id,
+      userId: params.session.created_by_user_id,
+      activityFolder: params.state.activity_folder,
+      currentStep: params.session.current_step,
+      userMessage: content,
+      campaignId: params.state.campaign_id,
+      contentId: params.state.content_id
+    }));
 
   await insertChatMessage({
     orgId: params.session.org_id,
@@ -992,6 +1010,11 @@ const resolveRoutedSkill = async (params: {
   }
 
   const registry = getSkillRegistry();
+  const payload = asRecord(params.event.payload);
+  const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
+  const explicitSkill = explicitTrigger ? registry.findById(explicitTrigger) : null;
+  const preferredSkillId =
+    explicitSkill && explicitSkill.handlesEvents.includes("user_message") ? explicitSkill.id : null;
   const availableSkills = registry
     .getAll()
     .filter((skill) => skill.handlesEvents.includes("user_message"))
@@ -1004,9 +1027,13 @@ const resolveRoutedSkill = async (params: {
     sessionId: params.session.id,
     currentStep: params.session.current_step,
     userMessage,
-    availableSkills
+    availableSkills,
+    preferredSkillId
   });
   if (!detected || detected.confidence < LLM_SKILL_ROUTE_CONFIDENCE_THRESHOLD) {
+    return null;
+  }
+  if (preferredSkillId && detected.skillId !== preferredSkillId) {
     return null;
   }
 

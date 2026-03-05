@@ -65,3 +65,14 @@ Implement Naver blog editor UX on top of a new optimistic-concurrency save-body 
 
 Reason  
 Editor copy/save/regenerate UX needed deterministic cross-surface state; adding `content:save-body` and `focusContentId` handoff avoided UI-only divergence between chat, scheduler, and storage.
+
+## D-007
+
+Phase  
+7-1b Patch
+
+Decision  
+Treat `skill_trigger` as a preferred hint and require LLM actionability gating before entering generation skills.
+
+Reason  
+Forced routing on explicit skill selection produced wrong-topic generation for low-context user messages; deferring trigger execution until context sufficiency is confirmed prevents premature generation.

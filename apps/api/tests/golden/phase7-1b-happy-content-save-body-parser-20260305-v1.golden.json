@@ -1,0 +1,18 @@
+{
+  "scenario": "happy_content_save_body_parser_with_expected_updated_at",
+  "description": "Content save-body payload with body and expected_updated_at is parsed into normalized contract input.",
+  "input": {
+    "body": {
+      "body": "# 제목\n\n본문 내용",
+      "expected_updated_at": "2026-03-05T12:34:56.000Z"
+    }
+  },
+  "output": {
+    "body": "# 제목\n\n본문 내용",
+    "expectedUpdatedAt": "2026-03-05T12:34:56.000Z"
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

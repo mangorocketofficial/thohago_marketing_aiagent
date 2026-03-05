@@ -2,7 +2,7 @@
 
 - Date: 2026-03-05
 - Status: Planning
-- Scope: `instagram_generation` skill, caption generation, ffmpeg media engine foundation, template system, image selection, content persistence
+- Scope: `instagram_generation` skill, caption generation, Sharp image engine foundation, template system, image selection, content persistence
 - Depends on: Phase 7-1a (shared LLM client, content save patterns), Phase 5-0 (skill router), Phase 5-2 (RAG context)
 - Maps to: Phase 7 content creation pipeline
 
@@ -24,10 +24,10 @@ Instagram content requires image + text (caption) generation — fundamentally d
 
 1. **Register `instagram_generation` skill** with intent matching for Instagram content requests.
 2. **Generate captions** using RAG context + brand profile + channel-specific system prompt.
-3. **Establish ffmpeg media engine** as the shared image/video composition foundation.
+3. **Establish Sharp image engine** for image composition (text rendering via SVG, image overlay via `composite()`).
 4. **Define template system** with 3-5 starter templates for 1080x1080 Instagram posts.
 5. **Implement image selection** — LLM picks from user's indexed activity folder images, or user selects manually.
-6. **Compose final image** — ffmpeg combines template background + user photo + text overlay → PNG output.
+6. **Compose final image** — Sharp combines template background + user photo + SVG text overlay → PNG output.
 7. **Persist content** — `contents` table (image type) + `schedule_slots` link + local file save.
 8. **Support two routes**: campaign-scheduled (auto) and on-demand (with mini survey).
 
@@ -207,14 +207,29 @@ const result = await callWithFallback({
 
 ---
 
-## 5) FFmpeg Media Engine Foundation
+## 5) Sharp Image Engine Foundation
 
-### 5.1 Module structure
+### 5.1 Why Sharp (not ffmpeg)
+
+| Concern | Sharp (libvips) | ffmpeg drawtext |
+|---|---|---|
+| Text auto-wrap | SVG `<text>` with `word-wrap` | Not supported |
+| Korean rendering | SVG + `@font-face` — stable | Font path issues common |
+| Text alignment | SVG `text-anchor` | Very limited |
+| Gradient backgrounds | SVG `linearGradient` | Complex filter chain |
+| Image resize/crop | `sharp.resize()` one-liner | `-vf scale,crop` verbose |
+| Performance (1080px) | ~50-100ms | ~300-500ms |
+| Bundle size | ~30MB | ~70-100MB |
+
+ffmpeg is deferred to a future video/reels phase where its strengths (timeline, audio, frame sequencing) are essential. Image composition uses Sharp exclusively.
+
+### 5.2 Module structure
 
 ```
 apps/api/src/media/
-  ├── ffmpeg-client.ts        ← FFmpeg wrapper (shared foundation)
-  ├── image-composer.ts       ← Instagram image composition
+  ├── sharp-client.ts         ← Sharp wrapper (image composition engine)
+  ├── svg-renderer.ts         ← SVG text overlay builder
+  ├── image-composer.ts       ← Instagram image composition orchestrator
   ├── templates/
   │   ├── schema.ts           ← Template JSON schema + types
   │   ├── registry.ts         ← Template loader + registry
@@ -231,138 +246,286 @@ apps/api/src/media/
   └── index.ts
 ```
 
-### 5.2 FFmpeg client wrapper
+### 5.3 Sharp client wrapper
 
-File: `apps/api/src/media/ffmpeg-client.ts` (new)
+File: `apps/api/src/media/sharp-client.ts` (new)
 
 ```typescript
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
-
-// Use bundled ffmpeg binary
-ffmpeg.setFfmpegPath(ffmpegStatic);
+import sharp from "sharp";
+import path from "path";
 
 export type CompositeLayer = {
-  type: "image" | "text" | "shape";
-  input?: string | Buffer;     // file path or buffer for image layers
-  text?: string;               // for text layers
-  font?: string;               // font file path
-  fontSize?: number;
-  fontColor?: string;
-  position: { x: number | string; y: number | string };
-  size?: { w: number; h: number };
-  opacity?: number;
+  type: "image" | "svg";
+  input: Buffer | string;        // Buffer for SVG/processed image, string for file path
+  top: number;
+  left: number;
 };
 
 export type ComposeOptions = {
   width: number;
   height: number;
-  background: string | Buffer;  // color hex or image path/buffer
+  background: Buffer;             // Pre-built background (solid color, gradient, or image)
   layers: CompositeLayer[];
   outputFormat: "png" | "jpg";
-  quality?: number;             // 1-100 for jpg
+  quality?: number;               // 1-100 for jpg
 };
 
 /**
- * Compose multiple layers into a single image using ffmpeg.
- * Returns the composed image as a Buffer.
+ * Compose multiple layers into a single image using Sharp.
+ * Background is the base layer; additional layers are composited on top.
  */
 export const composeImage = async (options: ComposeOptions): Promise<Buffer> => {
-  // Build ffmpeg complex filter chain from layers
-  const { filterChain, inputs } = buildFilterChain(options);
+  const compositeInputs: sharp.OverlayOptions[] = options.layers.map((layer) => ({
+    input: typeof layer.input === "string"
+      ? layer.input   // file path
+      : layer.input,  // Buffer (SVG or pre-processed image)
+    top: layer.top,
+    left: layer.left,
+  }));
 
-  return new Promise((resolve, reject) => {
-    const command = ffmpeg();
+  const result = await sharp(options.background)
+    .resize(options.width, options.height, { fit: "cover" })
+    .composite(compositeInputs)
+    .toFormat(options.outputFormat, {
+      quality: options.quality ?? (options.outputFormat === "jpg" ? 90 : undefined),
+    })
+    .toBuffer();
 
-    // Add all input sources
-    for (const input of inputs) {
-      command.input(input);
-    }
-
-    command
-      .complexFilter(filterChain)
-      .outputOptions(["-frames:v", "1"])
-      .format(options.outputFormat === "png" ? "image2" : "mjpeg")
-      .on("error", reject)
-      .pipe()
-      .on("data", (chunk: Buffer) => chunks.push(chunk))
-      .on("end", () => resolve(Buffer.concat(chunks)));
-  });
+  return result;
 };
 
 /**
- * Build ffmpeg complex filter chain from layer definitions.
- * Handles image overlay, text drawtext, and shape drawbox filters.
+ * Create a solid color background as a Buffer.
  */
-const buildFilterChain = (options: ComposeOptions): { filterChain: string[]; inputs: string[] } => {
-  const filters: string[] = [];
-  const inputs: string[] = [];
-
-  // Background layer
-  if (typeof options.background === "string" && options.background.startsWith("#")) {
-    // Solid color background
-    filters.push(
-      `color=c=${options.background}:s=${options.width}x${options.height}:d=1[bg]`
-    );
-  } else {
-    // Image background
-    inputs.push(typeof options.background === "string" ? options.background : "pipe:0");
-    filters.push(`[0:v]scale=${options.width}:${options.height}[bg]`);
-  }
-
-  let lastLabel = "bg";
-
-  for (const [index, layer] of options.layers.entries()) {
-    const outLabel = `l${index}`;
-
-    if (layer.type === "image" && layer.input) {
-      const inputIndex = inputs.length;
-      inputs.push(typeof layer.input === "string" ? layer.input : `pipe:${inputIndex}`);
-      const scaleW = layer.size?.w ?? options.width;
-      const scaleH = layer.size?.h ?? options.height;
-      filters.push(`[${inputIndex}:v]scale=${scaleW}:${scaleH}[img${index}]`);
-      filters.push(`[${lastLabel}][img${index}]overlay=${layer.position.x}:${layer.position.y}[${outLabel}]`);
-      lastLabel = outLabel;
-    }
-
-    if (layer.type === "text" && layer.text) {
-      const fontFile = layer.font ?? getDefaultFontPath();
-      const escaped = escapeDrawtext(layer.text);
-      filters.push(
-        `[${lastLabel}]drawtext=text='${escaped}':fontfile='${fontFile}':fontsize=${layer.fontSize ?? 48}:fontcolor=${layer.fontColor ?? "white"}:x=${layer.position.x}:y=${layer.position.y}[${outLabel}]`
-      );
-      lastLabel = outLabel;
-    }
-  }
-
-  return { filterChain: filters, inputs };
+export const createSolidBackground = async (
+  width: number,
+  height: number,
+  color: string
+): Promise<Buffer> => {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: color,
+    },
+  })
+    .png()
+    .toBuffer();
 };
 
 /**
- * Escape special characters for ffmpeg drawtext filter.
- * Korean text and special chars need proper escaping.
+ * Create a gradient background via SVG rendered through Sharp.
  */
-const escapeDrawtext = (text: string): string => {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "'\\''")
-    .replace(/:/g, "\\:")
-    .replace(/%/g, "%%");
+export const createGradientBackground = async (
+  width: number,
+  height: number,
+  colors: [string, string],
+  direction: "vertical" | "horizontal" | "diagonal"
+): Promise<Buffer> => {
+  const [x1, y1, x2, y2] = gradientCoords(direction);
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="g" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">
+          <stop offset="0%" stop-color="${colors[0]}"/>
+          <stop offset="100%" stop-color="${colors[1]}"/>
+        </linearGradient>
+      </defs>
+      <rect width="${width}" height="${height}" fill="url(#g)"/>
+    </svg>`;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
 };
 
-const getDefaultFontPath = (): string => {
-  return path.resolve(__dirname, "templates/fonts/Pretendard-Bold.otf");
+const gradientCoords = (
+  direction: "vertical" | "horizontal" | "diagonal"
+): [string, string, string, string] => {
+  switch (direction) {
+    case "vertical":   return ["0%", "0%", "0%", "100%"];
+    case "horizontal": return ["0%", "0%", "100%", "0%"];
+    case "diagonal":   return ["0%", "0%", "100%", "100%"];
+  }
+};
+
+/**
+ * Resize and crop a user image to fit a target area (cover mode).
+ * Returns a Buffer of the processed image.
+ */
+export const preprocessUserImage = async (
+  imagePath: string,
+  targetWidth: number,
+  targetHeight: number
+): Promise<Buffer> => {
+  return sharp(imagePath)
+    .resize(targetWidth, targetHeight, { fit: "cover", position: "centre" })
+    .png()
+    .toBuffer();
+};
+
+/**
+ * Apply a semi-transparent dark overlay on an image (for fullscreen-overlay template).
+ */
+export const applyDarkOverlay = async (
+  imageBuffer: Buffer,
+  width: number,
+  height: number,
+  opacity: number  // 0.0 - 1.0
+): Promise<Buffer> => {
+  const alpha = Math.round(opacity * 255);
+  const overlay = await sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: alpha / 255 },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  return sharp(imageBuffer)
+    .composite([{ input: overlay, top: 0, left: 0 }])
+    .toBuffer();
 };
 ```
 
-### 5.3 Dependency installation
+### 5.4 SVG text renderer
+
+File: `apps/api/src/media/svg-renderer.ts` (new)
+
+```typescript
+import path from "path";
+import fs from "fs";
+
+export type TextOverlayOptions = {
+  text: string;
+  fontSize: number;
+  fontWeight: "regular" | "bold";
+  fontColor: string;
+  align: "center" | "left" | "right";
+  maxWidth: number;
+  lineSpacing?: number;
+};
+
+/**
+ * Build an SVG buffer for text overlay.
+ * Uses embedded font via @font-face for consistent Korean rendering.
+ * Sharp renders SVG natively — no external dependencies needed.
+ */
+export const buildTextOverlaySvg = (options: TextOverlayOptions): Buffer => {
+  const fontFamily = "Pretendard";
+  const fontFile = getFontPath(options.fontWeight);
+  const fontBase64 = fs.readFileSync(fontFile).toString("base64");
+  const lineHeight = options.fontSize * (options.lineSpacing ?? 1.4);
+  const textAnchor = alignToAnchor(options.align);
+  const xPos = anchorXPosition(options.align, options.maxWidth);
+
+  // Estimate lines needed (conservative: ~0.6em per Korean char)
+  const charsPerLine = Math.floor(options.maxWidth / (options.fontSize * 0.6));
+  const lines = wrapText(options.text, charsPerLine);
+  const svgHeight = Math.ceil(lines.length * lineHeight + options.fontSize);
+
+  const tspans = lines
+    .map(
+      (line, i) =>
+        `<tspan x="${xPos}" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(line)}</tspan>`
+    )
+    .join("\n      ");
+
+  const svg = `
+    <svg width="${options.maxWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <style>
+          @font-face {
+            font-family: '${fontFamily}';
+            src: url('data:font/otf;base64,${fontBase64}');
+            font-weight: ${options.fontWeight === "bold" ? 700 : 400};
+          }
+        </style>
+      </defs>
+      <text
+        x="${xPos}" y="${options.fontSize}"
+        font-family="${fontFamily}" font-size="${options.fontSize}"
+        font-weight="${options.fontWeight === "bold" ? 700 : 400}"
+        fill="${options.fontColor}"
+        text-anchor="${textAnchor}">
+        ${tspans}
+      </text>
+    </svg>`;
+
+  return Buffer.from(svg);
+};
+
+/**
+ * Simple word-wrap for Korean text.
+ * Korean doesn't use spaces consistently, so we break by character count.
+ */
+const wrapText = (text: string, maxChars: number): string[] => {
+  if (text.length <= maxChars) return [text];
+
+  const lines: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChars) {
+      lines.push(remaining);
+      break;
+    }
+
+    // Try to break at a space within the limit
+    let breakPoint = remaining.lastIndexOf(" ", maxChars);
+    if (breakPoint <= 0) {
+      // No space found — break at maxChars for Korean text
+      breakPoint = maxChars;
+    }
+
+    lines.push(remaining.slice(0, breakPoint));
+    remaining = remaining.slice(breakPoint).trimStart();
+  }
+
+  return lines;
+};
+
+const alignToAnchor = (align: "center" | "left" | "right"): string => {
+  switch (align) {
+    case "center": return "middle";
+    case "left":   return "start";
+    case "right":  return "end";
+  }
+};
+
+const anchorXPosition = (align: "center" | "left" | "right", maxWidth: number): number => {
+  switch (align) {
+    case "center": return Math.round(maxWidth / 2);
+    case "left":   return 0;
+    case "right":  return maxWidth;
+  }
+};
+
+const escapeXml = (text: string): string => {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+};
+
+const getFontPath = (weight: "regular" | "bold"): string => {
+  const fileName = weight === "bold" ? "Pretendard-Bold.otf" : "Pretendard-Regular.otf";
+  return path.resolve(__dirname, "templates/fonts", fileName);
+};
+```
+
+### 5.5 Dependency installation
 
 ```bash
-pnpm --filter @repo/api add fluent-ffmpeg ffmpeg-static
-pnpm --filter @repo/api add -D @types/fluent-ffmpeg
+pnpm --filter @repo/api add sharp
+pnpm --filter @repo/api add -D @types/sharp
 ```
 
-`ffmpeg-static` bundles a platform-appropriate ffmpeg binary (no system install required for dev). For production Docker, include ffmpeg in the image.
+Sharp bundles platform-appropriate libvips binaries (~30MB). No system-level install required. Works in Electron and Docker without extra configuration.
 
 ---
 
@@ -399,13 +562,16 @@ export type BackgroundDef =
   | { type: "image"; placeholder: "user_photo" };  // user image fills background
 
 export type TemplateLayers = {
-  userImageArea?: {
+  userImageAreas?: Array<{
     x: number; y: number; w: number; h: number;
     fit: "cover" | "contain";
     borderRadius?: number;
+  }>;
+  darkOverlay?: {
+    opacity: number;  // 0.0-1.0, for fullscreen-overlay template
   };
   mainText: {
-    x: number | string; y: number | string;  // string for expressions like "(w-text_w)/2"
+    x: number; y: number;
     maxWidth: number;
     fontSize: number;
     fontWeight: "regular" | "bold";
@@ -414,7 +580,7 @@ export type TemplateLayers = {
     lineSpacing?: number;
   };
   subText?: {
-    x: number | string; y: number | string;
+    x: number; y: number;
     maxWidth: number;
     fontSize: number;
     fontWeight: "regular" | "bold";
@@ -427,6 +593,11 @@ export type TemplateLayers = {
   };
 };
 ```
+
+Key changes from original:
+- `userImageArea` → `userImageAreas` (array) — supports collage templates with multiple image slots.
+- `darkOverlay` added — for fullscreen-overlay template's semi-transparent layer.
+- Text positions use numeric `x`, `y` only (no string expressions) — Sharp uses pixel coordinates directly, not ffmpeg expressions.
 
 ### 6.2 Starter templates (5 presets)
 
@@ -443,12 +614,11 @@ File: `apps/api/src/media/templates/presets/center-image-bottom-text.json`
   "aspectRatio": "1:1",
   "background": { "type": "solid", "color": "#FFFFFF" },
   "layers": {
-    "userImageArea": {
-      "x": 40, "y": 40, "w": 1000, "h": 700,
-      "fit": "cover"
-    },
+    "userImageAreas": [
+      { "x": 40, "y": 40, "w": 1000, "h": 700, "fit": "cover" }
+    ],
     "mainText": {
-      "x": "(w-text_w)/2", "y": 790,
+      "x": 60, "y": 790,
       "maxWidth": 960,
       "fontSize": 52,
       "fontWeight": "bold",
@@ -456,7 +626,7 @@ File: `apps/api/src/media/templates/presets/center-image-bottom-text.json`
       "align": "center"
     },
     "subText": {
-      "x": "(w-text_w)/2", "y": 860,
+      "x": 60, "y": 860,
       "maxWidth": 960,
       "fontSize": 32,
       "fontWeight": "regular",
@@ -467,11 +637,149 @@ File: `apps/api/src/media/templates/presets/center-image-bottom-text.json`
 }
 ```
 
-Other presets follow the same schema:
-- **fullscreen-overlay**: User photo fills entire frame, semi-transparent dark overlay, white text centered.
-- **collage-2x2**: 4 image slots in a 2x2 grid with thin white borders, text at bottom.
-- **text-only-gradient**: Gradient background (no user photo), large centered text.
-- **split-image-text**: Left half image, right half solid color with text.
+File: `apps/api/src/media/templates/presets/fullscreen-overlay.json`
+
+```json
+{
+  "id": "fullscreen-overlay",
+  "name": "Fullscreen Overlay",
+  "nameKo": "전면 이미지 + 오버레이 텍스트",
+  "description": "User photo fills entire frame with dark overlay and white centered text",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "background": { "type": "image", "placeholder": "user_photo" },
+  "layers": {
+    "darkOverlay": { "opacity": 0.4 },
+    "mainText": {
+      "x": 60, "y": 440,
+      "maxWidth": 960,
+      "fontSize": 56,
+      "fontWeight": "bold",
+      "fontColor": "#FFFFFF",
+      "align": "center"
+    },
+    "subText": {
+      "x": 60, "y": 540,
+      "maxWidth": 960,
+      "fontSize": 30,
+      "fontWeight": "regular",
+      "fontColor": "#E0E0E0",
+      "align": "center"
+    }
+  }
+}
+```
+
+File: `apps/api/src/media/templates/presets/collage-2x2.json`
+
+```json
+{
+  "id": "collage-2x2",
+  "name": "Collage 2x2",
+  "nameKo": "콜라주 (2x2)",
+  "description": "4 image slots in a 2x2 grid with text at bottom",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "background": { "type": "solid", "color": "#FFFFFF" },
+  "layers": {
+    "userImageAreas": [
+      { "x": 10, "y": 10, "w": 525, "h": 400, "fit": "cover" },
+      { "x": 545, "y": 10, "w": 525, "h": 400, "fit": "cover" },
+      { "x": 10, "y": 420, "w": 525, "h": 400, "fit": "cover" },
+      { "x": 545, "y": 420, "w": 525, "h": 400, "fit": "cover" }
+    ],
+    "mainText": {
+      "x": 60, "y": 870,
+      "maxWidth": 960,
+      "fontSize": 44,
+      "fontWeight": "bold",
+      "fontColor": "#1A1A1A",
+      "align": "center"
+    },
+    "subText": {
+      "x": 60, "y": 940,
+      "maxWidth": 960,
+      "fontSize": 28,
+      "fontWeight": "regular",
+      "fontColor": "#666666",
+      "align": "center"
+    }
+  }
+}
+```
+
+File: `apps/api/src/media/templates/presets/text-only-gradient.json`
+
+```json
+{
+  "id": "text-only-gradient",
+  "name": "Text Only Gradient",
+  "nameKo": "텍스트 전용 (그라디언트)",
+  "description": "Gradient background with large centered text, no user photo",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "background": { "type": "gradient", "colors": ["#667eea", "#764ba2"], "direction": "diagonal" },
+  "layers": {
+    "mainText": {
+      "x": 90, "y": 400,
+      "maxWidth": 900,
+      "fontSize": 64,
+      "fontWeight": "bold",
+      "fontColor": "#FFFFFF",
+      "align": "center",
+      "lineSpacing": 1.5
+    },
+    "subText": {
+      "x": 90, "y": 560,
+      "maxWidth": 900,
+      "fontSize": 36,
+      "fontWeight": "regular",
+      "fontColor": "#E8E8FF",
+      "align": "center"
+    }
+  }
+}
+```
+
+File: `apps/api/src/media/templates/presets/split-image-text.json`
+
+```json
+{
+  "id": "split-image-text",
+  "name": "Split Image + Text",
+  "nameKo": "좌측 이미지 + 우측 텍스트",
+  "description": "Left half image, right half solid color with text",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "background": { "type": "solid", "color": "#F5F0EB" },
+  "layers": {
+    "userImageAreas": [
+      { "x": 0, "y": 0, "w": 540, "h": 1080, "fit": "cover" }
+    ],
+    "mainText": {
+      "x": 580, "y": 400,
+      "maxWidth": 460,
+      "fontSize": 48,
+      "fontWeight": "bold",
+      "fontColor": "#2D2D2D",
+      "align": "left",
+      "lineSpacing": 1.4
+    },
+    "subText": {
+      "x": 580, "y": 540,
+      "maxWidth": 460,
+      "fontSize": 28,
+      "fontWeight": "regular",
+      "fontColor": "#777777",
+      "align": "left"
+    }
+  }
+}
+```
 
 ### 6.3 Template registry
 
@@ -571,6 +879,18 @@ When user selects "이미지 없이 텍스트 디자인만":
 File: `apps/api/src/media/image-composer.ts` (new)
 
 ```typescript
+import sharp from "sharp";
+import {
+  composeImage,
+  createSolidBackground,
+  createGradientBackground,
+  preprocessUserImage,
+  applyDarkOverlay,
+} from "./sharp-client";
+import { buildTextOverlaySvg } from "./svg-renderer";
+import { getTemplate } from "./templates/registry";
+import type { TemplateId, BackgroundDef } from "./templates/schema";
+
 export type ImageComposeInput = {
   templateId: TemplateId;
   userImages: string[];           // file paths
@@ -589,7 +909,7 @@ export type ImageComposeResult = {
 };
 
 /**
- * Compose an Instagram image from template + user images + text overlays.
+ * Compose an Instagram image from template + user images + SVG text overlays.
  */
 export const composeInstagramImage = async (
   input: ImageComposeInput
@@ -597,48 +917,84 @@ export const composeInstagramImage = async (
   const template = getTemplate(input.templateId);
   if (!template) throw new Error(`Template not found: ${input.templateId}`);
 
-  // 1. Build background layer
-  const background = resolveBackground(template.background, input.userImages);
+  const { width, height } = template;
 
-  // 2. Build layer stack
-  const layers: CompositeLayer[] = [];
+  // 1. Build background
+  let background = await resolveBackground(template.background, input.userImages, width, height);
 
-  // User image layer (if template has userImageArea and images provided)
-  if (template.layers.userImageArea && input.userImages.length > 0) {
-    layers.push({
-      type: "image",
-      input: input.userImages[0],
-      position: { x: template.layers.userImageArea.x, y: template.layers.userImageArea.y },
-      size: { w: template.layers.userImageArea.w, h: template.layers.userImageArea.h },
-    });
+  // 2. Apply dark overlay if template requires it
+  if (template.layers.darkOverlay) {
+    background = await applyDarkOverlay(
+      background, width, height, template.layers.darkOverlay.opacity
+    );
   }
 
-  // Main text overlay
-  layers.push({
-    type: "text",
+  // 3. Build composite layers
+  const layers: Array<{ input: Buffer | string; top: number; left: number }> = [];
+
+  // User image layers (supports multiple for collage)
+  if (template.layers.userImageAreas && input.userImages.length > 0) {
+    for (let i = 0; i < template.layers.userImageAreas.length; i++) {
+      const area = template.layers.userImageAreas[i];
+      const imagePath = input.userImages[i % input.userImages.length]; // cycle if fewer images
+      if (!imagePath) continue;
+
+      const processedImage = await preprocessUserImage(imagePath, area.w, area.h);
+      layers.push({ input: processedImage, top: area.y, left: area.x });
+    }
+  }
+
+  // Main text overlay (SVG)
+  const mainTextSvg = buildTextOverlaySvg({
     text: input.overlayMainText,
-    font: getFontPath(template.layers.mainText.fontWeight),
     fontSize: template.layers.mainText.fontSize,
+    fontWeight: template.layers.mainText.fontWeight,
     fontColor: template.layers.mainText.fontColor,
-    position: { x: template.layers.mainText.x, y: template.layers.mainText.y },
+    align: template.layers.mainText.align,
+    maxWidth: template.layers.mainText.maxWidth,
+    lineSpacing: template.layers.mainText.lineSpacing,
+  });
+  layers.push({
+    input: mainTextSvg,
+    top: template.layers.mainText.y,
+    left: template.layers.mainText.x,
   });
 
   // Sub text overlay (optional)
   if (template.layers.subText && input.overlaySubText) {
-    layers.push({
-      type: "text",
+    const subTextSvg = buildTextOverlaySvg({
       text: input.overlaySubText,
-      font: getFontPath(template.layers.subText.fontWeight),
       fontSize: template.layers.subText.fontSize,
+      fontWeight: template.layers.subText.fontWeight,
       fontColor: template.layers.subText.fontColor,
-      position: { x: template.layers.subText.x, y: template.layers.subText.y },
+      align: template.layers.subText.align,
+      maxWidth: template.layers.subText.maxWidth,
+    });
+    layers.push({
+      input: subTextSvg,
+      top: template.layers.subText.y,
+      left: template.layers.subText.x,
     });
   }
 
-  // 3. Compose via ffmpeg
+  // Brand logo (optional)
+  if (template.layers.brandLogo && input.brandLogoPath) {
+    const logoBuffer = await preprocessUserImage(
+      input.brandLogoPath,
+      template.layers.brandLogo.w,
+      template.layers.brandLogo.h
+    );
+    layers.push({
+      input: logoBuffer,
+      top: template.layers.brandLogo.y,
+      left: template.layers.brandLogo.x,
+    });
+  }
+
+  // 4. Compose all layers via Sharp
   const buffer = await composeImage({
-    width: template.width,
-    height: template.height,
+    width,
+    height,
     background,
     layers,
     outputFormat: input.outputFormat,
@@ -646,38 +1002,41 @@ export const composeInstagramImage = async (
 
   return {
     buffer,
-    width: template.width,
-    height: template.height,
+    width,
+    height,
     format: input.outputFormat,
     sizeBytes: buffer.length,
   };
 };
-```
 
-### 8.2 User image preprocessing
-
-Before composition, user images need preprocessing:
-
-```typescript
-const preprocessUserImage = async (imagePath: string, targetArea: { w: number; h: number }): Promise<string> => {
-  const tempPath = path.join(TEMP_DIR, `prep_${uuid()}.png`);
-
-  await new Promise((resolve, reject) => {
-    ffmpeg(imagePath)
-      .outputOptions([
-        `-vf`, `scale=${targetArea.w}:${targetArea.h}:force_original_aspect_ratio=increase,crop=${targetArea.w}:${targetArea.h}`
-      ])
-      .output(tempPath)
-      .on("end", resolve)
-      .on("error", reject)
-      .run();
-  });
-
-  return tempPath;
+/**
+ * Resolve background definition into a Sharp-ready Buffer.
+ */
+const resolveBackground = async (
+  bgDef: BackgroundDef,
+  userImages: string[],
+  width: number,
+  height: number
+): Promise<Buffer> => {
+  switch (bgDef.type) {
+    case "solid":
+      return createSolidBackground(width, height, bgDef.color);
+    case "gradient":
+      return createGradientBackground(width, height, bgDef.colors, bgDef.direction);
+    case "image": {
+      if (userImages.length === 0) {
+        // Fallback to neutral gray if no user image provided
+        return createSolidBackground(width, height, "#E0E0E0");
+      }
+      // Use first user image as full background
+      return sharp(userImages[0])
+        .resize(width, height, { fit: "cover", position: "centre" })
+        .png()
+        .toBuffer();
+    }
+  }
 };
 ```
-
-This ensures user photos are cropped/scaled to fit the template's image area without distortion.
 
 ---
 
@@ -808,13 +1167,14 @@ User: "인스타 게시물 만들어줘"
   3. Assemble RAG context (brand profile + activity files + memory)
   4. Generate caption + overlay text via LLM (Claude → GPT-4o-mini fallback)
   5. Select image(s) via LLM or use user-selected paths
-  6. Preprocess user image(s) for template fit
-  7. Compose image via ffmpeg (template + images + text overlay)
-  8. Upload composed image to Supabase Storage
-  9. Insert contents row (channel: instagram, content_type: image)
-  10. Link content_id to schedule_slot, status → "draft"
-  11. Save composed image + caption to local file via IPC
-  12. Return chat reply with completion card
+  6. Preprocess user image(s) via Sharp (resize + crop to template area)
+  7. Build SVG text overlays for main + sub text
+  8. Compose image via Sharp composite (background + images + SVG text → PNG)
+  9. Upload composed image to Supabase Storage
+  10. Insert contents row (channel: instagram, content_type: image)
+  11. Link content_id to schedule_slot, status → "draft"
+  12. Save composed image + caption to local file via IPC
+  13. Return chat reply with completion card
 
   → Phase: "complete"
 ```
@@ -861,11 +1221,12 @@ Returns indexed image files from the user's activity folder (from Phase 5-1 watc
 
 | File | Action | Purpose |
 |---|---|---|
-| `apps/api/src/media/ffmpeg-client.ts` | Create | FFmpeg wrapper (shared for image + future video) |
-| `apps/api/src/media/image-composer.ts` | Create | Instagram image composition pipeline |
-| `apps/api/src/media/templates/schema.ts` | Create | Template type definitions |
+| `apps/api/src/media/sharp-client.ts` | Create | Sharp wrapper (image composition, backgrounds, preprocessing) |
+| `apps/api/src/media/svg-renderer.ts` | Create | SVG text overlay builder (Korean font embedding, word-wrap) |
+| `apps/api/src/media/image-composer.ts` | Create | Instagram image composition orchestrator |
+| `apps/api/src/media/templates/schema.ts` | Create | Template type definitions (multi-image, dark overlay support) |
 | `apps/api/src/media/templates/registry.ts` | Create | Template loader + registry |
-| `apps/api/src/media/templates/presets/*.json` | Create | 5 starter template definitions |
+| `apps/api/src/media/templates/presets/*.json` | Create | 5 starter template definitions (all with concrete coordinates) |
 | `apps/api/src/media/templates/fonts/*.otf` | Create | Korean font files (Pretendard, Noto Sans KR) |
 | `apps/api/src/media/index.ts` | Create | Module exports |
 | `apps/api/src/orchestrator/skills/instagram-generation/index.ts` | Create | Skill definition + execute |
@@ -876,7 +1237,7 @@ Returns indexed image files from the user's activity folder (from Phase 5-1 watc
 | `apps/api/src/orchestrator/skills/instagram-generation/generate.ts` | Create | Orchestrate full generation pipeline |
 | `apps/api/src/orchestrator/skills/router.ts` | Modify | Register instagram_generation skill |
 | `apps/api/src/routes/sessions.ts` | Modify | Add template listing + activity images routes |
-| `apps/api/package.json` | Modify | Add fluent-ffmpeg, ffmpeg-static deps |
+| `apps/api/package.json` | Modify | Add `sharp` dependency |
 
 ---
 
@@ -887,35 +1248,47 @@ Returns indexed image files from the user's activity folder (from Phase 5-1 watc
 3. Campaign-scheduled flow skips survey and uses campaign plan context.
 4. Caption is generated with correct format (hook + body + CTA + hashtags).
 5. Overlay text (main + sub) is generated within character limits.
-6. FFmpeg composes template + user image + text overlay into 1080x1080 PNG.
-7. Korean text renders correctly in composed image (Pretendard/Noto Sans KR font).
-8. Composed image is uploaded to Supabase Storage with public URL.
-9. Content is saved to `contents` table with `content_type: "image"`, caption in `body`.
-10. Schedule slot is created (on-demand) or linked (campaign) with `slot_status: "draft"`.
-11. LLM-assisted image selection picks relevant images from activity folder.
-12. Claude → GPT-4o-mini fallback works on transient failures (5xx, 429, timeout).
-13. `pnpm --filter @repo/api type-check` passes.
+6. Sharp composes template + user image + SVG text overlay into 1080x1080 PNG.
+7. Korean text renders correctly in composed image (Pretendard font via SVG `@font-face`).
+8. Gradient background renders correctly for `text-only-gradient` template.
+9. Collage template correctly places 2-4 images in grid layout.
+10. Composed image is uploaded to Supabase Storage with public URL.
+11. Content is saved to `contents` table with `content_type: "image"`, caption in `body`.
+12. Schedule slot is created (on-demand) or linked (campaign) with `slot_status: "draft"`.
+13. LLM-assisted image selection picks relevant images from activity folder.
+14. Claude → GPT-4o-mini fallback works on transient failures (5xx, 429, timeout).
+15. `pnpm --filter @repo/api type-check` passes.
 
 ---
 
 ## 14) Verification Plan
 
 1. `pnpm --filter @repo/api type-check` — pass
-2. `pnpm --filter @repo/api test:unit` — new tests for intent matching, survey state, template loading, ffmpeg composition
-3. Manual: send "인스타 게시물 만들어" → verify survey flow completes
-4. Manual: verify composed PNG is 1080x1080 with correct text overlay and user image
-5. Manual: verify Korean text renders without garbled characters in composed image
-6. Manual: verify Supabase Storage upload and public URL accessibility
-7. Manual: verify contents + schedule_slots rows are correctly created and linked
-8. Manual: test text-only template (no user image) → verify gradient background + text renders
-9. Manual: test fallback by disabling Anthropic key → verify GPT-4o-mini generates caption
+2. `pnpm --filter @repo/api test:unit` — new tests for intent matching, survey state, template loading, Sharp composition
+3. Unit test: `composeInstagramImage` with `center-image-bottom-text` template → verify output is 1080x1080 PNG buffer
+4. Unit test: `buildTextOverlaySvg` with Korean text → verify SVG contains correct font-face and tspan elements
+5. Unit test: `createGradientBackground` → verify output buffer is valid PNG
+6. Manual: send "인스타 게시물 만들어" → verify survey flow completes
+7. Manual: verify composed PNG is 1080x1080 with correct text overlay and user image
+8. Manual: verify Korean text renders without garbled characters in composed image
+9. Manual: verify Supabase Storage upload and public URL accessibility
+10. Manual: verify contents + schedule_slots rows are correctly created and linked
+11. Manual: test text-only-gradient template → verify gradient background + text renders
+12. Manual: test collage-2x2 template with 4 images → verify grid layout
+13. Manual: test fallback by disabling Anthropic key → verify GPT-4o-mini generates caption
 
 ---
 
 ## 15) Decisions
 
-**Why ffmpeg over Sharp/PIL:**
-FFmpeg will be reused for video composition (shorts/reels) in future phases. Single media engine reduces complexity. `drawtext` filter handles Korean with explicit font paths. `ffmpeg-static` npm package bundles the binary for cross-platform dev.
+**Why Sharp over ffmpeg for image composition:**
+Sharp (libvips) provides native SVG text rendering with `@font-face` support, enabling proper Korean text layout with auto-wrap, alignment, and consistent font rendering. ffmpeg `drawtext` lacks auto-wrap and has unreliable Korean font handling. Sharp is ~4-6x faster for static image composition (~50-100ms vs ~300-500ms) and ~30MB vs ~70-100MB bundle size. ffmpeg is deferred to a future video/reels phase where its timeline and audio capabilities are essential.
+
+**Why SVG for text overlays (not Canvas API):**
+Sharp renders SVG natively without additional dependencies. SVG provides declarative text layout (`text-anchor`, `@font-face`, `tspan` for multi-line) that maps cleanly from template JSON. Canvas API would require imperative code and additional `@napi-rs/canvas` dependency (~40MB).
+
+**Why `userImageAreas` as array (not single object):**
+Collage templates (2x2, future 3-grid, etc.) need multiple image placement areas. A single `userImageArea` would require template-specific hacks. Array-based design handles 1-to-N images uniformly.
 
 **Why 5 starter templates:**
 Minimum viable template set covering the most common Instagram post layouts. Custom template creation (user-designed or AI-analyzed from existing posts) is deferred to a later phase.

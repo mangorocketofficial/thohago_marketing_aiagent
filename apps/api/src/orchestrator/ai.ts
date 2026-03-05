@@ -341,6 +341,7 @@ export const detectSkillIntentForRouting = async (params: {
   currentStep: string;
   userMessage: string;
   availableSkills: Array<{ id: string; description: string }>;
+  preferredSkillId?: string | null;
 }): Promise<{ skillId: string; confidence: number; reason: string } | null> => {
   const userMessage = String(params.userMessage ?? "").trim();
   if (!userMessage) {
@@ -356,6 +357,8 @@ export const detectSkillIntentForRouting = async (params: {
   if (supportedSkills.length === 0) {
     return null;
   }
+  const preferredSkillId = normalizeString(params.preferredSkillId, "");
+  const skillIds = supportedSkills.map((entry) => entry.id);
 
   const response = await callOpenAiGeneralChat(
     [
@@ -365,13 +368,18 @@ export const detectSkillIntentForRouting = async (params: {
           "You classify whether a user message should enter a skill mode.",
           "Return JSON only.",
           "If uncertain, choose none.",
-          'Output schema: {"skill_id":"campaign_plan|none","confidence":0..1,"reason":"short"}'
+          "If preferred_skill_hint is provided, treat it as user-selected candidate, but still choose none unless the message is actionable enough.",
+          "For skills that include 'generation' in id, require a concrete topic/subject in user message.",
+          "Generic requests like '블로그 글 써줘' or '글 작성해줘' without a specific topic should be none.",
+          `skill_id must be one of: ${skillIds.join(", ")}, none.`,
+          'Output schema: {"skill_id":"<skill_id|none>","confidence":0..1,"reason":"short"}'
         ].join(" ")
       },
       {
         role: "user",
         content: [
           `[current_step] ${params.currentStep}`,
+          `[preferred_skill_hint] ${preferredSkillId || "none"}`,
           `[available_skills] ${safeJson(supportedSkills)}`,
           `[user_message] ${userMessage}`
         ].join("\n")
@@ -386,6 +394,7 @@ export const detectSkillIntentForRouting = async (params: {
         payload: {
           session_id: params.sessionId,
           current_step: params.currentStep,
+          preferred_skill_hint: preferredSkillId || null,
           available_skills: supportedSkills,
           user_message: userMessage
         },

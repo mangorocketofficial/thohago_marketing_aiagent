@@ -1,0 +1,18 @@
+{
+  "scenario": "edge_explicit_skill_trigger_defer_to_llm_gating",
+  "description": "Manual skill trigger no longer force-routes immediately when there is no active skill/skill lock.",
+  "input": {
+    "event": {
+      "content": "네이버 블로그 글 작성해줘",
+      "skill_trigger": "naverblog_generation"
+    },
+    "session_current_step": "await_user_input",
+    "state_active_skill": null,
+    "state_skill_lock_id": null
+  },
+  "output": null,
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

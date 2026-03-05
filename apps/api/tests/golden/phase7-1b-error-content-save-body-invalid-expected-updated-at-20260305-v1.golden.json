@@ -1,0 +1,19 @@
+{
+  "scenario": "error_content_save_body_invalid_expected_updated_at",
+  "description": "Content save-body parser rejects invalid expected_updated_at timestamp format.",
+  "input": {
+    "body": {
+      "body": "본문",
+      "expected_updated_at": "invalid-datetime"
+    }
+  },
+  "output_error": {
+    "status": 400,
+    "code": "invalid_payload",
+    "message": "expected_updated_at must be a valid ISO datetime."
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}
