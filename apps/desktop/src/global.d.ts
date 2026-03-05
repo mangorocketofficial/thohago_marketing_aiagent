@@ -181,6 +181,72 @@ type ChatScheduledContentListResult = {
   message?: string;
 };
 
+type ChatScheduledContentDayPayload = {
+  date: string;
+  timezone?: string;
+  campaignId?: string | "adhoc";
+  channel?: "instagram" | "threads" | "naver_blog" | "facebook" | "youtube";
+  status?: "scheduled" | "generating" | "pending_approval" | "approved" | "published" | "skipped" | "failed";
+  limit?: number;
+  cursor?: string | null;
+};
+
+type ChatScheduledContentDayResult = {
+  ok: boolean;
+  items: ChatScheduledContentItem[];
+  page: {
+    next_cursor: string | null;
+    has_more: boolean;
+  };
+  query: {
+    timezone: string;
+    date: string;
+  } | null;
+  message?: string;
+};
+
+type ChatRescheduledSlot = {
+  slot_id: string;
+  scheduled_date: string;
+  scheduled_time: string | null;
+  slot_status: "scheduled" | "generating" | "pending_approval" | "approved" | "published" | "skipped" | "failed";
+  channel: string;
+  content_type: string;
+  campaign_id: string | null;
+  workflow_item_id: string | null;
+  content_id: string | null;
+  session_id: string | null;
+  title: string | null;
+  metadata: Record<string, unknown>;
+  updated_at: string;
+};
+
+type ChatRescheduleSlotPayload = {
+  slotId: string;
+  targetDate: string;
+  targetTime?: string | null;
+  timezone?: string;
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  idempotencyKey?: string | null;
+};
+
+type ChatRescheduleSlotResult = {
+  ok: boolean;
+  slot: ChatRescheduledSlot | null;
+  window: {
+    source_in_active_window: boolean | null;
+    destination_in_active_window: boolean | null;
+    moved_out_of_active_window: boolean;
+    moved_into_active_window: boolean;
+  };
+  query: {
+    timezone: string;
+  };
+  idempotency_key: string | null;
+  message?: string;
+};
+
 type ChatActiveCampaignSummary = {
   id: string;
   title: string;
@@ -401,6 +467,8 @@ declare global {
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
         listInboxItems: (payload?: { limit?: number }) => Promise<ChatInboxListResult>;
         listScheduledContent: (payload?: ChatScheduledContentListPayload) => Promise<ChatScheduledContentListResult>;
+        listScheduledContentDay: (payload: ChatScheduledContentDayPayload) => Promise<ChatScheduledContentDayResult>;
+        rescheduleSlot: (payload: ChatRescheduleSlotPayload) => Promise<ChatRescheduleSlotResult>;
         listActiveCampaignSummaries: () => Promise<ChatActiveCampaignSummariesResult>;
         listFolderUpdates: (payload?: { limit?: number }) => Promise<ChatFolderUpdateListResult>;
         acknowledgeFolderUpdates: (payload: {

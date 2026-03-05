@@ -27,6 +27,11 @@ export const useSchedulerRealtimeSync = ({
   const [realtimeOrgId, setRealtimeOrgId] = useState("");
   const [realtimeClient, setRealtimeClient] = useState<SupabaseClient | null>(null);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const fetchScheduledContentRef = useRef(fetchScheduledContent);
+
+  useEffect(() => {
+    fetchScheduledContentRef.current = fetchScheduledContent;
+  }, [fetchScheduledContent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +110,7 @@ export const useSchedulerRealtimeSync = ({
           );
 
           if (!matchedExisting && isRealtimeRowInWindow(nextRow, activeWindowRef.current.startDate, activeWindowRef.current.endDate)) {
-            void fetchScheduledContent();
+            void fetchScheduledContentRef.current();
           }
         }
       )
@@ -115,13 +120,12 @@ export const useSchedulerRealtimeSync = ({
     realtimeChannelRef.current = channel;
 
     return () => {
-      setIsRealtimeConnected(false);
       if (realtimeChannelRef.current === channel) {
         void realtimeClient.removeChannel(channel);
         realtimeChannelRef.current = null;
       }
     };
-  }, [activeWindowRef, fetchScheduledContent, isOffline, realtimeClient, realtimeOrgId, setScheduledItems]);
+  }, [activeWindowRef, isOffline, realtimeClient, realtimeOrgId, setScheduledItems]);
 
   return {
     isRealtimeConnected

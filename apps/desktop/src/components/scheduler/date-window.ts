@@ -1,4 +1,4 @@
-export type SchedulerViewMode = "week" | "list";
+export type SchedulerViewMode = "week" | "month" | "list";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,6 +33,10 @@ const startOfWeekMonday = (date: Date): Date => {
   const mondayOffset = day === 0 ? -6 : 1 - day;
   return addDays(date, mondayOffset);
 };
+
+const startOfMonth = (date: Date): Date => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+
+const endOfMonth = (date: Date): Date => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
 
 const datePartsInTimezone = (timeZone: string, base: Date): { year: number; month: number; day: number } => {
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -91,6 +95,15 @@ export const buildDateWindow = (params: { viewMode: SchedulerViewMode; currentDa
     };
   }
 
+  if (params.viewMode === "month") {
+    const start = startOfMonth(anchor);
+    const end = endOfMonth(anchor);
+    return {
+      startDate: toDateKey(start),
+      endDate: toDateKey(end)
+    };
+  }
+
   return {
     startDate: toDateKey(anchor),
     endDate: toDateKey(addDays(anchor, 30))
@@ -107,6 +120,12 @@ export const shiftCurrentDateKey = (params: {
     return params.currentDateKey;
   }
   const multiplier = params.direction === "next" ? 1 : -1;
+  if (params.viewMode === "month") {
+    const shifted = startOfMonth(anchor);
+    shifted.setUTCMonth(shifted.getUTCMonth() + multiplier);
+    return toDateKey(shifted);
+  }
+
   const days = params.viewMode === "week" ? 7 : 30;
   return toDateKey(addDays(anchor, multiplier * days));
 };

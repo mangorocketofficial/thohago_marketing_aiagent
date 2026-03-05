@@ -21,3 +21,25 @@ Delivered 6-3a quickly with minimal coupling; client lifecycle unification defer
 
 Affects  
 Phase 6-4a
+
+DEBT-003
+
+Description  
+Scheduler day drawer currently uses cursor paging without list virtualization for extremely dense dates.
+
+Reason  
+6-4a focused on safe month overflow decomposition first; virtualization layer deferred to keep UI/data contract rollout smaller.
+
+Affects  
+Phase 6-4b
+
+DEBT-004
+
+Description  
+Scheduler drag-reschedule in UI is date-first and does not expose precise time adjustment controls yet.
+
+Reason  
+6-4a prioritized window-aware move safety and reconciliation semantics over time-level interaction design.
+
+Affects  
+Phase 6-4b

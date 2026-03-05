@@ -7,6 +7,10 @@ export const SOFT_REFETCH_MS = 45_000;
 export type ScheduledContentResponse = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["listScheduledContent"]>>;
 export type ScheduledContentItem = ScheduledContentResponse["items"][number];
 export type ScheduledContentPayload = Parameters<Window["desktopRuntime"]["chat"]["listScheduledContent"]>[0];
+export type ScheduledContentDayResponse = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["listScheduledContentDay"]>>;
+export type ScheduledContentDayPayload = Parameters<Window["desktopRuntime"]["chat"]["listScheduledContentDay"]>[0];
+export type RescheduleSlotPayload = Parameters<Window["desktopRuntime"]["chat"]["rescheduleSlot"]>[0];
+export type RescheduleSlotResponse = Awaited<ReturnType<Window["desktopRuntime"]["chat"]["rescheduleSlot"]>>;
 
 export type SchedulerRealtimeRow = {
   id?: string;

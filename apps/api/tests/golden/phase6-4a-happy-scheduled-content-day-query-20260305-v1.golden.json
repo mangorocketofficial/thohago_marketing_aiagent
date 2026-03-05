@@ -1,0 +1,36 @@
+{
+  "scenario": "happy_scheduled_content_day_query_with_cursor",
+  "description": "Day detail query with timezone, filters, and cursor is parsed into the canonical scheduler day contract.",
+  "input": {
+    "query": {
+      "date": "2026-03-12",
+      "timezone": "Asia/Bangkok",
+      "campaign_id": "adhoc",
+      "channel": "instagram",
+      "status": "pending_approval",
+      "limit": "180"
+    },
+    "cursor_payload": {
+      "scheduled_date": "2026-03-12",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  },
+  "output": {
+    "date": "2026-03-12",
+    "startDate": "2026-03-12",
+    "endDate": "2026-03-12",
+    "timezone": "Asia/Bangkok",
+    "campaignId": "adhoc",
+    "channel": "instagram",
+    "status": "pending_approval",
+    "limit": 180,
+    "cursor": {
+      "scheduled_date": "2026-03-12",
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

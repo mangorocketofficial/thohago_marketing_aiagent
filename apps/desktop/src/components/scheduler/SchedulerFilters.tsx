@@ -61,6 +61,7 @@ export const SchedulerFilters = ({
         onChange={(event) => onViewModeChange(event.target.value as SchedulerViewMode)}
       >
         <option value="week">Week</option>
+        <option value="month">Month</option>
         <option value="list">List</option>
       </select>
 

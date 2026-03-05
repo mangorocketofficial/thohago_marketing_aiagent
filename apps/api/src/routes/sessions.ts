@@ -3,12 +3,15 @@ import { requireApiSecret, requireUserJwt } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
 import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
+import { parseRescheduleSlotRequest } from "../scheduler/http/reschedule-slot-request";
+import { parseScheduledContentDayQuery } from "../scheduler/http/scheduled-content-day-query";
 import {
   encodeScheduledContentCursor,
   parseScheduledContentQuery
 } from "../scheduler/http/scheduled-content-query";
 import { listActiveCampaignSummaries } from "../scheduler/queries/list-active-campaign-summaries";
 import { listScheduledContentBySlotWindow } from "../scheduler/queries/list-scheduled-content";
+import { rescheduleScheduleSlot } from "../scheduler/queries/reschedule-schedule-slot";
 import {
   createSessionForOrg,
   getActiveSessionForOrg,
@@ -361,6 +364,43 @@ sessionsRouter.get("/orgs/:orgId/workspace-inbox-items", async (req, res) => {
   }
 });
 
+sessionsRouter.get("/orgs/:orgId/scheduled-content/day", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const parsed = parseScheduledContentDayQuery(req.query as Record<string, unknown>);
+    const result = await listScheduledContentBySlotWindow({
+      orgId,
+      startDate: parsed.date,
+      endDate: parsed.date,
+      timezone: parsed.timezone,
+      campaignId: parsed.campaignId,
+      channel: parsed.channel,
+      status: parsed.status,
+      limit: parsed.limit,
+      cursor: parsed.cursor
+    });
+
+    res.json({
+      ok: true,
+      items: result.items,
+      page: {
+        next_cursor: result.page.nextCursor ? encodeScheduledContentCursor(result.page.nextCursor) : null,
+        has_more: result.page.hasMore
+      },
+      query: {
+        timezone: result.query.timezone,
+        date: parsed.date
+      }
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 sessionsRouter.get("/orgs/:orgId/scheduled-content", async (req, res) => {
   if (!requireApiSecret(req, res)) {
     return;
@@ -393,6 +433,38 @@ sessionsRouter.get("/orgs/:orgId/scheduled-content", async (req, res) => {
         start_date: result.query.startDate,
         end_date: result.query.endDate
       }
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.patch("/orgs/:orgId/schedule-slots/:slotId/reschedule", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const slotId = parseRequiredString(req.params.slotId, "slotId");
+    const parsed = parseRescheduleSlotRequest(req.body);
+    const result = await rescheduleScheduleSlot({
+      orgId,
+      slotId,
+      targetDate: parsed.targetDate,
+      targetTime: parsed.targetTime,
+      timezone: parsed.timezone,
+      idempotencyKey: parsed.idempotencyKey,
+      windowStart: parsed.windowStart,
+      windowEnd: parsed.windowEnd
+    });
+
+    res.json({
+      ok: true,
+      slot: result.slot,
+      window: result.window,
+      query: result.query,
+      idempotency_key: result.idempotency_key
     });
   } catch (error) {
     sendError(res, error);

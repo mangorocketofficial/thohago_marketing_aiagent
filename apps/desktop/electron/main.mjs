@@ -142,6 +142,22 @@ const parseOptionalDateString = (value, field) => {
   return normalized;
 };
 
+const parseOptionalIsoDateTime = (value, field) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${field} must be a valid ISO datetime.`);
+  }
+  return normalized;
+};
+
 const parseOptionalSchedulerCursor = (value) => {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -1908,6 +1924,186 @@ const registerIpcHandlers = () => {
           has_more: false
         },
         query: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:list-scheduled-content-day", async (_, payload) => {
+    const date = parseOptionalDateString(payload?.date, "date");
+    if (!date) {
+      throw new Error("date is required.");
+    }
+
+    const limitInput = payload?.limit;
+    const limit = parsePositiveInteger(limitInput);
+    if (limitInput !== undefined && limit === null) {
+      throw new Error("limit must be a positive integer.");
+    }
+
+    const timezoneRaw = typeof payload?.timezone === "string" ? payload.timezone.trim() : "";
+    if (payload?.timezone !== undefined && !timezoneRaw) {
+      throw new Error("timezone must be non-empty when provided.");
+    }
+
+    const campaignIdRaw = typeof payload?.campaignId === "string" ? payload.campaignId.trim() : "";
+    const channel = parseOptionalSchedulerChannel(payload?.channel);
+    const status = parseOptionalSchedulerStatus(payload?.status);
+    const cursor = parseOptionalSchedulerCursor(payload?.cursor);
+
+    const params = new URLSearchParams();
+    params.set("date", date);
+    if (limit !== null) {
+      params.set("limit", String(Math.max(1, Math.min(500, limit))));
+    }
+    if (timezoneRaw) {
+      params.set("timezone", timezoneRaw);
+    }
+    if (campaignIdRaw) {
+      params.set("campaign_id", campaignIdRaw);
+    }
+    if (channel) {
+      params.set("channel", channel);
+    }
+    if (status) {
+      params.set("status", status);
+    }
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/scheduled-content/day?${params.toString()}`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        items: Array.isArray(body?.items) ? body.items : [],
+        page: {
+          next_cursor: typeof body?.page?.next_cursor === "string" ? body.page.next_cursor : null,
+          has_more: body?.page?.has_more === true
+        },
+        query:
+          body?.query && typeof body.query === "object"
+            ? {
+                timezone: typeof body.query.timezone === "string" ? body.query.timezone : "",
+                date: typeof body.query.date === "string" ? body.query.date : date
+              }
+            : {
+                timezone: timezoneRaw || "UTC",
+                date
+              }
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load day schedule detail.";
+      return {
+        ok: false,
+        items: [],
+        page: {
+          next_cursor: null,
+          has_more: false
+        },
+        query: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:reschedule-slot", async (_, payload) => {
+    const slotId = typeof payload?.slotId === "string" ? payload.slotId.trim() : "";
+    if (!slotId) {
+      throw new Error("slotId is required.");
+    }
+
+    const targetDate = parseOptionalDateString(payload?.targetDate, "targetDate");
+    if (!targetDate) {
+      throw new Error("targetDate is required.");
+    }
+
+    const targetTime = parseOptionalIsoDateTime(payload?.targetTime, "targetTime");
+    const timezoneRaw = typeof payload?.timezone === "string" ? payload.timezone.trim() : "";
+    if (payload?.timezone !== undefined && !timezoneRaw) {
+      throw new Error("timezone must be non-empty when provided.");
+    }
+
+    const windowStart = parseOptionalDateString(payload?.windowStart, "windowStart");
+    const windowEnd = parseOptionalDateString(payload?.windowEnd, "windowEnd");
+    if (windowStart && windowEnd && windowStart > windowEnd) {
+      throw new Error("windowStart must be on or before windowEnd.");
+    }
+
+    const idempotencyKey =
+      typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey.trim()
+        : null;
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/schedule-slots/${encodeURIComponent(slotId)}/reschedule`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            target_date: targetDate,
+            ...(targetTime ? { target_time: targetTime } : {}),
+            ...(timezoneRaw ? { timezone: timezoneRaw } : {}),
+            ...(windowStart ? { window_start: windowStart } : {}),
+            ...(windowEnd ? { window_end: windowEnd } : {}),
+            ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {})
+          })
+        }
+      );
+
+      return {
+        ok: true,
+        slot: body?.slot ?? null,
+        window:
+          body?.window && typeof body.window === "object"
+            ? {
+                source_in_active_window:
+                  typeof body.window.source_in_active_window === "boolean"
+                    ? body.window.source_in_active_window
+                    : null,
+                destination_in_active_window:
+                  typeof body.window.destination_in_active_window === "boolean"
+                    ? body.window.destination_in_active_window
+                    : null,
+                moved_out_of_active_window: body.window.moved_out_of_active_window === true,
+                moved_into_active_window: body.window.moved_into_active_window === true
+              }
+            : {
+                source_in_active_window: null,
+                destination_in_active_window: null,
+                moved_out_of_active_window: false,
+                moved_into_active_window: false
+              },
+        query:
+          body?.query && typeof body.query === "object"
+            ? {
+                timezone: typeof body.query.timezone === "string" ? body.query.timezone : timezoneRaw || "UTC"
+              }
+            : {
+                timezone: timezoneRaw || "UTC"
+              },
+        idempotency_key: typeof body?.idempotency_key === "string" ? body.idempotency_key : null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to reschedule slot.";
+      return {
+        ok: false,
+        slot: null,
+        window: {
+          source_in_active_window: null,
+          destination_in_active_window: null,
+          moved_out_of_active_window: false,
+          moved_into_active_window: false
+        },
+        query: {
+          timezone: timezoneRaw || "UTC"
+        },
+        idempotency_key: idempotencyKey,
         message
       };
     }

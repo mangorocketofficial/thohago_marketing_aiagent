@@ -25,6 +25,7 @@ const getScheduledSlotStatus = (item: ScheduledContentItem, content: Content): S
 };
 
 type SchedulerItem = {
+  slotId: string | null;
   content: Content;
   workflowHint: WorkflowLinkHint | null;
   slotStatus: SlotStatus;
@@ -90,6 +91,7 @@ export const useSchedulerViewModel = ({
         continue;
       }
       byId.set(content.id, {
+        slotId: raw.slot_id,
         content,
         workflowHint,
         slotStatus,
@@ -115,6 +117,7 @@ export const useSchedulerViewModel = ({
         continue;
       }
       byId.set(content.id, {
+        slotId: null,
         content,
         workflowHint,
         slotStatus,

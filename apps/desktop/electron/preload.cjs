@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     listSessions: (payload) => ipcRenderer.invoke("chat:list-sessions", payload),
     listInboxItems: (payload) => ipcRenderer.invoke("chat:list-inbox-items", payload),
     listScheduledContent: (payload) => ipcRenderer.invoke("chat:list-scheduled-content", payload),
+    listScheduledContentDay: (payload) => ipcRenderer.invoke("chat:list-scheduled-content-day", payload),
+    rescheduleSlot: (payload) => ipcRenderer.invoke("chat:reschedule-slot", payload),
     listActiveCampaignSummaries: () => ipcRenderer.invoke("chat:list-active-campaign-summaries"),
     listFolderUpdates: (payload) => ipcRenderer.invoke("chat:list-folder-updates", payload),
     acknowledgeFolderUpdates: (payload) => ipcRenderer.invoke("chat:acknowledge-folder-updates", payload),
