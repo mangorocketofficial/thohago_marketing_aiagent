@@ -20,7 +20,7 @@ const resolveStatusLabel = (slotStatus: ContentEditorProps["slotStatus"]): strin
 };
 
 /**
- * Visual editor for instagram image drafts with server-side re-compose.
+ * Visual editor for instagram image drafts with local compose + metadata sync.
  */
 export const InstagramContentEditor = ({
   content,
@@ -35,9 +35,9 @@ export const InstagramContentEditor = ({
   const [savedBody, setSavedBody] = useState(composeCaptionBody(seed.caption, seed.hashtags));
   const [updatedAt, setUpdatedAt] = useState(content.updated_at ?? "");
   const [templateId, setTemplateId] = useState(seed.templateId);
-  const [overlayMain, setOverlayMain] = useState(seed.overlayMain);
-  const [overlaySub, setOverlaySub] = useState(seed.overlaySub);
+  const [overlayTexts, setOverlayTexts] = useState<Record<string, string>>(seed.overlayTexts);
   const [imageFileIds, setImageFileIds] = useState<string[] | null>(seed.imageFileIds.length > 0 ? seed.imageFileIds : null);
+  const [imagePaths, setImagePaths] = useState<string[] | null>(seed.imagePaths.length > 0 ? seed.imagePaths : null);
   const [imageNames, setImageNames] = useState(seed.imageNames);
   const [activityFolder, setActivityFolder] = useState(seed.activityFolder);
   const [isSaving, setIsSaving] = useState(false);
@@ -60,10 +60,12 @@ export const InstagramContentEditor = ({
   } = useInstagramPreviewRuntime({
     contentId: content.id,
     templateId,
-    overlayMain,
-    overlaySub,
+    overlayTexts,
     imageFileIds,
+    imagePaths,
     activityFolder,
+    expectedUpdatedAt: updatedAt,
+    onMetadataUpdatedAt: setUpdatedAt,
     onNotice: setNotice
   });
 
@@ -78,9 +80,9 @@ export const InstagramContentEditor = ({
     setSavedBody(composeCaptionBody(seed.caption, seed.hashtags));
     setUpdatedAt(content.updated_at ?? "");
     setTemplateId(seed.templateId);
-    setOverlayMain(seed.overlayMain);
-    setOverlaySub(seed.overlaySub);
+    setOverlayTexts(seed.overlayTexts);
     setImageFileIds(seed.imageFileIds.length > 0 ? seed.imageFileIds : null);
+    setImagePaths(seed.imagePaths.length > 0 ? seed.imagePaths : null);
     setImageNames(seed.imageNames);
     setActivityFolder(seed.activityFolder);
     setLocalSaveStatus("idle");
@@ -165,20 +167,29 @@ export const InstagramContentEditor = ({
 
       <ImagePreview
         imageUrl={imageUrl}
-        width={currentTemplate.width}
-        height={currentTemplate.height}
-        overlayMain={overlayMain}
-        overlaySub={overlaySub}
-        mainTextPosition={currentTemplate.layers.mainText}
-        subTextPosition={currentTemplate.layers.subText ?? null}
+        width={currentTemplate.size.width}
+        height={currentTemplate.size.height}
+        textSlots={currentTemplate.overlays.texts.map((slot) => ({
+          id: slot.id,
+          label: slot.label,
+          x: slot.x,
+          y: slot.y,
+          width: slot.width,
+          height: slot.height,
+          font_size: slot.font_size,
+          align: slot.align
+        }))}
+        overlayTexts={overlayTexts}
         isRecomposing={isRecomposing}
-        onEditOverlayMain={(nextValue) => {
-          setOverlayMain(nextValue);
-          queueRecompose({ overlayMain: nextValue });
-        }}
-        onEditOverlaySub={(nextValue) => {
-          setOverlaySub(nextValue);
-          queueRecompose({ overlaySub: nextValue });
+        onEditOverlayText={(slotId, nextValue) => {
+          setOverlayTexts((prev) => {
+            const next = {
+              ...prev,
+              [slotId]: nextValue
+            };
+            queueRecompose({ overlayTexts: next });
+            return next;
+          });
         }}
       />
 
@@ -201,10 +212,12 @@ export const InstagramContentEditor = ({
         }}
         onRemoveImage={(slotIndex) => {
           const nextIds = [...(imageFileIds ?? [])].filter((_, index) => index !== slotIndex);
+          const nextPaths = [...(imagePaths ?? [])].filter((_, index) => index !== slotIndex);
           const nextNames = imageNames.filter((_, index) => index !== slotIndex);
           setImageFileIds(nextIds);
+          setImagePaths(nextPaths);
           setImageNames(nextNames);
-          void requestRecompose({ imageFileIds: nextIds });
+          void requestRecompose({ imageFileIds: nextIds, imagePaths: nextPaths });
         }}
       />
 
@@ -249,17 +262,23 @@ export const InstagramContentEditor = ({
           isLoading={isPickerLoading}
           targetSlotIndex={pickerTargetSlotIndex}
           onSelect={(fileId, slotIndex) => {
-            const pickedName = pickerImages.find((entry) => entry.fileId === fileId)?.fileName ?? fileId.slice(0, 8);
+            const picked = pickerImages.find((entry) => entry.fileId === fileId);
+            const pickedName = picked?.fileName ?? fileId.slice(0, 8);
+            const pickedPath = picked?.relativePath ?? "";
             const nextIds = [...(imageFileIds ?? [])];
+            const nextPaths = [...(imagePaths ?? [])];
             const nextNames = [...imageNames];
             const target = slotIndex ?? nextIds.length;
             nextIds[target] = fileId;
+            nextPaths[target] = pickedPath;
             nextNames[target] = pickedName;
             const boundedIds = requiredImageCount > 0 ? nextIds.slice(0, requiredImageCount) : nextIds;
+            const boundedPaths = requiredImageCount > 0 ? nextPaths.slice(0, requiredImageCount) : nextPaths;
             const boundedNames = requiredImageCount > 0 ? nextNames.slice(0, requiredImageCount) : nextNames;
             setImageFileIds(boundedIds);
+            setImagePaths(boundedPaths);
             setImageNames(boundedNames);
-            void requestRecompose({ imageFileIds: boundedIds });
+            void requestRecompose({ imageFileIds: boundedIds, imagePaths: boundedPaths });
           }}
           onClose={() => setIsPickerOpen(false)}
         />

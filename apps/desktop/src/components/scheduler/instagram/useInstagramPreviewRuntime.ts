@@ -1,34 +1,110 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityImageThumbnail } from "./ImagePickerModal";
-import type { TemplateTextPosition } from "./ImagePreview";
+
+type TemplatePhotoSlot = {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fit: "cover" | "contain";
+  z_index?: number;
+};
+
+type TemplateTextSlot = {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size: number;
+  font_color: string;
+  font_weight?: "normal" | "bold";
+  font_style?: string;
+  align: "left" | "center" | "right";
+  example_text?: string;
+};
 
 type TemplateDefinition = {
   id: string;
   nameKo: string;
   description: string;
-  width: number;
-  height: number;
-  layers: {
-    mainText: TemplateTextPosition;
-    subText?: TemplateTextPosition;
-    userImageAreas?: Array<{ x: number; y: number; w: number; h: number }>;
+  thumbnail: string;
+  size: {
+    width: number;
+    height: number;
   };
+  overlays: {
+    photos: TemplatePhotoSlot[];
+    texts: TemplateTextSlot[];
+    badge?: {
+      id: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      type: "circle" | "rect";
+      font_size: number;
+      font_color: string;
+      font_weight?: "normal" | "bold";
+      z_index?: number;
+      example_text?: string;
+    };
+  };
+  header?: {
+    logos: string[];
+    tag?: string;
+    position: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+  } | null;
 };
 
-const SIGNED_URL_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const RECOMPOSE_DEBOUNCE_MS = 800;
 
 export const DEFAULT_TEMPLATE: TemplateDefinition = {
-  id: "center-image-bottom-text",
-  nameKo: "Default",
+  id: "koica_cover_01",
+  nameKo: "KOICA 표지 카드",
   description: "",
-  width: 1080,
-  height: 1080,
-  layers: {
-    mainText: { x: 60, y: 790, maxWidth: 960, fontSize: 52, align: "center" },
-    subText: { x: 60, y: 870, maxWidth: 960, fontSize: 42, align: "center" },
-    userImageAreas: [{ x: 140, y: 120, w: 800, h: 620 }]
-  }
+  thumbnail: "thumbnails/koica_cover_01.png",
+  size: {
+    width: 1080,
+    height: 1080
+  },
+  overlays: {
+    photos: [
+      {
+        id: "main_photo",
+        label: "메인 사진",
+        x: 100,
+        y: 130,
+        width: 850,
+        height: 530,
+        fit: "cover",
+        z_index: 1
+      }
+    ],
+    texts: [
+      {
+        id: "title",
+        label: "제목",
+        x: 60,
+        y: 760,
+        width: 960,
+        height: 100,
+        font_size: 52,
+        font_color: "#222222",
+        font_weight: "bold",
+        align: "center"
+      }
+    ]
+  },
+  header: null
 };
 
 const asTemplateDefinitionArray = (value: unknown): TemplateDefinition[] => {
@@ -43,40 +119,52 @@ const asTemplateDefinitionArray = (value: unknown): TemplateDefinition[] => {
 type UseInstagramPreviewRuntimeParams = {
   contentId: string;
   templateId: string;
-  overlayMain: string;
-  overlaySub: string;
+  overlayTexts: Record<string, string>;
   imageFileIds: string[] | null;
+  imagePaths: string[] | null;
   activityFolder: string;
+  expectedUpdatedAt: string;
+  onMetadataUpdatedAt: (nextUpdatedAt: string) => void;
   onNotice: (message: string) => void;
 };
 
 type RecomposePatch = Partial<{
   templateId: string;
-  overlayMain: string;
-  overlaySub: string;
+  overlayTexts: Record<string, string>;
   imageFileIds: string[] | null;
+  imagePaths: string[] | null;
 }>;
 
+type RecomposeOptions = {
+  persistMetadata?: boolean;
+};
+
 /**
- * Owns signed-url lifecycle, template loading, image picker thumbnails, and re-compose execution.
+ * Owns template loading, local compose execution, image picker thumbnails, and metadata persistence.
  */
 export const useInstagramPreviewRuntime = ({
   contentId,
   templateId,
-  overlayMain,
-  overlaySub,
+  overlayTexts,
   imageFileIds,
+  imagePaths,
   activityFolder,
+  expectedUpdatedAt,
+  onMetadataUpdatedAt,
   onNotice
 }: UseInstagramPreviewRuntimeParams) => {
   const [templates, setTemplates] = useState<TemplateDefinition[]>([]);
   const [imageUrl, setImageUrl] = useState("");
-  const [signedUrlExpiresAt, setSignedUrlExpiresAt] = useState("");
   const [isRecomposing, setIsRecomposing] = useState(false);
   const [pickerImages, setPickerImages] = useState<ActivityImageThumbnail[]>([]);
   const [isPickerLoading, setIsPickerLoading] = useState(false);
   const requestSeqRef = useRef(0);
   const debounceTimerRef = useRef<number | null>(null);
+  const metadataUpdatedAtRef = useRef(expectedUpdatedAt);
+
+  useEffect(() => {
+    metadataUpdatedAtRef.current = expectedUpdatedAt;
+  }, [expectedUpdatedAt]);
 
   const loadTemplates = useCallback(async () => {
     const result = await window.desktopRuntime.content.listInstagramTemplates();
@@ -90,54 +178,37 @@ export const useInstagramPreviewRuntime = ({
     }
   }, [onNotice]);
 
-  const refreshSignedUrl = useCallback(async () => {
-    const result = await window.desktopRuntime.content.getSignedUrl({ contentId });
-    if (!result.ok) {
-      onNotice(result.message || "Failed to load preview image.");
-      return;
-    }
-    setImageUrl(result.signedImageUrl);
-    setSignedUrlExpiresAt(result.expiresAt);
-  }, [contentId, onNotice]);
-
   useEffect(() => {
     void loadTemplates();
-    void refreshSignedUrl();
-  }, [loadTemplates, refreshSignedUrl]);
+  }, [loadTemplates]);
 
-  useEffect(() => {
-    if (!signedUrlExpiresAt) {
-      return;
-    }
-    const refreshInMs = new Date(signedUrlExpiresAt).getTime() - Date.now() - SIGNED_URL_REFRESH_BUFFER_MS;
-    if (refreshInMs <= 0) {
-      void refreshSignedUrl();
-      return;
-    }
-    const timer = window.setTimeout(() => void refreshSignedUrl(), refreshInMs);
-    return () => window.clearTimeout(timer);
-  }, [refreshSignedUrl, signedUrlExpiresAt]);
-
-  const currentTemplate = useMemo(() => templates.find((template) => template.id === templateId) ?? DEFAULT_TEMPLATE, [templateId, templates]);
-  const requiredImageCount = currentTemplate.layers.userImageAreas?.length ?? 0;
+  const currentTemplate = useMemo(
+    () => templates.find((template) => template.id === templateId) ?? DEFAULT_TEMPLATE,
+    [templateId, templates]
+  );
+  const requiredImageCount = currentTemplate.overlays.photos.length;
 
   const requestRecompose = useCallback(
-    async (patch?: RecomposePatch) => {
+    async (patch?: RecomposePatch, options?: RecomposeOptions) => {
       const nextTemplateId = patch?.templateId ?? templateId;
-      const nextOverlayMain = patch?.overlayMain ?? overlayMain;
-      const nextOverlaySub = patch?.overlaySub ?? overlaySub;
+      const nextOverlayTexts =
+        patch && Object.prototype.hasOwnProperty.call(patch, "overlayTexts")
+          ? patch.overlayTexts ?? {}
+          : overlayTexts;
       const nextImageFileIds =
         patch && Object.prototype.hasOwnProperty.call(patch, "imageFileIds") ? patch.imageFileIds : imageFileIds;
+      const nextImagePaths =
+        patch && Object.prototype.hasOwnProperty.call(patch, "imagePaths") ? patch.imagePaths : imagePaths;
 
       const seq = requestSeqRef.current + 1;
       requestSeqRef.current = seq;
       setIsRecomposing(true);
 
-      const result = await window.desktopRuntime.content.recompose({
+      const composeResult = await window.desktopRuntime.content.composeLocal({
         contentId,
         templateId: nextTemplateId,
-        overlayMain: nextOverlayMain,
-        overlaySub: nextOverlaySub,
+        overlayTexts: nextOverlayTexts,
+        ...(Array.isArray(nextImagePaths) ? { imagePaths: nextImagePaths } : {}),
         ...(Array.isArray(nextImageFileIds) ? { imageFileIds: nextImageFileIds } : {}),
         clientRequestId: `${contentId}:${seq}`
       });
@@ -145,27 +216,53 @@ export const useInstagramPreviewRuntime = ({
       if (seq !== requestSeqRef.current) {
         return;
       }
-      setIsRecomposing(false);
 
-      if (!result.ok) {
-        onNotice(result.message || "Failed to re-compose image.");
+      if (!composeResult.ok) {
+        setIsRecomposing(false);
+        onNotice(composeResult.message || "Failed to compose image.");
         return;
       }
 
-      setImageUrl(result.signedImageUrl);
-      setSignedUrlExpiresAt(result.expiresAt);
+      setImageUrl(composeResult.thumbnailDataUrl);
+
+      if (options?.persistMetadata !== false) {
+        const saveResult = await window.desktopRuntime.content.saveInstagramMetadata({
+          contentId,
+          templateId: nextTemplateId,
+          overlayTexts: nextOverlayTexts,
+          ...(Array.isArray(nextImageFileIds) ? { imageFileIds: nextImageFileIds } : {}),
+          ...(metadataUpdatedAtRef.current ? { expectedUpdatedAt: metadataUpdatedAtRef.current } : {})
+        });
+
+        if (seq !== requestSeqRef.current) {
+          return;
+        }
+
+        if (!saveResult.ok) {
+          setIsRecomposing(false);
+          onNotice(saveResult.message || "Failed to save instagram metadata.");
+          return;
+        }
+
+        if (saveResult.updatedAt) {
+          metadataUpdatedAtRef.current = saveResult.updatedAt;
+          onMetadataUpdatedAt(saveResult.updatedAt);
+        }
+      }
+
+      setIsRecomposing(false);
       onNotice("");
     },
-    [contentId, imageFileIds, onNotice, overlayMain, overlaySub, templateId]
+    [contentId, imageFileIds, imagePaths, onMetadataUpdatedAt, onNotice, overlayTexts, templateId]
   );
 
   const queueRecompose = useCallback(
-    (patch?: RecomposePatch) => {
+    (patch?: RecomposePatch, options?: RecomposeOptions) => {
       if (debounceTimerRef.current !== null) {
         window.clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = window.setTimeout(() => {
-        void requestRecompose(patch);
+        void requestRecompose(patch, options);
       }, RECOMPOSE_DEBOUNCE_MS);
     },
     [requestRecompose]
@@ -185,6 +282,12 @@ export const useInstagramPreviewRuntime = ({
       window.clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+  }, [contentId]);
+
+  useEffect(() => {
+    void requestRecompose(undefined, { persistMetadata: false });
+    // Intentionally only on content switch; edit-triggered recompose is user-action driven.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentId]);
 
   const loadPickerImages = useCallback(async () => {

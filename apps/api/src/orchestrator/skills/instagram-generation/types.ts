@@ -42,11 +42,13 @@ export type InstagramGenerationResult = {
   topic: string;
   caption: string;
   model: "claude" | "gpt-4o-mini";
-  outputFormat: "png" | "jpg";
-  storagePath: string;
-  previewUrl: string | null;
   templateId: string;
+  overlayMain: string;
+  overlaySub: string;
+  overlayTexts: Record<string, string>;
+  imageFileIds: string[];
   selectedImagePaths: string[];
+  requiresLocalCompose: boolean;
   localSaveSuggestion: {
     relativePath: string;
     fileName: string;

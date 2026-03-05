@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import sharp from "sharp";
-import { composeInstagramImage } from "../src/media/image-composer";
+import { composeInstagramImage } from "@repo/media-engine";
 
 describe("Phase 7-2a image composer", () => {
-  it("composes 1080x1080 png with text-only template", async () => {
+  it("composes 1080x1080 png with koica template and id-based text map", async () => {
     const result = await composeInstagramImage({
-      templateId: "text-only-gradient",
+      templateId: "koica_cover_01",
       userImages: [],
-      overlayMainText: "봄맞이 이벤트",
-      overlaySubText: "지금 신청하세요",
+      overlayTexts: {
+        contest_info: "Contest 안내",
+        title: "나의 한 페이지",
+        author: "홍길동",
+        award_badge: "우수상"
+      },
       outputFormat: "png"
     });
 

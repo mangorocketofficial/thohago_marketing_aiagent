@@ -3,7 +3,7 @@
 - Date: 2026-03-05
 - Status: Planning
 - Scope: Approve/revise/reject actions for Instagram content, scheduler board visual integration, local file archival, slot status lifecycle completion
-- Depends on: Phase 7-2b (canvas editor), Phase 7-2a (content persistence + slot linking), Phase 3-3 (workflow action contract)
+- Depends on: Phase 7-2b (canvas editor), Phase 7-2.1 (local image composition refactoring), Phase 3-3 (workflow action contract)
 - Maps to: Phase 7 content creation pipeline
 
 ---
@@ -15,7 +15,7 @@ Phase 7-2b delivers the visual editor for Instagram content, but:
 1. **No approval actions**: Users can view and edit but cannot approve, request revision, or reject content. Unlike Naver Blog (copy-only), Instagram content needs an approval workflow because it will eventually be auto-published.
 2. **No slot status lifecycle completion**: Content moves from `scheduled` → `generating` → `draft` but never transitions to `approved` / `published` / `skipped`.
 3. **No scheduler board visual differentiation**: Instagram cards on the board show no image thumbnail or visual indicator beyond text.
-4. **No structured local archival**: Composed images and captions are not systematically saved to the user's local folder.
+4. **No structured local archival**: Composed images and captions are not systematically saved to the user's final local folder on approval.
 5. **No revision flow**: When a user requests revision, there is no mechanism to re-trigger generation with feedback context.
 
 ---
@@ -24,9 +24,9 @@ Phase 7-2b delivers the visual editor for Instagram content, but:
 
 1. **Approval action bar in editor**: Approve / Request Revision / Skip actions wired to workflow resolution + slot status sync.
 2. **Slot status lifecycle**: Complete the `draft` → `approved` → (future: `published`) transition with guard rails.
-3. **Scheduler board thumbnails**: Instagram cards show a small thumbnail of the composed image.
-4. **Local file archival**: On approve, save composed image + caption text file to local folder.
-5. **Revision flow**: Request Revision → chat opens with content context + user feedback → AI regenerates → editor refreshes.
+3. **Scheduler board thumbnails**: Instagram cards show a small thumbnail from the local compose cache.
+4. **Local file archival**: On approve, copy composed image from cache + save caption text to final user folder.
+5. **Revision flow**: Request Revision → chat opens with content context + user feedback → AI regenerates → Electron re-composes locally → editor refreshes.
 6. **Skip flow**: Mark slot as `skipped` → card grayed out on board.
 
 ---
@@ -69,10 +69,10 @@ const handleApprove = async () => {
     actionId: "approve",
     eventType: "content_approved",
     contentId: content.id,
-    editedBody: caption, // latest caption
+    editedBody: caption,
   });
 
-  // 3. Save approved content to local folder
+  // 3. Copy approved content from cache to final local folder
   await saveApprovedContentLocally();
 
   // 4. Navigate to next pending item
@@ -142,7 +142,7 @@ ALTER TABLE public.schedule_slots
     slot_status IN (
       'scheduled',
       'generating',
-      'pending_approval',
+      'draft',
       'approved',
       'published',
       'skipped',
@@ -151,6 +151,8 @@ ALTER TABLE public.schedule_slots
     )
   );
 ```
+
+Note: Changed `pending_approval` to `draft` to match existing slot status values from 7-2a.
 
 ---
 
@@ -188,13 +190,13 @@ const handleRequestRevision = async () => {
 
 When `instagram_generation` skill receives a message with `focusContentId` and revision intent:
 
-1. Load existing content (caption + overlay + template + image paths) from `contents` row.
+1. Load existing content (caption + overlay + template + imageFileIds) from `contents` row.
 2. Include revision reason in the generation prompt as feedback context.
-3. Re-generate caption + overlay text with revision guidance.
-4. Re-compose image with updated text.
-5. Update `contents` row with new body/metadata.
-6. Update `schedule_slots.slot_status` → `generating` → `draft`.
-7. Chat reply: "인스타 게시물을 수정했습니다. 에디터에서 확인해주세요."
+3. Re-generate caption + overlay text with revision guidance via LLM.
+4. Update `contents` row with new body/metadata (caption, overlayMain, overlaySub, hashtags).
+5. Update `schedule_slots.slot_status` → `generating` → `draft`.
+6. Return result with `requiresLocalCompose: true` so Electron re-composes locally.
+7. Chat reply includes content metadata for editor refresh.
 
 File: `apps/api/src/orchestrator/skills/instagram-generation/generate.ts` (modify)
 
@@ -203,9 +205,47 @@ File: `apps/api/src/orchestrator/skills/instagram-generation/generate.ts` (modif
 if (revisionContext) {
   prompt += `\n\n[REVISION_FEEDBACK]\nThe user requested changes: "${revisionContext.reason}"\nPrevious caption: "${revisionContext.previousCaption}"\nAdjust the content based on this feedback while maintaining brand voice.`;
 }
+
+// Return — no server-side image composition
+return {
+  contentId,
+  slotId,
+  caption,
+  hashtags,
+  templateId: revisionContext?.templateId || selectedTemplateId,
+  overlayMain,
+  overlaySub,
+  imageFileIds: revisionContext?.imageFileIds || selectedImageFileIds,
+  requiresLocalCompose: true,  // Electron will compose locally
+};
 ```
 
-### 4.3 Skip action
+### 4.3 Editor refresh after revision
+
+When the chat receives a revision response with `requiresLocalCompose: true`:
+
+```typescript
+// In chat message handler (InstagramGenerationCard or chat effect)
+if (message.metadata?.requiresLocalCompose && message.metadata?.contentId) {
+  // Trigger local re-compose via IPC
+  const result = await runtime.content.composeLocal({
+    contentId: message.metadata.contentId,
+    templateId: message.metadata.templateId,
+    overlayMain: message.metadata.overlayMain,
+    overlaySub: message.metadata.overlaySub,
+    imageFileIds: message.metadata.imageFileIds,
+  });
+
+  // Notify editor to re-fetch content and update preview
+  if (result.ok) {
+    editorContext.refreshContent(message.metadata.contentId);
+  }
+}
+```
+
+The editor listens for `refreshContent` events and re-reads content metadata + loads the updated local preview.
+
+### 4.4 Skip action
 
 ```typescript
 const handleSkip = async () => {
@@ -227,11 +267,11 @@ const handleSkip = async () => {
 
 ## 5) Scheduler Board Visual Integration
 
-### 5.1 Instagram card with thumbnail
+### 5.1 Instagram card with thumbnail (local)
 
 File: `apps/desktop/src/components/scheduler/SchedulerBoard.tsx` (modify)
 
-Instagram cards on the board include a small image thumbnail:
+Instagram cards on the board include a small image thumbnail loaded from local cache:
 
 ```
 ┌──────────────────────────┐
@@ -243,18 +283,47 @@ Instagram cards on the board include a small image thumbnail:
 ```
 
 ```typescript
+// Board thumbnail hook — loads from local cache via IPC
+const useBoardThumbnails = (items: ScheduledContentItem[]) => {
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const instagramItems = items.filter(
+      (item) => item.channel === "instagram" && item.content_id
+    );
+    if (instagramItems.length === 0) return;
+
+    // Batch load thumbnails from local cache
+    Promise.all(
+      instagramItems.map(async (item) => {
+        const result = await runtime.content.loadCachedThumbnail({
+          contentId: item.content_id,
+        });
+        return { contentId: item.content_id, dataUrl: result.ok ? result.thumbnailDataUrl : null };
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const r of results) {
+        if (r.dataUrl) map[r.contentId] = r.dataUrl;
+      }
+      setThumbnails(map);
+    });
+  }, [items]);
+
+  return thumbnails;
+};
+
 // In SchedulerBoard card renderer
 const renderCardContent = (item: ScheduledContentItem) => {
-  const thumbnailUrl = item.metadata?.composed_image_url;
+  const thumbnailDataUrl = thumbnails[item.content_id];
 
   return (
     <div className="board-card" onClick={() => onSelectContent(item.content_id)}>
-      {item.channel === "instagram" && thumbnailUrl && (
+      {item.channel === "instagram" && thumbnailDataUrl && (
         <img
-          src={thumbnailUrl}
+          src={thumbnailDataUrl}
           alt=""
           className="board-card-thumbnail"
-          loading="lazy"
         />
       )}
       <div className="board-card-info">
@@ -268,7 +337,39 @@ const renderCardContent = (item: ScheduledContentItem) => {
 };
 ```
 
-### 5.2 Status badge styling
+### 5.2 IPC handler for cached thumbnail
+
+File: `apps/desktop/electron/main.mjs` (modify)
+
+```javascript
+ipcMain.handle("content:load-cached-thumbnail", async (_, payload) => {
+  const watchPath = getDesktopConfig().watch_path;
+  if (!watchPath) return { ok: false, error: "no_watch_path" };
+
+  const composedPath = path.join(
+    watchPath, "contents", ".instagram-cache", payload.contentId, "composed.png"
+  );
+
+  if (!await fileExists(composedPath)) {
+    return { ok: false, error: "not_cached" };
+  }
+
+  // Generate 48px thumbnail for board card
+  const thumbnailBuffer = await sharp(composedPath)
+    .resize(96, 96, { fit: "cover" })  // 2x for retina
+    .jpeg({ quality: 70 })
+    .toBuffer();
+
+  return {
+    ok: true,
+    thumbnailDataUrl: `data:image/jpeg;base64,${thumbnailBuffer.toString("base64")}`,
+  };
+});
+```
+
+No signed URL. No expiration. No refresh timer. Thumbnail is always available from local cache.
+
+### 5.3 Status badge styling
 
 Instagram-specific badge additions:
 
@@ -279,7 +380,7 @@ Instagram-specific badge additions:
 
 These extend the existing badge colors from Phase 7-1b.
 
-### 5.3 Board card thumbnail styling
+### 5.4 Board card thumbnail styling
 
 ```css
 .board-card-thumbnail {
@@ -301,29 +402,22 @@ These extend the existing badge colors from Phase 7-1b.
 
 ## 6) Local File Archival
 
-### 6.1 Save on approve
+### 6.1 Save on approve (local copy)
 
-When content is approved, automatically save to local folder:
+When content is approved, copy from cache to final user folder:
 
 ```typescript
 const saveApprovedContentLocally = async () => {
   const folderPath = buildLocalContentPath(content);
 
-  // 1. Save composed image
-  await runtime.content.saveLocal({
-    relativePath: folderPath,
-    fileName: `${content.id}_instagram.png`,
-    body: null, // binary save — use downloadAndSave instead
-  });
-
-  // 2. Download image from Supabase Storage → save locally
-  await runtime.content.downloadAndSaveImage({
-    imageUrl: content.metadata.composed_image_url,
+  // 1. Copy composed image from local cache to final folder
+  await runtime.content.copyFromCache({
+    contentId: content.id,
     relativePath: folderPath,
     fileName: `instagram_${formatDate(content.scheduled_at)}.png`,
   });
 
-  // 3. Save caption as text file
+  // 2. Save caption as text file
   await runtime.content.saveLocal({
     relativePath: folderPath,
     fileName: `instagram_${formatDate(content.scheduled_at)}_caption.txt`,
@@ -332,14 +426,19 @@ const saveApprovedContentLocally = async () => {
 };
 ```
 
+No HTTP download. No signed URL. Just a local `fs.copyFile` from cache to final folder.
+
 ### 6.2 Local folder structure
 
 ```
 {watch_root}/
   contents/
+    .instagram-cache/              ← hidden cache (7-2.1)
+      {contentId}/
+        composed.png               ← working copy during editing
     {campaign_title}/
       2026-03-10_instagram/
-        instagram_2026-03-10.png          ← composed image
+        instagram_2026-03-10.png          ← approved final copy
         instagram_2026-03-10_caption.txt  ← caption + hashtags
     ondemand/
       2026-03-05_instagram/
@@ -347,31 +446,37 @@ const saveApprovedContentLocally = async () => {
         instagram_2026-03-05_caption.txt
 ```
 
-### 6.3 IPC handler for image download + save
+### 6.3 IPC handler for cache copy
 
 File: `apps/desktop/electron/main.mjs` (modify)
 
 ```javascript
-ipcMain.handle("content:download-and-save-image", async (_, payload) => {
+ipcMain.handle("content:copy-from-cache", async (_, payload) => {
   const watchPath = getDesktopConfig().watch_path;
   if (!watchPath) return { ok: false, error: "no_watch_path" };
 
-  // Path traversal defense (same as 7-1a hardening)
+  // Source: local compose cache
+  const sourcePath = path.join(
+    watchPath, "contents", ".instagram-cache", payload.contentId, "composed.png"
+  );
+
+  if (!await fileExists(sourcePath)) {
+    return { ok: false, error: "cache_not_found" };
+  }
+
+  // Target: final user folder
   const targetDir = path.resolve(watchPath, payload.relativePath);
+
+  // Path traversal defense
   if (!targetDir.startsWith(path.resolve(watchPath))) {
     return { ok: false, error: "path_traversal_blocked" };
   }
 
   await fs.mkdir(targetDir, { recursive: true });
+  const targetPath = path.join(targetDir, payload.fileName);
+  await fs.copyFile(sourcePath, targetPath);
 
-  const response = await fetch(payload.imageUrl);
-  if (!response.ok) return { ok: false, error: "download_failed" };
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const filePath = path.join(targetDir, payload.fileName);
-  await fs.writeFile(filePath, buffer);
-
-  return { ok: true, filePath };
+  return { ok: true, filePath: targetPath };
 });
 ```
 
@@ -415,12 +520,17 @@ File: `apps/desktop/src/global.d.ts` (modify)
 ```typescript
 interface DesktopRuntime {
   content: {
-    saveBody: (...) => Promise<...>;       // from 7-1b
-    saveLocal: (...) => Promise<...>;      // from 7-1a
-    recompose: (...) => Promise<...>;      // from 7-2b
-    downloadImage: (...) => Promise<...>;  // from 7-2b
-    downloadAndSaveImage: (params: {       // NEW in 7-2c
-      imageUrl: string;
+    saveBody: (...) => Promise<...>;            // from 7-1b
+    saveLocal: (...) => Promise<...>;           // from 7-1a
+    composeLocal: (...) => Promise<...>;        // from 7-2.1
+    loadActivityThumbnails: (...) => Promise<...>; // from 7-2b
+    downloadImage: (...) => Promise<...>;       // from 7-2b (modified in 7-2.1 to read local)
+    listInstagramTemplates: () => Promise<...>; // from 7-2b
+    loadCachedThumbnail: (params: {             // NEW in 7-2c
+      contentId: string;
+    }) => Promise<{ ok: boolean; thumbnailDataUrl?: string; error?: string }>;
+    copyFromCache: (params: {                   // NEW in 7-2c
+      contentId: string;
       relativePath: string;
       fileName: string;
     }) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
@@ -436,12 +546,13 @@ interface DesktopRuntime {
 |---|---|---|
 | `apps/desktop/src/components/scheduler/InstagramContentEditor.tsx` | Modify | Add approval action section |
 | `apps/desktop/src/components/scheduler/instagram/ApprovalActionBar.tsx` | Create | Approve/Revise/Skip buttons + revision reason |
+| `apps/desktop/src/components/scheduler/instagram/useBoardThumbnails.ts` | Create | Hook for loading local cached thumbnails |
 | `apps/desktop/src/components/scheduler/SchedulerBoard.tsx` | Modify | Instagram card thumbnails + new status badges |
 | `apps/desktop/src/pages/Scheduler.tsx` | Modify | Content navigation (next pending) |
 | `apps/desktop/src/styles/scheduler.css` | Modify | Thumbnail, badge, approval bar styles |
-| `apps/desktop/src/global.d.ts` | Modify | downloadAndSaveImage type |
-| `apps/desktop/electron/main.mjs` | Modify | content:download-and-save-image IPC |
-| `apps/desktop/electron/preload.mjs` | Modify | Expose downloadAndSaveImage |
+| `apps/desktop/src/global.d.ts` | Modify | loadCachedThumbnail + copyFromCache types |
+| `apps/desktop/electron/main.mjs` | Modify | load-cached-thumbnail + copy-from-cache IPC |
+| `apps/desktop/electron/preload.mjs` | Modify | Expose loadCachedThumbnail + copyFromCache |
 | `apps/desktop/electron/preload.cjs` | Modify | CJS bridge |
 | `apps/api/src/orchestrator/scheduler-slot-transition.ts` | Modify | Add revision_requested to valid transitions |
 | `apps/api/src/orchestrator/skills/instagram-generation/generate.ts` | Modify | Revision context in generation prompt |
@@ -453,19 +564,20 @@ interface DesktopRuntime {
 ## 10) Acceptance Criteria
 
 1. Approve button in editor triggers workflow resolution → `contents.status: "approved"` + `slot_status: "approved"`.
-2. Approved content is automatically saved to local folder (image PNG + caption TXT).
-3. Request Revision with reason opens chat panel → AI regenerates with feedback context → editor refreshes.
+2. Approved content is copied from `.instagram-cache/` to final local folder (image PNG + caption TXT).
+3. Request Revision with reason opens chat panel → AI regenerates text → Electron re-composes locally → editor refreshes with new content.
 4. Slot status transitions to `revision_requested` → `generating` → `draft` on revision.
 5. Skip action marks `slot_status: "skipped"` → card grayed out on board.
-6. Scheduler board shows image thumbnails for Instagram cards.
+6. Scheduler board shows image thumbnails loaded from local cache (no network, no expiration).
 7. After approve/skip, editor navigates to next pending `draft` item.
 8. Item counter shows "승인 대기: N/M 항목".
 9. `revision_requested` badge appears orange on board cards.
 10. Local file archival follows folder structure convention (campaign vs ondemand).
 11. Path traversal defense blocks `..` segments in local save paths.
-12. `pnpm --filter desktop type-check` passes.
-13. `pnpm --filter @repo/api type-check` passes.
-14. Existing workflow resolution contract (Phase 3-3) is preserved — no regression.
+12. No signed URL references remain in 7-2c code path.
+13. `pnpm --filter desktop type-check` passes.
+14. `pnpm --filter @repo/api type-check` passes.
+15. Existing workflow resolution contract (Phase 3-3) is preserved — no regression.
 
 ---
 
@@ -476,13 +588,15 @@ interface DesktopRuntime {
 3. `pnpm type-check` — pass (workspace-wide)
 4. `pnpm --filter @repo/api test:unit` — new tests for revision status transitions
 5. Manual: approve content → verify workflow + slot + content status all update to approved
-6. Manual: verify local folder contains PNG + caption TXT after approve
-7. Manual: request revision with reason → verify chat opens with context → AI regenerates → editor shows new content
+6. Manual: verify final folder contains PNG (copied from cache) + caption TXT after approve
+7. Manual: request revision with reason → verify chat opens with context → AI regenerates → Electron re-composes → editor shows new content
 8. Manual: skip content → verify slot_status = skipped, card grayed on board
 9. Manual: approve → verify editor navigates to next draft item
-10. Manual: verify board shows Instagram thumbnails for items with composed images
+10. Manual: verify board shows Instagram thumbnails loaded from local cache
 11. Manual: verify item counter "승인 대기: N/M" updates after each action
-12. Apply migration → verify revision_requested status is accepted in schedule_slots
+12. Manual: leave board open for 1 hour → verify thumbnails still display (no expiration)
+13. Apply migration → verify revision_requested status is accepted in schedule_slots
+14. Grep: `signedUrl|signed_url|createSignedUrl` → zero matches in 7-2c code
 
 ---
 
@@ -491,14 +605,23 @@ interface DesktopRuntime {
 **Why approval workflow for Instagram (unlike Naver Blog):**
 Instagram content will eventually support auto-publish via Instagram Graph API (future phase). Approval gates the publish action. Naver Blog has no API for auto-publish, so copy-only was sufficient.
 
+**Why local cache thumbnails for board (not signed URLs):**
+With 7-2.1 local composition, composed images already exist on local filesystem at `.instagram-cache/{contentId}/composed.png`. Loading a 48px thumbnail via IPC is instant, never expires, and works offline. No need for network-based signed URLs.
+
+**Why `copyFromCache` instead of `downloadAndSaveImage`:**
+The original 7-2c used `fetch(signedUrl)` to download from Supabase Storage. With local composition (7-2.1), the image already exists locally. A simple `fs.copyFile` is faster and more reliable than an HTTP download.
+
 **Why auto-navigate after action:**
 Users typically review content sequentially. Reducing clicks by auto-navigating to the next pending item improves review throughput. Returning to the board when all items are reviewed provides a natural completion signal.
 
 **Why revision loops through chat:**
 The chat-centric architecture (established in Phase 3-3) already handles content modification requests. Re-using this path for revision keeps the interaction model consistent and allows natural language feedback ("톤을 더 밝게 해줘") rather than structured form input.
 
+**Why editor refresh via `editorContext.refreshContent()`:**
+After revision, the server returns updated text metadata. The chat handler triggers local re-compose via IPC, then signals the editor to re-read content and update its preview. This avoids polling or Supabase Realtime subscriptions — a simple event-driven refresh.
+
 **Why local save on approve (not on generate):**
-Saving draft content locally creates clutter (user may skip or revise). Only approved content represents the user's final choice and is worth archiving. Users can still manually download from the editor at any time.
+Saving draft content to the final folder creates clutter (user may skip or revise). Only approved content represents the user's final choice and is worth archiving. Draft images remain in `.instagram-cache/` until approved.
 
 **Why separate image + caption files locally:**
 Users may want to upload the image to Instagram and paste the caption separately. Two files is more practical than a single combined file.

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { OverlayTextEdit } from "./OverlayTextEdit";
 
-export type TemplateTextPosition = {
+export type TemplateTextSlotPosition = {
+  id: string;
+  label: string;
   x: number;
   y: number;
-  maxWidth: number;
-  fontSize: number;
+  width: number;
+  height: number;
+  font_size: number;
   align: "center" | "left" | "right";
 };
 
@@ -13,13 +16,10 @@ type ImagePreviewProps = {
   imageUrl: string;
   width: number;
   height: number;
-  overlayMain: string;
-  overlaySub: string;
-  mainTextPosition: TemplateTextPosition;
-  subTextPosition: TemplateTextPosition | null;
+  textSlots: TemplateTextSlotPosition[];
+  overlayTexts: Record<string, string>;
   isRecomposing: boolean;
-  onEditOverlayMain: (text: string) => void;
-  onEditOverlaySub: (text: string) => void;
+  onEditOverlayText: (slotId: string, text: string) => void;
 };
 
 /**
@@ -29,13 +29,10 @@ export const ImagePreview = ({
   imageUrl,
   width,
   height,
-  overlayMain,
-  overlaySub,
-  mainTextPosition,
-  subTextPosition,
+  textSlots,
+  overlayTexts,
   isRecomposing,
-  onEditOverlayMain,
-  onEditOverlaySub
+  onEditOverlayText
 }: ImagePreviewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [displayScale, setDisplayScale] = useState(1);
@@ -53,13 +50,14 @@ export const ImagePreview = ({
   }, [width]);
 
   const toDisplayStyle = useMemo(
-    () => (position: TemplateTextPosition): CSSProperties => ({
+    () => (slot: TemplateTextSlotPosition): CSSProperties => ({
       position: "absolute",
-      top: position.y * displayScale,
-      left: position.x * displayScale,
-      width: position.maxWidth * displayScale,
-      fontSize: Math.max(10, position.fontSize * displayScale),
-      textAlign: position.align
+      top: slot.y * displayScale,
+      left: slot.x * displayScale,
+      width: slot.width * displayScale,
+      minHeight: slot.height * displayScale,
+      fontSize: Math.max(10, slot.font_size * displayScale),
+      textAlign: slot.align
     }),
     [displayScale]
   );
@@ -79,22 +77,16 @@ export const ImagePreview = ({
         </div>
       )}
 
-      <OverlayTextEdit
-        value={overlayMain}
-        onChange={onEditOverlayMain}
-        style={toDisplayStyle(mainTextPosition)}
-        maxLength={15}
-        placeholder="Main text"
-      />
-      {subTextPosition ? (
+      {textSlots.map((slot) => (
         <OverlayTextEdit
-          value={overlaySub}
-          onChange={onEditOverlaySub}
-          style={toDisplayStyle(subTextPosition)}
-          maxLength={25}
-          placeholder="Sub text"
+          key={slot.id}
+          value={overlayTexts[slot.id] ?? ""}
+          onChange={(next) => onEditOverlayText(slot.id, next)}
+          style={toDisplayStyle(slot)}
+          maxLength={120}
+          placeholder={slot.label}
         />
-      ) : null}
+      ))}
 
       {isRecomposing ? (
         <div className="instagram-image-preview-loading">

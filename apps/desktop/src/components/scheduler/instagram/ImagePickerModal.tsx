@@ -1,6 +1,7 @@
 export type ActivityImageThumbnail = {
   fileId: string;
   fileName: string;
+  relativePath: string;
   thumbnailDataUrl: string;
 };
 

@@ -84,7 +84,7 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
       campaignId: context.state.campaign_id,
       topic: extractedTopic || "캠페인 인스타 콘텐츠",
       imageMode: "auto",
-      templateId: "center-image-bottom-text",
+      templateId: "koica_cover_01",
       idempotencyKey: context.idempotencyKey
     });
 
@@ -98,8 +98,12 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
         slot_id: generated.slotId,
         topic: generated.topic,
         template_id: generated.templateId,
+        overlay_main: generated.overlayMain,
+        overlay_sub: generated.overlaySub,
+        overlay_texts: generated.overlayTexts,
+        image_file_ids: generated.imageFileIds,
         selected_image_paths: generated.selectedImagePaths,
-        preview_url: generated.previewUrl,
+        requires_local_compose: generated.requiresLocalCompose,
         local_save_suggestion: {
           relative_path: generated.localSaveSuggestion.relativePath,
           file_name: generated.localSaveSuggestion.fileName
@@ -197,8 +201,12 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
       slot_id: generated.slotId,
       topic: generated.topic,
       template_id: generated.templateId,
+      overlay_main: generated.overlayMain,
+      overlay_sub: generated.overlaySub,
+      overlay_texts: generated.overlayTexts,
+      image_file_ids: generated.imageFileIds,
       selected_image_paths: generated.selectedImagePaths,
-      preview_url: generated.previewUrl,
+      requires_local_compose: generated.requiresLocalCompose,
       local_save_suggestion: {
         relative_path: generated.localSaveSuggestion.relativePath,
         file_name: generated.localSaveSuggestion.fileName

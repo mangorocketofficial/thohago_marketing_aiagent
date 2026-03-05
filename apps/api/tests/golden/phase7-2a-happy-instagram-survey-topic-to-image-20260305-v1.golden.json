@@ -21,7 +21,7 @@
       "templateId": null,
       "completed_at": null
     },
-    "assistantMessage": "활동 폴더에서 사용할 이미지가 있나요?\n1) 폴더에서 AI가 자동 선택\n2) 직접 이미지 지정\n3) 이미지 없이 텍스트 디자인만",
+    "assistantMessage": "사용할 이미지를 어떻게 선택할까요?\n1) AI 자동 선택\n2) 직접 이미지 지정\n3) 텍스트 중심(이미지 최소)",
     "ready": false
   },
   "is_deterministic": "yes",

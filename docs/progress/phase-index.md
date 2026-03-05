@@ -62,3 +62,5 @@
 | 7-1b Patch | Skill Trigger Guardrails + Golden Contracts | Done | 2026-03-05 | [phase-7-1b-patch-completion.md](./phase-7-1b-patch-completion.md) |
 | 7-2a | Instagram Generation Backend Core | Done | 2026-03-05 | [phase-7-2a-completion.md](./phase-7-2a-completion.md) |
 | 7-2b | Instagram Canvas Editor + Template Rendering | Done | 2026-03-05 | [phase-7-2b-completion.md](./phase-7-2b-completion.md) |
+| 7-2.1 | Local Image Generation Refactor | Done | 2026-03-05 | [phase-7-2.1-completion.md](./phase-7-2.1-completion.md) |
+| 7-2.2 | Template Schema Redesign (Dynamic Overlay Slots) | Done | 2026-03-05 | [phase-7-2.2-completion.md](./phase-7-2.2-completion.md) |

@@ -35,7 +35,7 @@ export const ContentEditor = (props: ContentEditorProps) => {
     return <BlogContentEditor {...props} />;
   }
   if (props.content.channel === "instagram") {
-    return <InstagramContentEditor {...props} />;
+    return <InstagramContentEditor key={props.content.id} {...props} />;
   }
 
   return <GenericContentEditor {...props} />;

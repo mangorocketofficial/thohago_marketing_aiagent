@@ -93,21 +93,55 @@ type ContentSaveLocalResult = {
   message?: string;
 };
 
-type InstagramTemplateTextLayer = {
+type InstagramTemplateTextSlot = {
+  id: string;
+  label: string;
   x: number;
   y: number;
-  maxWidth: number;
-  fontSize: number;
+  width: number;
+  height: number;
+  font_size: number;
+  font_color: string;
+  font_weight?: "normal" | "bold";
+  font_style?: string;
   align: "center" | "left" | "right";
 };
 
-type InstagramTemplateImageArea = {
+type InstagramTemplatePhotoSlot = {
+  id: string;
+  label: string;
   x: number;
   y: number;
-  w: number;
-  h: number;
+  width: number;
+  height: number;
   fit: "cover" | "contain";
-  borderRadius?: number;
+  z_index?: number;
+};
+
+type InstagramTemplateBadge = {
+  id: string;
+  label?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: "circle" | "rect";
+  font_size: number;
+  font_color: string;
+  font_weight?: "normal" | "bold";
+  z_index?: number;
+  example_text?: string;
+};
+
+type InstagramTemplateHeader = {
+  logos: string[];
+  tag?: string;
+  position: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 };
 
 type InstagramTemplateDefinition = {
@@ -115,13 +149,16 @@ type InstagramTemplateDefinition = {
   nameKo: string;
   description: string;
   thumbnail: string;
-  width: number;
-  height: number;
-  layers: {
-    mainText: InstagramTemplateTextLayer;
-    subText?: InstagramTemplateTextLayer;
-    userImageAreas?: InstagramTemplateImageArea[];
+  size: {
+    width: number;
+    height: number;
   };
+  overlays: {
+    photos: InstagramTemplatePhotoSlot[];
+    texts: InstagramTemplateTextSlot[];
+    badge?: InstagramTemplateBadge;
+  };
+  header?: InstagramTemplateHeader | null;
 };
 
 type ContentListInstagramTemplatesResult =
@@ -138,15 +175,17 @@ type ContentListInstagramTemplatesResult =
       details?: Record<string, unknown>;
     };
 
-type ContentGetSignedUrlPayload = {
+type ContentSaveInstagramMetadataPayload = {
   contentId: string;
+  templateId: string;
+  overlayTexts: Record<string, string>;
+  imageFileIds?: string[];
+  expectedUpdatedAt?: string;
 };
 
-type ContentGetSignedUrlResult =
+type ContentSaveInstagramMetadataResult =
   | {
       ok: true;
-      signedImageUrl: string;
-      expiresAt: string;
       updatedAt: string;
     }
   | {
@@ -157,21 +196,23 @@ type ContentGetSignedUrlResult =
       details?: Record<string, unknown>;
     };
 
-type ContentRecomposePayload = {
+type ContentComposeLocalPayload = {
   contentId: string;
   templateId: string;
-  overlayMain: string;
-  overlaySub: string;
+  overlayTexts: Record<string, string>;
+  imagePaths?: string[];
   imageFileIds?: string[];
   clientRequestId?: string;
 };
 
-type ContentRecomposeResult =
+type ContentComposeLocalResult =
   | {
       ok: true;
-      signedImageUrl: string;
-      expiresAt: string;
-      updatedAt: string;
+      composedPath: string;
+      thumbnailDataUrl: string;
+      width: number;
+      height: number;
+      sizeBytes: number;
       requestId: string;
     }
   | {
@@ -185,6 +226,7 @@ type ContentRecomposeResult =
 type ActivityImageThumbnail = {
   fileId: string;
   fileName: string;
+  relativePath: string;
   thumbnailDataUrl: string;
 };
 
@@ -583,10 +625,10 @@ declare global {
       };
       content: {
         saveBody: (payload: ContentSaveBodyPayload) => Promise<ContentSaveBodyResult>;
+        saveInstagramMetadata: (payload: ContentSaveInstagramMetadataPayload) => Promise<ContentSaveInstagramMetadataResult>;
         saveLocal: (payload: ContentSaveLocalPayload) => Promise<ContentSaveLocalResult>;
         listInstagramTemplates: () => Promise<ContentListInstagramTemplatesResult>;
-        getSignedUrl: (payload: ContentGetSignedUrlPayload) => Promise<ContentGetSignedUrlResult>;
-        recompose: (payload: ContentRecomposePayload) => Promise<ContentRecomposeResult>;
+        composeLocal: (payload: ContentComposeLocalPayload) => Promise<ContentComposeLocalResult>;
         loadActivityThumbnails: (
           payload?: ContentLoadActivityThumbnailsPayload
         ) => Promise<ContentLoadActivityThumbnailsResult>;

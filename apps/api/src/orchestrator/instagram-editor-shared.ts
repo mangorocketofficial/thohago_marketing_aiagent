@@ -1,12 +1,10 @@
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
-import { getTemplate } from "../media/templates/registry";
-import type { TemplateId } from "../media/templates/schema";
+import { getTemplate, type TemplateId } from "@repo/media-engine";
 
-export const DEFAULT_TEMPLATE_ID: TemplateId = "center-image-bottom-text";
-export const STORAGE_BUCKET = "content-images-private";
-export const SIGNED_URL_TTL_SECONDS = 30 * 60;
+export const DEFAULT_TEMPLATE_ID: TemplateId = "koica_cover_01";
 
 export type InstagramContentRow = {
   id: string;
@@ -31,13 +29,6 @@ const asStringArray = (value: unknown): string[] =>
     ? value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter((entry) => !!entry)
     : [];
 
-const isTemplateId = (value: string): value is TemplateId =>
-  value === "center-image-bottom-text" ||
-  value === "fullscreen-overlay" ||
-  value === "collage-2x2" ||
-  value === "text-only-gradient" ||
-  value === "split-image-text";
-
 const dedupeStrings = (values: string[]): string[] => {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -51,12 +42,31 @@ const dedupeStrings = (values: string[]): string[] => {
   return result;
 };
 
+const toRelativePath = (absoluteOrRelativePath: string, activityFolder: string, fileName: string): string => {
+  const normalized = absoluteOrRelativePath.replace(/\\/g, "/");
+  const normalizedFolder = activityFolder.replace(/\\/g, "/");
+  if (!normalizedFolder) {
+    return fileName;
+  }
+  const index = normalized.lastIndexOf(`/${normalizedFolder}/`);
+  if (index >= 0) {
+    return normalized.slice(index + 1).replace(/^\/+/, "");
+  }
+
+  if (normalized.includes(normalizedFolder)) {
+    const start = normalized.indexOf(normalizedFolder);
+    return normalized.slice(start);
+  }
+
+  return `${normalizedFolder}/${fileName}`.replace(/\/+/g, "/");
+};
+
 export const normalizeTemplateId = (candidate: unknown, fallback: TemplateId): TemplateId => {
   const normalized = asString(candidate, "").trim();
-  if (!normalized || !isTemplateId(normalized)) {
+  if (!normalized) {
     return fallback;
   }
-  return getTemplate(normalized) ? normalized : fallback;
+  return getTemplate(normalized) ? (normalized as TemplateId) : fallback;
 };
 
 export const normalizeOverlayText = (value: unknown, fallback: string, maxLength: number): string => {
@@ -67,42 +77,34 @@ export const normalizeOverlayText = (value: unknown, fallback: string, maxLength
   return normalized.slice(0, maxLength);
 };
 
+export const normalizeOverlayTextMap = (
+  value: unknown,
+  fallback: Record<string, string>,
+  maxLength = 120
+): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...fallback };
+  }
+
+  const next: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const id = key.trim();
+    if (!id) {
+      continue;
+    }
+    const normalized = asString(entry, "").trim().slice(0, maxLength);
+    next[id] = normalized;
+  }
+
+  return Object.keys(next).length > 0 ? next : { ...fallback };
+};
+
 export const resolveRequestId = (clientRequestId: unknown): string => {
   const value = asString(clientRequestId, "").trim();
   if (!value) {
     return randomUUID();
   }
   return value.slice(0, 120);
-};
-
-export const resolveStorageRef = (params: {
-  orgId: string;
-  contentId: string;
-  metadata: Record<string, unknown>;
-}): { bucket: string; path: string; contentType: string } => {
-  const storage = asRecord(params.metadata.composed_image_storage);
-  return {
-    bucket: asString(storage.bucket, STORAGE_BUCKET).trim() || STORAGE_BUCKET,
-    path: asString(storage.path, "").trim() || `${params.orgId}/${params.contentId}/composed.png`,
-    contentType: asString(storage.content_type, "image/png").trim() || "image/png"
-  };
-};
-
-export const buildSignedUrlPayload = async (params: {
-  bucket: string;
-  path: string;
-}): Promise<{ signedImageUrl: string; expiresAt: string }> => {
-  const expiresAt = new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000).toISOString();
-  const signed = await supabaseAdmin.storage.from(params.bucket).createSignedUrl(params.path, SIGNED_URL_TTL_SECONDS);
-  const signedImageUrl = asString(signed.data?.signedUrl, "").trim();
-  if (!signedImageUrl) {
-    throw new HttpError(500, "storage_sign_failed", "Failed to create signed url.");
-  }
-
-  return {
-    signedImageUrl,
-    expiresAt
-  };
 };
 
 export const loadInstagramContentRow = async (params: {
@@ -161,7 +163,7 @@ const resolveImagePathsByFileIds = async (params: {
 
   const { data, error } = await supabaseAdmin
     .from("local_files")
-    .select("id,file_path,status")
+    .select("id,file_path,file_name,activity_folder,status")
     .eq("org_id", params.orgId)
     .eq("file_type", "image")
     .in("id", normalizedIds);
@@ -174,11 +176,13 @@ const resolveImagePathsByFileIds = async (params: {
   for (const row of (Array.isArray(data) ? data : []) as Record<string, unknown>[]) {
     const id = asString(row.id, "").trim();
     const filePath = asString(row.file_path, "").trim();
+    const fileName = asString(row.file_name, "").trim() || path.basename(filePath);
+    const activityFolder = asString(row.activity_folder, "").trim();
     const status = asString(row.status, "active").trim().toLowerCase();
     if (!id || !filePath || status === "deleted") {
       continue;
     }
-    byId.set(id, filePath);
+    byId.set(id, toRelativePath(filePath, activityFolder, fileName));
   }
 
   const missing = normalizedIds.filter((id) => !byId.has(id));

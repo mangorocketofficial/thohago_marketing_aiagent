@@ -13,6 +13,25 @@ const sanitizePathSegment = (value: string, fallback: string): string => {
   return cleaned || fallback;
 };
 
+const asStringMap = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const id = key.trim();
+    if (!id) {
+      continue;
+    }
+    const text = asString(entry, "").trim();
+    if (!text) {
+      continue;
+    }
+    result[id] = text;
+  }
+  return result;
+};
+
 const buildLocalSaveSuggestion = (params: {
   source: SlotSource;
   topic: string;
@@ -82,9 +101,14 @@ export const loadExistingGeneratedResult = async (params: {
 
   const row = asRecord(data);
   const metadata = asRecord(row.metadata);
-  const storage = asRecord(metadata.composed_image_storage);
   const localSave = asRecord(metadata.local_save_suggestion);
-  const outputFormat = asString(storage.content_type, "").includes("jpeg") ? "jpg" : "png";
+  const outputFormat = asString(metadata.output_format, "").toLowerCase() === "jpg" ? "jpg" : "png";
+  const imageFileIds = Array.isArray(metadata.image_file_ids)
+    ? metadata.image_file_ids.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  const overlayTexts = asStringMap(metadata.overlay_texts);
+  const overlayMain = asString(metadata.overlay_main, "");
+  const overlaySub = asString(metadata.overlay_sub, "");
 
   return {
     contentId: asString(row.id, ""),
@@ -93,13 +117,21 @@ export const loadExistingGeneratedResult = async (params: {
     topic: asString(metadata.topic, params.topic) || params.topic,
     caption: asString(row.body, ""),
     model: asString(metadata.generation_model, "claude") === "gpt-4o-mini" ? "gpt-4o-mini" : "claude",
-    outputFormat,
-    storagePath: asString(storage.path, ""),
-    previewUrl: null,
-    templateId: asString(metadata.template_id, "center-image-bottom-text"),
+    templateId: asString(metadata.template_id, "koica_cover_01"),
+    overlayMain,
+    overlaySub,
+    overlayTexts:
+      Object.keys(overlayTexts).length > 0
+        ? overlayTexts
+        : {
+            ...(overlayMain ? { title: overlayMain } : {}),
+            ...(overlaySub ? { author: overlaySub } : {})
+          },
+    imageFileIds,
     selectedImagePaths: Array.isArray(metadata.image_paths)
       ? metadata.image_paths.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
       : [],
+    requiresLocalCompose: true,
     localSaveSuggestion: {
       relativePath: asString(localSave.relative_path, "contents/ondemand"),
       fileName: asString(localSave.file_name, `instagram.${outputFormat}`)
@@ -109,7 +141,7 @@ export const loadExistingGeneratedResult = async (params: {
 };
 
 /**
- * Insert draft content row before storage upload.
+ * Insert draft instagram content row with local-compose seed metadata.
  */
 export const insertDraftInstagramContent = async (params: {
   orgId: string;
@@ -121,6 +153,7 @@ export const insertDraftInstagramContent = async (params: {
   hashtags: string[];
   overlayMain: string;
   overlaySub: string;
+  overlayTexts: Record<string, string>;
   templateId: string;
   selectedImageFileIds: string[];
   selectedImagePaths: string[];
@@ -166,9 +199,11 @@ export const insertDraftInstagramContent = async (params: {
         template_id: params.templateId,
         overlay_main: params.overlayMain,
         overlay_sub: params.overlaySub,
+        overlay_texts: params.overlayTexts,
         image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,
         output_format: params.outputFormat,
+        composed_locally: true,
         local_save_suggestion: {
           relative_path: localSaveSuggestion.relativePath,
           file_name: localSaveSuggestion.fileName,
@@ -195,52 +230,6 @@ export const insertDraftInstagramContent = async (params: {
     contentId,
     localSaveSuggestion
   };
-};
-
-/**
- * Update content metadata with storage path and size.
- */
-export const updateContentStorageMetadata = async (params: {
-  orgId: string;
-  contentId: string;
-  storageBucket: string;
-  storagePath: string;
-  contentType: string;
-  sizeBytes: number;
-}): Promise<void> => {
-  const { data: row, error: readError } = await supabaseAdmin
-    .from("contents")
-    .select("metadata")
-    .eq("org_id", params.orgId)
-    .eq("id", params.contentId)
-    .maybeSingle();
-
-  if (readError || !row) {
-    throw new HttpError(500, "db_error", `Failed to read content metadata before update: ${readError?.message ?? "missing"}`);
-  }
-
-  const currentMetadata = asRecord(asRecord(row).metadata);
-  const { data, error } = await supabaseAdmin
-    .from("contents")
-    .update({
-      metadata: {
-        ...currentMetadata,
-        composed_image_size: params.sizeBytes,
-        composed_image_storage: {
-          bucket: params.storageBucket,
-          path: params.storagePath,
-          content_type: params.contentType
-        }
-      }
-    })
-    .eq("org_id", params.orgId)
-    .eq("id", params.contentId)
-    .select("id")
-    .maybeSingle();
-
-  if (error || !data) {
-    throw new HttpError(500, "db_error", `Failed to update content storage metadata: ${error?.message ?? "conflict"}`);
-  }
 };
 
 /**

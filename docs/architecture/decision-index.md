@@ -98,3 +98,25 @@ Use server-side Sharp re-compose + signed URL refresh as the canonical preview p
 
 Reason  
 Keeping composition on the API avoids renderer/output drift from duplicate canvas logic, while request ordering guards prevent stale previews during fast overlay/template/image edits.
+
+## D-010
+
+Phase  
+7-2.1
+
+Decision  
+Extract Instagram composition contracts into shared `@repo/media-engine` and route API/Desktop to the same engine.
+
+Reason  
+One shared engine removes API/Desktop drift risk and makes local compose behavior deterministic across scheduler editor and chat preview.
+
+## D-011
+
+Phase  
+7-2.2
+
+Decision  
+Adopt asset-native template schema (`size + overlays.photos/texts/badge + header`) and retire fixed `main/sub` slot assumptions.
+
+Reason  
+Real templates require variable text/photo slot counts and id-addressable overlays; fixed two-slot schema blocked editor scalability and badge support.

@@ -30,6 +30,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@repo/media-engine':
+        specifier: workspace:*
+        version: link:../../packages/media-engine
       '@repo/rag':
         specifier: workspace:*
         version: link:../../packages/rag
@@ -61,6 +64,9 @@ importers:
       '@repo/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@repo/media-engine':
+        specifier: workspace:*
+        version: link:../../packages/media-engine
       '@repo/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -161,6 +167,16 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.57.4
         version: 2.98.0
+    devDependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+
+  packages/media-engine:
+    dependencies:
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
     devDependencies:
       typescript:
         specifier: ^5.8.2

@@ -98,3 +98,14 @@ Reason
 
 Affects  
 Phase 7-2c
+
+DEBT-010
+
+Description  
+Local compose/template-schema migration has no automated visual regression snapshot gate for composed output parity.
+
+Reason  
+7-2.1/7-2.2 prioritized contract and runtime migration first; screenshot-baseline validation was deferred to keep rollout incremental.
+
+Affects  
+Phase 7-2c

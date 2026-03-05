@@ -1,0 +1,199 @@
+{
+  "template_id": "oda_career_ngo_02",
+  "template_name": "NGO 채용 리스트",
+  "description": "브라우저 창 스타일. NGO 카테고리 채용정보 3건 표시.",
+  "style": "retro_pixel_8bit",
+  "size": {
+    "width": 1080,
+    "height": 1080
+  },
+  "overlays": {
+    "photos": [
+      {
+        "id": "bg_photo",
+        "label": "배경 사진 (블러/어둡게 처리)",
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 1080,
+        "fit": "cover",
+        "z_index": 0,
+        "opacity": 0.15,
+        "optional": true
+      }
+    ],
+    "browser_window": {
+      "x": 60,
+      "y": 50,
+      "width": 960,
+      "height": 940,
+      "style": "default",
+      "tab_bg_color": "#F5F5F5"
+    },
+    "texts": [
+      {
+        "id": "category_title",
+        "label": "카테고리명 (탭 제목)",
+        "x": 125,
+        "y": 58,
+        "width": 160,
+        "height": 32,
+        "font_size": 42,
+        "font_color": "#333333",
+        "font_weight": "bold",
+        "align": "left",
+        "example_text": "NGO"
+      },
+      {
+        "id": "job_1_org",
+        "label": "채용 1 - 기관명",
+        "x": 195,
+        "y": 170,
+        "width": 700,
+        "height": 25,
+        "font_size": 20,
+        "font_color": "#555555",
+        "example_text": "[한경국립대학교 산학협력단]"
+      },
+      {
+        "id": "job_1_title",
+        "label": "채용 1 - 직무명",
+        "x": 195,
+        "y": 200,
+        "width": 750,
+        "height": 35,
+        "font_size": 26,
+        "font_color": "#222222",
+        "font_weight": "bold",
+        "example_text": "캄보디아 역량강화사업 PAO 모집"
+      },
+      {
+        "id": "job_1_detail",
+        "label": "채용 1 - 상세",
+        "x": 195,
+        "y": 245,
+        "width": 750,
+        "height": 25,
+        "font_size": 17,
+        "font_color": "#888888",
+        "example_text": "- 기후변화대응 농업분야관련 통합지도 등 계약직 1명 (경력무관) (~12.28.)"
+      },
+      {
+        "id": "job_2_org",
+        "label": "채용 2 - 기관명",
+        "x": 195,
+        "y": 360,
+        "width": 700,
+        "height": 25,
+        "font_size": 20,
+        "font_color": "#555555",
+        "example_text": "[밀알복지재단]"
+      },
+      {
+        "id": "job_2_title",
+        "label": "채용 2 - 직무명",
+        "x": 195,
+        "y": 390,
+        "width": 750,
+        "height": 35,
+        "font_size": 26,
+        "font_color": "#222222",
+        "font_weight": "bold",
+        "example_text": "국제사업실 사업3팀(말라위) 직원 채용"
+      },
+      {
+        "id": "job_2_detail",
+        "label": "채용 2 - 상세",
+        "x": 195,
+        "y": 435,
+        "width": 750,
+        "height": 25,
+        "font_size": 17,
+        "font_color": "#888888",
+        "example_text": "- 말라위지부 관리운영, 성과관리 등 정규직 1명 (경력) (~1.4.)"
+      },
+      {
+        "id": "job_3_org",
+        "label": "채용 3 - 기관명",
+        "x": 195,
+        "y": 545,
+        "width": 700,
+        "height": 25,
+        "font_size": 20,
+        "font_color": "#555555",
+        "example_text": "[아산나눔재단]"
+      },
+      {
+        "id": "job_3_title",
+        "label": "채용 3 - 직무명",
+        "x": 195,
+        "y": 575,
+        "width": 750,
+        "height": 35,
+        "font_size": 26,
+        "font_color": "#222222",
+        "font_weight": "bold",
+        "example_text": "2026년 상반기 대학생 인턴 채용"
+      },
+      {
+        "id": "job_3_detail",
+        "label": "채용 3 - 상세",
+        "x": 195,
+        "y": 620,
+        "width": 750,
+        "height": 25,
+        "font_size": 17,
+        "font_color": "#888888",
+        "example_text": "- 스타트업팀, 글로벌팀, 기업가정신팀 등 계약직 6명 (신입) (~1.6.)"
+      }
+    ],
+    "decorations": [
+      {
+        "type": "checkmark_circle",
+        "x": 155,
+        "y": 205,
+        "r": 20,
+        "color": "#50C882"
+      },
+      {
+        "type": "checkmark_circle",
+        "x": 155,
+        "y": 395,
+        "r": 20,
+        "color": "#50C882"
+      },
+      {
+        "type": "checkmark_circle",
+        "x": 155,
+        "y": 585,
+        "r": 20,
+        "color": "#50C882"
+      },
+      {
+        "type": "folder_icon",
+        "x": 255,
+        "y": 55,
+        "size": 32,
+        "color": "#C8E650"
+      },
+      {
+        "type": "search_icon",
+        "x": 85,
+        "y": 60,
+        "size": 22
+      },
+      {
+        "type": "pixel_cursor",
+        "x": 980,
+        "y": 910,
+        "size": 7,
+        "color": "#50C882"
+      }
+    ]
+  },
+  "page_indicator": {
+    "total": 5,
+    "active": 1,
+    "y": 1045
+  }
+}

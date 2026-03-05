@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { composeInstagramImage, getTemplate } from "@repo/media-engine";
 import { createInitialCrawlState, runOnboardingCrawl } from "./crawler/index.mjs";
 import { SEED_ORG_ID } from "./constants.mjs";
 import {
@@ -265,6 +266,22 @@ const resolveAbsolutePathFromRelativePath = (relativePath) => {
   return absolutePath;
 };
 
+const resolveComposeImagePath = (candidatePath) => {
+  const normalized = typeof candidatePath === "string" ? candidatePath.trim() : "";
+  if (!normalized) {
+    throw new Error("imagePath is required.");
+  }
+
+  if (path.isAbsolute(normalized)) {
+    const rootPath = resolveWatchRootPath();
+    const absolutePath = path.resolve(normalized);
+    ensurePathInsideRoot(rootPath, absolutePath);
+    return absolutePath;
+  }
+
+  return resolveAbsolutePathFromRelativePath(normalized);
+};
+
 const toThumbnailDataUrl = (absolutePath, maxSize = 200) => {
   const source = nativeImage.createFromPath(absolutePath);
   if (source.isEmpty()) {
@@ -277,6 +294,65 @@ const toThumbnailDataUrl = (absolutePath, maxSize = 200) => {
     quality: "good"
   });
   return resized.toDataURL();
+};
+
+const toThumbnailDataUrlFromBuffer = (buffer, maxSize = 400) => {
+  const source = nativeImage.createFromBuffer(buffer);
+  if (source.isEmpty()) {
+    return null;
+  }
+
+  const resized = source.resize({
+    width: Math.max(1, Math.floor(maxSize)),
+    height: Math.max(1, Math.floor(maxSize)),
+    quality: "good"
+  });
+  return resized.toDataURL();
+};
+
+const sanitizeContentId = (value) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    throw new Error("contentId is required.");
+  }
+  if (!/^[A-Za-z0-9_-]{6,120}$/.test(normalized)) {
+    throw new Error("contentId format is invalid.");
+  }
+  return normalized;
+};
+
+const resolveInstagramCachePath = (watchPath, contentId) => {
+  const rootPath = path.resolve(watchPath);
+  const cacheDir = path.resolve(rootPath, "contents", ".instagram-cache", contentId);
+  ensurePathInsideRoot(rootPath, cacheDir);
+  const composedPath = path.resolve(cacheDir, "composed.png");
+  ensurePathInsideRoot(rootPath, composedPath);
+  return {
+    cacheDir,
+    composedPath
+  };
+};
+
+const parseOptionalStringArrayPayload = (value) => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter((entry) => !!entry);
+};
+
+const parseOptionalStringMapPayload = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const map = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const id = String(key ?? "").trim();
+    if (!id || typeof entry !== "string") {
+      continue;
+    }
+    map[id] = entry;
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
 };
 
 const parseOptionalSchedulerCursor = (value) => {
@@ -1689,43 +1765,7 @@ const registerIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle("content:get-signed-url", async (_, payload) => {
-    const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
-    if (!contentId) {
-      return {
-        ok: false,
-        message: "contentId is required.",
-        code: "invalid_payload",
-        status: 400
-      };
-    }
-
-    try {
-      const body = await callOrchestratorApi(
-        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/signed-url`,
-        {
-          method: "GET"
-        }
-      );
-      return {
-        ok: true,
-        signedImageUrl: typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "",
-        expiresAt: typeof body?.expiresAt === "string" ? body.expiresAt : "",
-        updatedAt: typeof body?.updated_at === "string" ? body.updated_at : ""
-      };
-    } catch (error) {
-      const runtimeError = toRuntimeError(error, "Failed to load signed image URL.");
-      return {
-        ok: false,
-        message: runtimeError.message,
-        code: runtimeError.code ?? "request_failed",
-        status: runtimeError.status ?? 500,
-        details: runtimeError.details
-      };
-    }
-  });
-
-  ipcMain.handle("content:recompose", async (_, payload) => {
+  ipcMain.handle("content:save-instagram-metadata", async (_, payload) => {
     const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
     if (!contentId) {
       return {
@@ -1746,41 +1786,148 @@ const registerIpcHandlers = () => {
       };
     }
 
-    const overlayMain = typeof payload?.overlayMain === "string" ? payload.overlayMain : "";
-    const overlaySub = typeof payload?.overlaySub === "string" ? payload.overlaySub : "";
-    const imageFileIds = Array.isArray(payload?.imageFileIds)
-      ? payload.imageFileIds.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter((entry) => !!entry)
-      : undefined;
-    const clientRequestId = typeof payload?.clientRequestId === "string" ? payload.clientRequestId.trim() : "";
+    let expectedUpdatedAt = null;
+    try {
+      expectedUpdatedAt = parseOptionalIsoDateTime(payload?.expectedUpdatedAt, "expectedUpdatedAt");
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "expectedUpdatedAt must be a valid ISO datetime.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    const overlayTexts = parseOptionalStringMapPayload(payload?.overlayTexts);
+    const imageFileIds = parseOptionalStringArrayPayload(payload?.imageFileIds);
 
     try {
       const body = await callOrchestratorApi(
-        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/recompose`,
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/instagram-metadata`,
         {
-          method: "POST",
+          method: "PATCH",
           body: JSON.stringify({
-            templateId,
-            overlayMain,
-            overlaySub,
-            ...(imageFileIds ? { imageFileIds } : {}),
-            ...(clientRequestId ? { clientRequestId } : {})
+            template_id: templateId,
+            ...(overlayTexts ? { overlay_texts: overlayTexts } : {}),
+            ...(imageFileIds ? { image_file_ids: imageFileIds } : {}),
+            ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {})
           })
         }
       );
 
+      const contentRow = body?.content && typeof body.content === "object" ? body.content : null;
+      const updatedAt = typeof contentRow?.updated_at === "string" ? contentRow.updated_at.trim() : "";
       return {
         ok: true,
-        signedImageUrl: typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "",
-        expiresAt: typeof body?.expiresAt === "string" ? body.expiresAt : "",
-        updatedAt: typeof body?.updated_at === "string" ? body.updated_at : "",
-        requestId: typeof body?.requestId === "string" ? body.requestId : clientRequestId
+        updatedAt
       };
     } catch (error) {
-      const runtimeError = toRuntimeError(error, "Failed to re-compose instagram image.");
+      const runtimeError = toRuntimeError(error, "Failed to save instagram metadata.");
       return {
         ok: false,
         message: runtimeError.message,
         code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:compose-local", async (_, payload) => {
+    const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
+    if (!watchPath) {
+      return {
+        ok: false,
+        message: "watchPath is not configured.",
+        code: "no_watch_path",
+        status: 400
+      };
+    }
+
+    const clientRequestId = typeof payload?.clientRequestId === "string" ? payload.clientRequestId.trim() : "";
+    try {
+      const contentId = sanitizeContentId(payload?.contentId);
+      const templateId = typeof payload?.templateId === "string" ? payload.templateId.trim() : "";
+      if (!templateId) {
+        return {
+          ok: false,
+          message: "templateId is required.",
+          code: "invalid_payload",
+          status: 400
+        };
+      }
+
+      const template = getTemplate(templateId);
+      if (!template) {
+        return {
+          ok: false,
+          message: `Unsupported templateId: ${templateId}`,
+          code: "invalid_payload",
+          status: 400
+        };
+      }
+
+      const overlayTexts = parseOptionalStringMapPayload(payload?.overlayTexts) ?? {};
+      const imagePaths = parseOptionalStringArrayPayload(payload?.imagePaths) ?? [];
+      const resolvedImagePaths = imagePaths
+        .map((relativePath) => {
+          try {
+            return resolveComposeImagePath(relativePath);
+          } catch {
+            return "";
+          }
+        })
+        .filter((entry) => !!entry);
+
+      const requiredImageCount = template.overlays.photos.length;
+      if (requiredImageCount > 0 && resolvedImagePaths.length !== requiredImageCount) {
+        return {
+          ok: false,
+          message: "Invalid image slot count for selected template.",
+          code: "invalid_payload",
+          status: 422,
+          details: {
+            requiredImageCount,
+            providedImageCount: resolvedImagePaths.length
+          }
+        };
+      }
+
+      const composed = await composeInstagramImage({
+        templateId,
+        userImages: resolvedImagePaths,
+        overlayTexts,
+        outputFormat: "png"
+      });
+
+      const cache = resolveInstagramCachePath(watchPath, contentId);
+      await fs.promises.mkdir(cache.cacheDir, { recursive: true });
+      await fs.promises.writeFile(cache.composedPath, composed.buffer);
+      const thumbnailDataUrl = toThumbnailDataUrlFromBuffer(composed.buffer, 420);
+      if (!thumbnailDataUrl) {
+        return {
+          ok: false,
+          message: "Failed to generate preview thumbnail.",
+          code: "compose_failed",
+          status: 500
+        };
+      }
+
+      return {
+        ok: true,
+        composedPath: cache.composedPath,
+        thumbnailDataUrl,
+        width: composed.width,
+        height: composed.height,
+        sizeBytes: composed.sizeBytes,
+        requestId: clientRequestId || `${Date.now()}`
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to compose instagram image locally.");
+      return {
+        ok: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "compose_failed",
         status: runtimeError.status ?? 500,
         details: runtimeError.details
       };
@@ -1836,6 +1983,7 @@ const registerIpcHandlers = () => {
             return {
               fileId,
               fileName: fileName || path.basename(relativePath),
+              relativePath,
               thumbnailDataUrl
             };
           } catch {
@@ -1890,36 +2038,20 @@ const registerIpcHandlers = () => {
     }
 
     try {
-      const body = await callOrchestratorApi(
-        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/signed-url`,
-        {
-          method: "GET"
-        }
-      );
-      const signedImageUrl = typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "";
-      if (!signedImageUrl) {
+      const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
+      if (!watchPath) {
         return {
           ok: false,
           cancelled: false,
-          message: "signed image url is missing from API response.",
-          code: "invalid_response",
-          status: 502
+          message: "watchPath is not configured.",
+          code: "no_watch_path",
+          status: 400
         };
       }
 
-      const response = await fetch(signedImageUrl);
-      if (!response.ok) {
-        return {
-          ok: false,
-          cancelled: false,
-          message: `Failed to download image. HTTP ${response.status}`,
-          code: "download_failed",
-          status: response.status
-        };
-      }
-
-      const buffer = Buffer.from(await response.arrayBuffer());
-      await fs.promises.writeFile(result.filePath, buffer);
+      const cache = resolveInstagramCachePath(watchPath, sanitizeContentId(contentId));
+      await fs.promises.access(cache.composedPath, fs.constants.R_OK);
+      await fs.promises.copyFile(cache.composedPath, result.filePath);
       return {
         ok: true,
         cancelled: false,

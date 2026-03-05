@@ -1,4 +1,4 @@
-import type { TemplateId } from "../../../media/templates/schema";
+import type { TemplateId } from "@repo/media-engine";
 import {
   defaultInstagramSurveyState,
   type InstagramImageMode,
@@ -13,14 +13,7 @@ const TOPIC_STOP_PHRASES = [
   "instagram post"
 ];
 
-const TEMPLATE_CHOICES: Record<string, TemplateId> = {
-  "1": "center-image-bottom-text",
-  "2": "fullscreen-overlay",
-  "3": "collage-2x2",
-  "4": "split-image-text"
-};
-
-const DEFAULT_TEMPLATE: TemplateId = "center-image-bottom-text";
+const DEFAULT_TEMPLATE: TemplateId = "koica_cover_01";
 
 export type SurveyAdvanceResult = {
   state: InstagramSurveyState;
@@ -61,7 +54,7 @@ export const readSurveyState = (value: unknown): InstagramSurveyState | null => 
  */
 export const startInstagramSurvey = (): SurveyAdvanceResult => ({
   state: defaultInstagramSurveyState(),
-  assistantMessage: '어떤 주제의 인스타 게시물을 만들까요?',
+  assistantMessage: "어떤 주제로 인스타 게시물을 만들까요?",
   ready: false
 });
 
@@ -74,7 +67,7 @@ export const advanceInstagramSurvey = (state: InstagramSurveyState, userMessage:
     if (!topic) {
       return {
         state,
-        assistantMessage: '주제를 한 문장으로 알려주세요. 예: "봄 나들이 행사 홍보"',
+        assistantMessage: "주제를 한 문장으로 입력해주세요. 예: 봄 행사 안내",
         ready: false
       };
     }
@@ -106,10 +99,10 @@ export const advanceInstagramSurvey = (state: InstagramSurveyState, userMessage:
           ...state,
           phase: "complete",
           imageMode,
-          templateId: "text-only-gradient",
+          templateId: DEFAULT_TEMPLATE,
           completed_at: new Date().toISOString()
         },
-        assistantMessage: "좋아요. 텍스트 전용 템플릿으로 생성을 시작할게요.",
+        assistantMessage: "텍스트 중심 모드로 생성을 시작합니다.",
         ready: true
       };
     }
@@ -134,7 +127,7 @@ export const advanceInstagramSurvey = (state: InstagramSurveyState, userMessage:
         templateId,
         completed_at: new Date().toISOString()
       },
-      assistantMessage: "템플릿 선택 완료. 생성을 시작할게요.",
+      assistantMessage: "템플릿 선택 완료. 생성을 시작합니다.",
       ready: true
     };
   }
@@ -151,10 +144,10 @@ export const advanceInstagramSurvey = (state: InstagramSurveyState, userMessage:
  */
 export const buildImageSelectionQuestion = (): string =>
   [
-    "활동 폴더에서 사용할 이미지가 있나요?",
-    "1) 폴더에서 AI가 자동 선택",
+    "사용할 이미지를 어떻게 선택할까요?",
+    "1) AI 자동 선택",
     "2) 직접 이미지 지정",
-    "3) 이미지 없이 텍스트 디자인만"
+    "3) 텍스트 중심(이미지 최소)"
   ].join("\n");
 
 /**
@@ -163,10 +156,7 @@ export const buildImageSelectionQuestion = (): string =>
 export const buildTemplateSelectionQuestion = (): string =>
   [
     "템플릿을 선택해주세요:",
-    "1) 중앙 이미지 + 하단 텍스트",
-    "2) 전면 이미지 + 오버레이 텍스트",
-    "3) 콜라주 (2-4장)",
-    "4) 자유형 (AI 추천)"
+    "1) KOICA 표지 카드"
   ].join("\n");
 
 const parseImageMode = (value: string): InstagramImageMode | null => {
@@ -188,22 +178,13 @@ const parseImageMode = (value: string): InstagramImageMode | null => {
 
 const parseTemplateChoice = (value: string): TemplateId | null => {
   const text = value.trim().toLowerCase();
-  if (TEMPLATE_CHOICES[text]) {
-    return TEMPLATE_CHOICES[text];
+  if (!text) {
+    return null;
   }
-  if (text.includes("중앙")) {
-    return "center-image-bottom-text";
+  if (text === "1" || text.includes("koica") || text.includes("표지")) {
+    return DEFAULT_TEMPLATE;
   }
-  if (text.includes("전면") || text.includes("오버레이")) {
-    return "fullscreen-overlay";
-  }
-  if (text.includes("콜라주")) {
-    return "collage-2x2";
-  }
-  if (text.includes("자유") || text.includes("추천")) {
-    return "split-image-text";
-  }
-  return null;
+  return DEFAULT_TEMPLATE;
 };
 
 const extractTopicFromMessage = (value: string): string => {

@@ -1,8 +1,5 @@
 import { HttpError } from "../../../lib/errors";
-import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { composeInstagramImage } from "../../../media/image-composer";
-import { getTemplate } from "../../../media/templates/registry";
-import type { TemplateId } from "../../../media/templates/schema";
+import { getTemplate, type TemplateId } from "@repo/media-engine";
 import { callWithFallback } from "../../llm-client";
 import { buildInstagramGenerationContext } from "./context";
 import { selectImagesForInstagram } from "./image-selector";
@@ -11,18 +8,16 @@ import {
   insertDraftInstagramContent,
   linkContentToSlot,
   loadCampaignTitle,
-  loadExistingGeneratedResult,
-  updateContentStorageMetadata
+  loadExistingGeneratedResult
 } from "./persistence";
 import { buildInstagramPrompt, parseInstagramDraft } from "./prompt";
 import { resolveInstagramGenerationSlot } from "./slot";
 import type { InstagramGenerationResult, InstagramImageMode } from "./types";
 
-const DEFAULT_TEMPLATE_ID: TemplateId = "center-image-bottom-text";
-const STORAGE_BUCKET = "content-images-private";
+const DEFAULT_TEMPLATE_ID: TemplateId = "koica_cover_01";
 
 /**
- * Generate instagram content (caption + composed image) and persist with rollback guards.
+ * Generate instagram caption/template seed and persist metadata for local composition.
  */
 export const generateAndPersistInstagram = async (params: {
   orgId: string;
@@ -76,7 +71,8 @@ export const generateAndPersistInstagram = async (params: {
 
   const parsedDraft = parseInstagramDraft(llm.text);
   const template = getTemplate(templateId);
-  const requiredCount = template?.layers.userImageAreas?.length ?? 1;
+  const requiredCount = template?.overlays.photos.length ?? 1;
+  const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayMain, parsedDraft.overlaySub);
 
   const selected = await selectImagesForInstagram({
     orgId: params.orgId,
@@ -88,14 +84,6 @@ export const generateAndPersistInstagram = async (params: {
   });
 
   const outputFormat: "png" | "jpg" = "png";
-  const composed = await composeInstagramImage({
-    templateId,
-    userImages: selected.selectedImages.map((entry) => entry.filePath),
-    overlayMainText: parsedDraft.overlayMain,
-    overlaySubText: parsedDraft.overlaySub,
-    outputFormat
-  });
-
   const campaignTitle = await loadCampaignTitle({
     orgId: params.orgId,
     campaignId: target.slot.campaign_id
@@ -112,9 +100,10 @@ export const generateAndPersistInstagram = async (params: {
     hashtags: parsedDraft.hashtags,
     overlayMain: parsedDraft.overlayMain,
     overlaySub: parsedDraft.overlaySub,
+    overlayTexts,
     templateId,
     selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
-    selectedImagePaths: selected.selectedImages.map((entry) => entry.filePath),
+    selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
     model: llm.model,
     promptTokens: llm.promptTokens,
     completionTokens: llm.completionTokens,
@@ -122,40 +111,6 @@ export const generateAndPersistInstagram = async (params: {
     outputFormat,
     campaignTitle
   });
-
-  const extension = "png";
-  const contentType = "image/png";
-  const storagePath = `${params.orgId}/${inserted.contentId}/composed.${extension}`;
-
-  const uploaded = await supabaseAdmin.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, composed.buffer, {
-      upsert: false,
-      contentType
-    });
-
-  if (uploaded.error) {
-    await deleteContentDraft({
-      orgId: params.orgId,
-      contentId: inserted.contentId
-    });
-    throw new HttpError(500, "storage_upload_failed", `Failed to upload instagram image: ${uploaded.error.message}`);
-  }
-
-  try {
-    await updateContentStorageMetadata({
-      orgId: params.orgId,
-      contentId: inserted.contentId,
-      storageBucket: STORAGE_BUCKET,
-      storagePath,
-      contentType,
-      sizeBytes: composed.sizeBytes
-    });
-  } catch (error) {
-    await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
-    await deleteContentDraft({ orgId: params.orgId, contentId: inserted.contentId });
-    throw error;
-  }
 
   try {
     await linkContentToSlot({
@@ -166,13 +121,9 @@ export const generateAndPersistInstagram = async (params: {
       idempotencyKey: params.idempotencyKey
     });
   } catch (error) {
-    await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
     await deleteContentDraft({ orgId: params.orgId, contentId: inserted.contentId });
     throw error;
   }
-
-  const signed = await supabaseAdmin.storage.from(STORAGE_BUCKET).createSignedUrl(storagePath, 30 * 60);
-  const previewUrl = signed.data?.signedUrl ?? null;
 
   return {
     contentId: inserted.contentId,
@@ -181,24 +132,55 @@ export const generateAndPersistInstagram = async (params: {
     topic: effectiveTopic,
     caption,
     model: llm.model,
-    outputFormat,
-    storagePath,
-    previewUrl,
     templateId,
-    selectedImagePaths: selected.selectedImages.map((entry) => entry.filePath),
+    overlayMain: parsedDraft.overlayMain,
+    overlaySub: parsedDraft.overlaySub,
+    overlayTexts,
+    imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
+    selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+    requiresLocalCompose: true,
     localSaveSuggestion: inserted.localSaveSuggestion,
     reused: false
   };
 };
 
 const normalizeTemplateId = (templateId: string | null): TemplateId =>
-  templateId === "center-image-bottom-text" ||
-  templateId === "fullscreen-overlay" ||
-  templateId === "collage-2x2" ||
-  templateId === "text-only-gradient" ||
-  templateId === "split-image-text"
-    ? templateId
-    : DEFAULT_TEMPLATE_ID;
+  templateId && getTemplate(templateId) ? templateId : DEFAULT_TEMPLATE_ID;
+
+const buildOverlayTextMap = (
+  templateId: TemplateId,
+  overlayMain: string,
+  overlaySub: string
+): Record<string, string> => {
+  const template = getTemplate(templateId);
+  const textSlots = template?.overlays.texts ?? [];
+  const map: Record<string, string> = {};
+  if (textSlots.length === 0) {
+    return map;
+  }
+
+  const titleSlot = textSlots.find((slot) => /title/i.test(slot.id)) ?? textSlots[0];
+  if (titleSlot) {
+    map[titleSlot.id] = overlayMain || titleSlot.example_text || "";
+  }
+
+  const subSlot = textSlots.find((slot) => /author|sub/i.test(slot.id)) ?? textSlots.find((slot) => slot.id !== titleSlot.id);
+  if (subSlot) {
+    map[subSlot.id] = overlaySub || subSlot.example_text || "";
+  }
+
+  for (const slot of textSlots) {
+    if (!(slot.id in map)) {
+      map[slot.id] = slot.example_text || "";
+    }
+  }
+
+  if (template?.overlays.badge?.id) {
+    map[template.overlays.badge.id] = template.overlays.badge.example_text ?? "";
+  }
+
+  return map;
+};
 
 const composeCaption = (caption: string, hashtags: string[]): string => {
   const trimmed = caption.trim();
