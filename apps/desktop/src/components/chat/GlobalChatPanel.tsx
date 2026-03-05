@@ -23,21 +23,6 @@ const readStoredCollapsed = (): boolean => window.localStorage.getItem(COLLAPSED
 const clampWidth = (value: number): number =>
   Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, Math.round(value)));
 
-const toSingleLine = (value: string): string => value.replace(/\s+/g, " ").trim();
-
-const buildSessionPreview = (session: { current_step?: string; state?: Record<string, unknown> }): string => {
-  const state = session.state ?? {};
-  const userMessage = typeof state.user_message === "string" ? toSingleLine(state.user_message) : "";
-  const contentDraft = typeof state.content_draft === "string" ? toSingleLine(state.content_draft) : "";
-  if (userMessage) {
-    return userMessage.slice(0, 80);
-  }
-  if (contentDraft) {
-    return contentDraft.slice(0, 80);
-  }
-  return `Step: ${session.current_step ?? "session"}`;
-};
-
 export const GlobalChatPanel = () => {
   const { activePage } = useNavigation();
   const {
@@ -69,8 +54,8 @@ export const GlobalChatPanel = () => {
 
   const [isCollapsed, setIsCollapsed] = useState(readStoredCollapsed);
   const [panelWidth, setPanelWidth] = useState(readStoredWidth);
-  const [showRecent, setShowRecent] = useState(true);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
 
   const isUiBusy = isActionPending || isSessionMutating;
 
@@ -125,6 +110,14 @@ export const GlobalChatPanel = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const node = timelineRef.current;
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [selectedSessionId, timelineMessages.length]);
+
   if (isCollapsed) {
     return (
       <aside className="ui-global-chat-collapsed">
@@ -152,7 +145,7 @@ export const GlobalChatPanel = () => {
 
       <div className="ui-global-chat-inner">
         <header className="ui-global-chat-head">
-          <strong>Global Chat</strong>
+          <strong>또대리</strong>
           <div className="button-row">
             <button type="button" onClick={() => void createSessionForCurrentWorkspace()} disabled={isUiBusy}>
               + Session
@@ -230,7 +223,7 @@ export const GlobalChatPanel = () => {
           </div>
         ) : null}
 
-        <div className="ui-global-chat-timeline">
+        <div className="ui-global-chat-timeline" ref={timelineRef}>
           {timelineMessages.length === 0 ? <p className="empty">No chat messages yet.</p> : null}
           {timelineMessages.map((message) => (
             <div key={message.id} className={`chat-item chat-${message.role}`}>
@@ -260,31 +253,6 @@ export const GlobalChatPanel = () => {
           >
             Send
           </button>
-        </div>
-
-        <div className="ui-global-chat-recent-block">
-          <button type="button" onClick={() => setShowRecent((previous) => !previous)}>
-            {showRecent ? "Hide" : "Show"} recent sessions
-          </button>
-          {showRecent ? (
-            <div className="ui-session-rail-list">
-              {recentSelectableSessions.map((session) => {
-                const isSelected = session.id === selectedSessionId;
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`ui-session-rail-item ${isSelected ? "is-active" : ""}`}
-                    onClick={() => selectSession(session)}
-                    disabled={isUiBusy || isSelected}
-                  >
-                    <span className="ui-session-rail-item-title">{session.title?.trim() || session.id.slice(0, 8)}</span>
-                    <span className="ui-session-rail-item-preview">{buildSessionPreview(session as { current_step?: string; state?: Record<string, unknown> })}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
         </div>
 
         {chatConfigMessage ? <p className="notice">{chatConfigMessage}</p> : null}

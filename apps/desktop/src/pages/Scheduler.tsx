@@ -205,8 +205,6 @@ export const SchedulerPage = () => {
         <div className="ui-scheduler-head">
           <div>
             <p className="eyebrow">Scheduler</p>
-            <h1>Scheduler</h1>
-            <p className="description">Daily management board for scheduled content and approvals.</p>
           </div>
 
           <SchedulerFilters

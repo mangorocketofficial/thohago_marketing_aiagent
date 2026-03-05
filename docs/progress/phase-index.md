@@ -55,3 +55,4 @@
 | 6-2 | Scheduler Board UX Redesign + S-5A Campaign Finalization Foundation | Done | 2026-03-05 | [phase-6-2-completion.md](./phase-6-2-completion.md) |
 | 6-3a | Scheduler Data Integration Core | Done | 2026-03-05 | [phase-6-3a-completion.md](./phase-6-3a-completion.md) |
 | 6-4a | Scheduler Scale UX + Window-Aware Reschedule Core | Done | 2026-03-05 | [phase-6-4a-completion.md](./phase-6-4a-completion.md) |
+| 6-4a Patch | Scheduler/Chat UX Polish + Session Resume Defaults | Done | 2026-03-05 | [phase-6-4a-ui-polish-completion.md](./phase-6-4a-ui-polish-completion.md) |

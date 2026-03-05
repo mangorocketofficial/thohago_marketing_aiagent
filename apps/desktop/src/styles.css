@@ -616,6 +616,7 @@ th {
 .ui-main-layout {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   min-height: 100vh;
   background: radial-gradient(circle at top left, #dcecff 0%, #eff2f7 45%, #e4e8ef 100%);
 }
@@ -659,7 +660,7 @@ th {
 .ui-topbar-item {
   border: 1px solid #d0d8e4;
   background: #fff;
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 7px 12px;
   font-size: 13px;
 }
@@ -672,6 +673,7 @@ th {
 
 .ui-main-body {
   display: flex;
+  height: 100%;
   min-height: 0;
   flex: 1;
   position: relative;
@@ -782,6 +784,7 @@ th {
 .ui-main-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -790,6 +793,9 @@ th {
   border-left: 1px solid var(--ui-border-color);
   background: var(--ui-bg-panel);
   display: flex;
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.4);
 }
@@ -808,11 +814,13 @@ th {
 
 .ui-global-chat-inner {
   flex: 1;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   padding: 10px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-content: start;
   overflow: hidden;
 }
 
@@ -857,16 +865,21 @@ th {
   border-radius: 10px;
   background: #fff;
   padding: 10px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 8px;
-  overflow: auto;
-  min-height: 240px;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 
 .ui-global-chat-timeline .chat-item {
   width: fit-content;
   max-width: 88%;
   border-radius: 12px;
+  align-self: flex-start;
 }
 
 .ui-global-chat-timeline .chat-user {
@@ -911,26 +924,28 @@ th {
 
 .ui-scheduler-head {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
 .ui-scheduler-controls {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  align-items: start;
+  justify-items: start;
+  width: 620px;
+  max-width: 100%;
 }
 
 .ui-scheduler-controls-row {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .ui-scheduler-controls select {
@@ -941,10 +956,49 @@ th {
   background: #fff;
 }
 
+.ui-scheduler-controls-row-nav {
+  display: grid;
+  grid-template-columns: 88px repeat(3, 74px);
+  justify-content: start;
+}
+
+.ui-scheduler-nav-button {
+  width: 74px;
+}
+
+.ui-scheduler-controls-row-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 138px 142px;
+  justify-content: start;
+}
+
+.ui-scheduler-select-view {
+  width: 88px;
+}
+
+.ui-scheduler-select-campaign,
+.ui-scheduler-select-channel,
+.ui-scheduler-select-status {
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-scheduler-controls-row-meta {
+  min-height: 24px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
+
 .ui-scheduler-window-label {
   margin: 0;
   font-size: 12px;
   color: #334155;
+  flex: 0 0 auto;
+  min-width: auto;
+  text-align: left;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .ui-scheduler-loading {
@@ -1884,6 +1938,45 @@ th {
   }
 
   .ui-scheduler-head {
-    align-items: stretch;
+    align-items: flex-start;
+  }
+
+  .ui-scheduler-controls {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .ui-scheduler-controls-row-nav {
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ui-scheduler-controls-row-filters {
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ui-scheduler-nav-button,
+  .ui-scheduler-select-view {
+    width: auto;
+  }
+
+  .ui-scheduler-select-campaign,
+  .ui-scheduler-select-channel,
+  .ui-scheduler-select-status {
+    width: auto;
+  }
+
+  .ui-scheduler-controls-row-meta {
+    flex-wrap: wrap;
+  }
+
+  .ui-scheduler-window-label {
+    flex: 0 1 auto;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 }

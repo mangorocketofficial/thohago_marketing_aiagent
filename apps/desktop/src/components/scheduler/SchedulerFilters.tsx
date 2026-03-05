@@ -54,8 +54,9 @@ export const SchedulerFilters = ({
   onFiltersChange
 }: SchedulerFiltersProps) => (
   <div className="ui-scheduler-controls">
-    <div className="ui-scheduler-controls-row">
+    <div className="ui-scheduler-controls-row ui-scheduler-controls-row-nav">
       <select
+        className="ui-scheduler-select-view"
         aria-label="View mode"
         value={viewMode}
         onChange={(event) => onViewModeChange(event.target.value as SchedulerViewMode)}
@@ -65,19 +66,20 @@ export const SchedulerFilters = ({
         <option value="list">List</option>
       </select>
 
-      <button type="button" onClick={() => onDateShift("prev")} disabled={isLoading}>
+      <button className="ui-scheduler-nav-button" type="button" onClick={() => onDateShift("prev")} disabled={isLoading}>
         Prev
       </button>
-      <button type="button" onClick={onJumpToToday} disabled={isLoading}>
+      <button className="ui-scheduler-nav-button" type="button" onClick={onJumpToToday} disabled={isLoading}>
         Today
       </button>
-      <button type="button" onClick={() => onDateShift("next")} disabled={isLoading}>
+      <button className="ui-scheduler-nav-button" type="button" onClick={() => onDateShift("next")} disabled={isLoading}>
         Next
       </button>
     </div>
 
-    <div className="ui-scheduler-controls-row">
+    <div className="ui-scheduler-controls-row ui-scheduler-controls-row-filters">
       <select
+        className="ui-scheduler-select-campaign"
         aria-label="Campaign filter"
         value={filters.campaignId}
         onChange={(event) =>
@@ -97,6 +99,7 @@ export const SchedulerFilters = ({
       </select>
 
       <select
+        className="ui-scheduler-select-channel"
         aria-label="Channel filter"
         value={filters.channel}
         onChange={(event) =>
@@ -115,6 +118,7 @@ export const SchedulerFilters = ({
       </select>
 
       <select
+        className="ui-scheduler-select-status"
         aria-label="Status filter"
         value={filters.status}
         onChange={(event) =>
@@ -132,7 +136,7 @@ export const SchedulerFilters = ({
       </select>
     </div>
 
-    <div className="ui-scheduler-controls-row">
+    <div className="ui-scheduler-controls-row ui-scheduler-controls-row-meta">
       <p className="ui-scheduler-window-label">{currentDateKey}</p>
       <span className={`ui-connection-pill is-${connectionState}`}>{CONNECTION_LABEL[connectionState]}</span>
       {isLoading ? <span className="ui-scheduler-loading">Loading...</span> : null}

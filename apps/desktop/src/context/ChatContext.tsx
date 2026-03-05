@@ -241,7 +241,7 @@ export const ChatProvider = ({
         .from("chat_messages")
         .select("*")
         .eq("org_id", chatConfig.orgId)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(200);
 
       if (boundTimelineScope === "session") {
@@ -284,7 +284,7 @@ export const ChatProvider = ({
         .select("*")
         .eq("org_id", chatConfig.orgId)
         .is("session_id", null)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(200);
 
       if (error) {

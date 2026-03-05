@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@repo/types";
 import { useChatContext } from "../../context/ChatContext";
@@ -11,6 +11,7 @@ type WorkspaceChatPanelProps = {
 export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: WorkspaceChatPanelProps) => {
   const { t } = useTranslation();
   const { navigate } = useNavigation();
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const {
     messages,
     chatInput,
@@ -26,6 +27,14 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
     () => messages.filter((message) => message.message_type !== "action_card"),
     [messages]
   );
+
+  useEffect(() => {
+    const node = timelineRef.current;
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [selectedSessionId, timelineMessages.length]);
 
   const readWorkflowNotification = (
     message: ChatMessage
@@ -58,7 +67,7 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
 
       {chatConfigMessage ? <p className="notice">{chatConfigMessage}</p> : null}
 
-      <div className="chat-list">
+      <div className="chat-list" ref={timelineRef}>
         {timelineMessages.length === 0 ? (
           <p className="empty">No chat messages yet.</p>
         ) : (

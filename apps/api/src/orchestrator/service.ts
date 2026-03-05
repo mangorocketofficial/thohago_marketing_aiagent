@@ -29,6 +29,7 @@ import {
   normalizeWorkspaceType,
   parseState
 } from "./service-helpers";
+import { buildSessionTitleFromFirstUserMessage } from "./session-title";
 import { runContentApprovalSideEffects } from "./side-effects";
 import { applyContentApprovedStep, applyContentRejectStep } from "./steps/content";
 import { syncSlotStatusFromWorkflow } from "./scheduler-slot-transition";
@@ -434,12 +435,14 @@ const updateSession = async (
     state?: SessionState;
     current_step?: OrchestratorStep;
     status?: SessionStatus;
+    title?: string;
   }
 ): Promise<void> => {
   const updatePayload: Record<string, unknown> = {};
   if (patch.state) updatePayload.state = patch.state;
   if (patch.current_step) updatePayload.current_step = patch.current_step;
   if (patch.status) updatePayload.status = patch.status;
+  if (patch.title) updatePayload.title = patch.title;
 
   const { error } = await supabaseAdmin.from("orchestrator_sessions").update(updatePayload).eq("id", sessionId);
   if (error) {
@@ -764,6 +767,25 @@ const buildContentStepDeps = (): ContentStepDeps => ({
   runContentApprovalSideEffects
 });
 
+const ensureSessionTitleFromFirstUserMessage = async (params: {
+  session: OrchestratorSessionRow;
+  userMessage: string;
+}): Promise<void> => {
+  const currentTitle = asString(params.session.title, "").trim();
+  if (currentTitle) {
+    return;
+  }
+
+  const nextTitle = buildSessionTitleFromFirstUserMessage(params.userMessage);
+  if (!nextTitle) {
+    return;
+  }
+
+  await updateSession(params.session.id, {
+    title: nextTitle
+  });
+};
+
 const handleGeneralUserMessage = async (params: {
   session: OrchestratorSessionRow;
   state: SessionState;
@@ -774,6 +796,11 @@ const handleGeneralUserMessage = async (params: {
   if (!content) {
     throw new HttpError(400, "invalid_payload", "payload.content is required for user_message.");
   }
+
+  await ensureSessionTitleFromFirstUserMessage({
+    session: params.session,
+    userMessage: content
+  });
 
   await insertChatMessage({
     orgId: params.session.org_id,

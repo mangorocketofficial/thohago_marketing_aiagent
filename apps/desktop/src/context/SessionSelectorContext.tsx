@@ -458,8 +458,14 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       const persisted = readPersistedSelectedSessionByOrg();
       const persistedSessionId = persisted[orgId] ?? "";
       const persistedSession = persistedSessionId ? recent.find((entry) => entry.id === persistedSessionId) ?? null : null;
-      if (isOpenSession(persistedSession)) {
+      if (persistedSession) {
         commitSelectedSession(persistedSession);
+        return;
+      }
+
+      const mostRecentSession = recent[0] ?? null;
+      if (mostRecentSession) {
+        commitSelectedSession(mostRecentSession);
         return;
       }
 
@@ -496,12 +502,6 @@ export const SessionSelectorProvider = ({ children, runtime, chatConfig, activeS
       if (isOpenSession(recommended)) {
         commitSelectedSession(recommended);
         setRecentSessions((previous) => upsertSession(previous, recommended, RECENT_LIMIT));
-        return;
-      }
-
-      const fallbackSession = recent.find((entry) => isOpenSessionStatus(entry.status)) ?? null;
-      if (fallbackSession) {
-        commitSelectedSession(fallbackSession);
         return;
       }
 

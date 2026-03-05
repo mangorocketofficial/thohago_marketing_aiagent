@@ -21,3 +21,14 @@ Ship 6-4a as scheduler-scale core first (month overflow/day drawer/window-aware 
 
 Reason  
 Separating board-scale hardening from editor expansion kept API/IPC/realtime/UI changes testable in smaller slices and reduced cross-surface regression risk.
+
+## D-003
+
+Phase  
+6-4a Patch
+
+Decision  
+Ship session continuity defaults and deterministic session titles together with scheduler/chat UI polish.
+
+Reason  
+Users needed immediate relaunch continuity and readable multi-session context; coupling default-session restore, fixed title generation, and control alignment removed key navigation friction in one release slice.
