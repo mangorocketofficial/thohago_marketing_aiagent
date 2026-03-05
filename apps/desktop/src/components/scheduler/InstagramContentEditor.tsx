@@ -50,6 +50,7 @@ export const InstagramContentEditor = ({
     templates,
     currentTemplate,
     requiredImageCount,
+    maxImageCount,
     imageUrl,
     isRecomposing,
     pickerImages,
@@ -169,7 +170,7 @@ export const InstagramContentEditor = ({
         imageUrl={imageUrl}
         width={currentTemplate.size.width}
         height={currentTemplate.size.height}
-        textSlots={currentTemplate.overlays.texts.map((slot) => ({
+        textSlots={currentTemplate.texts.map((slot) => ({
           id: slot.id,
           label: slot.label,
           x: slot.x,
@@ -198,6 +199,7 @@ export const InstagramContentEditor = ({
         currentImageNames={imageNames}
         selectedImageCount={selectedImageCount}
         requiredImageCount={requiredImageCount}
+        maxImageCount={maxImageCount}
         availableTemplates={templateOptions.map((template) => ({
           id: template.id,
           nameKo: template.nameKo,
@@ -272,9 +274,9 @@ export const InstagramContentEditor = ({
             nextIds[target] = fileId;
             nextPaths[target] = pickedPath;
             nextNames[target] = pickedName;
-            const boundedIds = requiredImageCount > 0 ? nextIds.slice(0, requiredImageCount) : nextIds;
-            const boundedPaths = requiredImageCount > 0 ? nextPaths.slice(0, requiredImageCount) : nextPaths;
-            const boundedNames = requiredImageCount > 0 ? nextNames.slice(0, requiredImageCount) : nextNames;
+            const boundedIds = maxImageCount > 0 ? nextIds.slice(0, maxImageCount) : nextIds;
+            const boundedPaths = maxImageCount > 0 ? nextPaths.slice(0, maxImageCount) : nextPaths;
+            const boundedNames = maxImageCount > 0 ? nextNames.slice(0, maxImageCount) : nextNames;
             setImageFileIds(boundedIds);
             setImagePaths(boundedPaths);
             setImageNames(boundedNames);

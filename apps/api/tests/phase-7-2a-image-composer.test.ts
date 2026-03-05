@@ -1,18 +1,24 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { describe, it } from "node:test";
 import sharp from "sharp";
 import { composeInstagramImage } from "@repo/media-engine";
+
+const fixtureImagePath = fileURLToPath(
+  new URL("../../../assets/template1/composite_test_01.png", import.meta.url)
+);
 
 describe("Phase 7-2a image composer", () => {
   it("composes 1080x1080 png with koica template and id-based text map", async () => {
     const result = await composeInstagramImage({
       templateId: "koica_cover_01",
-      userImages: [],
+      userImages: [path.resolve(fixtureImagePath)],
       overlayTexts: {
-        contest_info: "Contest 안내",
-        title: "나의 한 페이지",
-        author: "홍길동",
-        award_badge: "우수상"
+        contest_info: "Contest intro",
+        title: "One page of life",
+        author: "Hong",
+        badge_text: "Award"
       },
       outputFormat: "png"
     });

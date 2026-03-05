@@ -535,11 +535,16 @@ sessionsRouter.get("/orgs/:orgId/templates/instagram", async (req, res) => {
     const templates = getAllTemplates().map((template) => ({
       id: template.template_id,
       nameKo: template.template_name,
-      description: template.description,
-      thumbnail: `thumbnails/${template.template_id}.png`,
+      description:
+        template.meta && typeof template.meta.description === "string" ? template.meta.description : "",
+      thumbnail:
+        template.meta && typeof template.meta.thumbnail === "string"
+          ? template.meta.thumbnail
+          : `thumbnails/${template.template_id}.png`,
       size: template.size,
-      overlays: template.overlays,
-      header: template.header ?? null
+      photos: template.photos,
+      texts: template.texts,
+      meta: template.meta ?? null
     }));
     res.json({
       ok: true,

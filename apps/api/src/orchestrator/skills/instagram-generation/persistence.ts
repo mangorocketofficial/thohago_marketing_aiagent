@@ -107,8 +107,6 @@ export const loadExistingGeneratedResult = async (params: {
     ? metadata.image_file_ids.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : [];
   const overlayTexts = asStringMap(metadata.overlay_texts);
-  const overlayMain = asString(metadata.overlay_main, "");
-  const overlaySub = asString(metadata.overlay_sub, "");
 
   return {
     contentId: asString(row.id, ""),
@@ -118,15 +116,7 @@ export const loadExistingGeneratedResult = async (params: {
     caption: asString(row.body, ""),
     model: asString(metadata.generation_model, "claude") === "gpt-4o-mini" ? "gpt-4o-mini" : "claude",
     templateId: asString(metadata.template_id, "koica_cover_01"),
-    overlayMain,
-    overlaySub,
-    overlayTexts:
-      Object.keys(overlayTexts).length > 0
-        ? overlayTexts
-        : {
-            ...(overlayMain ? { title: overlayMain } : {}),
-            ...(overlaySub ? { author: overlaySub } : {})
-          },
+    overlayTexts,
     imageFileIds,
     selectedImagePaths: Array.isArray(metadata.image_paths)
       ? metadata.image_paths.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
@@ -151,8 +141,6 @@ export const insertDraftInstagramContent = async (params: {
   topic: string;
   caption: string;
   hashtags: string[];
-  overlayMain: string;
-  overlaySub: string;
   overlayTexts: Record<string, string>;
   templateId: string;
   selectedImageFileIds: string[];
@@ -197,8 +185,6 @@ export const insertDraftInstagramContent = async (params: {
         campaign_id: params.slot.campaign_id,
         hashtags: params.hashtags,
         template_id: params.templateId,
-        overlay_main: params.overlayMain,
-        overlay_sub: params.overlaySub,
         overlay_texts: params.overlayTexts,
         image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,

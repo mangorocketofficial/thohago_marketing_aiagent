@@ -1,4 +1,4 @@
-import { truncateToTokenBudget } from "@repo/rag";
+﻿import { truncateToTokenBudget } from "@repo/rag";
 import type { InstagramDraft } from "./types";
 
 export type InstagramCaptionContext = {
@@ -9,6 +9,7 @@ export type InstagramCaptionContext = {
   topic: string;
   channel: "instagram";
   templateId: string;
+  textSlotIds: string[];
 };
 
 const REFERENCE_BUDGET = 2200;
@@ -28,6 +29,9 @@ export const buildInstagramPrompt = (context: InstagramCaptionContext): string =
       .join("\n\n"),
     REFERENCE_BUDGET
   );
+
+  const overlayGuide = buildOverlayGuide(context.textSlotIds);
+  const overlayExample = buildOverlayExample(context.textSlotIds);
 
   return [
     "[ROLE]",
@@ -52,8 +56,10 @@ export const buildInstagramPrompt = (context: InstagramCaptionContext): string =
     "- Use emoji naturally (2-4 max).",
     "",
     "[OVERLAY_TEXT]",
-    "- overlay_main: one line, max 15 chars",
-    "- overlay_sub: one line, max 25 chars",
+    "- Return overlay_texts as an object.",
+    "- Each value must be one line and max 25 chars.",
+    "- Keys must exactly match the slot IDs below.",
+    overlayGuide,
     "",
     "[REFERENCE_MATERIALS]",
     references || "(No additional references)",
@@ -62,10 +68,9 @@ export const buildInstagramPrompt = (context: InstagramCaptionContext): string =
     "Return strict JSON only:",
     "{",
     '  "caption": "...",',
-    '  "hashtags": ["태그1", "태그2"],',
-    '  "overlay_main": "...",',
-    '  "overlay_sub": "...",',
-    '  "suggested_image_keywords": ["키워드1", "키워드2"]',
+    '  "hashtags": ["#tag1", "#tag2"],',
+    `  "overlay_texts": ${overlayExample},`,
+    '  "suggested_image_keywords": ["keyword1", "keyword2"]',
     "}"
   ].join("\n");
 };
@@ -77,16 +82,43 @@ export const parseInstagramDraft = (text: string): InstagramDraft => {
   const parsed = tryParseJsonObject(text);
   const caption = readString(parsed?.caption).trim();
   const hashtags = normalizeHashtags(parsed?.hashtags, caption);
-  const overlayMain = clampText(readString(parsed?.overlay_main).trim(), 15);
-  const overlaySub = clampText(readString(parsed?.overlay_sub).trim(), 25);
   const suggestedImageKeywords = normalizeStringArray(parsed?.suggested_image_keywords).slice(0, 6);
+
+  const overlayTexts = normalizeOverlayTexts(parsed);
 
   return {
     caption: caption || text.trim(),
     hashtags,
-    overlayMain: overlayMain || "지금 확인하세요",
-    overlaySub: overlaySub || "함께 참여해보세요",
+    overlayTexts,
     suggestedImageKeywords
+  };
+};
+
+const buildOverlayGuide = (slotIds: string[]): string => {
+  if (slotIds.length === 0) {
+    return "- No text slots provided. Return an empty object.";
+  }
+  return `- Slot IDs: ${slotIds.join(", ")}`;
+};
+
+const buildOverlayExample = (slotIds: string[]): string => {
+  if (slotIds.length === 0) {
+    return "{}";
+  }
+
+  const entries = slotIds.map((slotId) => `"${escapeJson(slotId)}": "..."`);
+  return `{ ${entries.join(", ")} }`;
+};
+
+const normalizeOverlayTexts = (parsed: Record<string, unknown> | null): Record<string, string> => {
+  const fromMap = normalizeStringMap(parsed?.overlay_texts);
+  if (Object.keys(fromMap).length > 0) {
+    return fromMap;
+  }
+
+  return {
+    title: "지금 확인하세요",
+    author: "함께 참여해보세요"
   };
 };
 
@@ -125,6 +157,27 @@ const normalizeStringArray = (value: unknown): string[] =>
         .filter(Boolean)
     : [];
 
+const normalizeStringMap = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const slotId = key.trim();
+    if (!slotId) {
+      continue;
+    }
+    const text = clampText(readString(entry).trim(), 25);
+    if (!text) {
+      continue;
+    }
+    result[slotId] = text;
+  }
+
+  return result;
+};
+
 const normalizeHashtags = (value: unknown, caption: string): string[] => {
   const fromArray = normalizeStringArray(value).map((entry) => (entry.startsWith("#") ? entry : `#${entry}`));
   if (fromArray.length) {
@@ -141,3 +194,5 @@ const clampText = (value: string, maxLength: number): string => {
   }
   return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd();
 };
+
+const escapeJson = (value: string): string => value.replace(/\\/g, "\\\\").replace(/\"/g, '\\\"');

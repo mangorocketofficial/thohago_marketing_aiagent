@@ -30,8 +30,7 @@ export type InstagramSurveyState = {
 export type InstagramDraft = {
   caption: string;
   hashtags: string[];
-  overlayMain: string;
-  overlaySub: string;
+  overlayTexts: Record<string, string>;
   suggestedImageKeywords: string[];
 };
 
@@ -43,8 +42,6 @@ export type InstagramGenerationResult = {
   caption: string;
   model: "claude" | "gpt-4o-mini";
   templateId: string;
-  overlayMain: string;
-  overlaySub: string;
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
   selectedImagePaths: string[];

@@ -231,12 +231,16 @@ export const resolveEffectiveImageSelection = async (params: {
 export const validateImageSlotCount = (params: {
   requiredImageCount: number;
   providedImageCount: number;
+  maxImageCount?: number;
 }): void => {
-  if (params.requiredImageCount <= 0 || params.requiredImageCount === params.providedImageCount) {
+  const minCount = Math.max(0, params.requiredImageCount);
+  const maxCount = Math.max(minCount, params.maxImageCount ?? minCount);
+  if (params.providedImageCount >= minCount && params.providedImageCount <= maxCount) {
     return;
   }
   throw new HttpError(422, "invalid_payload", "Invalid image slot count for selected template.", {
-    requiredImageCount: params.requiredImageCount,
+    minImageCount: minCount,
+    maxImageCount: maxCount,
     providedImageCount: params.providedImageCount
   });
 };

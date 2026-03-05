@@ -1,7 +1,7 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TemplateBadge, TemplateTextSlot } from "./templates/schema";
+import type { TemplateTextSlot } from "./templates/schema";
 
 type TextOverlaySvg = {
   slotId: string;
@@ -14,10 +14,6 @@ type TextOverlaySvg = {
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
-const FONT_STYLE_MAP: Record<string, string> = {
-  handwriting: "InstagramOverlayHandwritingFont, InstagramOverlayFont, Noto Sans CJK KR, sans-serif"
-};
-
 /**
  * Build per-slot SVG buffers from template text slots and id-based content map.
  */
@@ -26,7 +22,7 @@ export const buildTextOverlaySvg = (
   textById: Record<string, string>
 ): TextOverlaySvg[] =>
   slots.map((slot) => {
-    const sourceText = `${textById[slot.id] ?? slot.example_text ?? ""}`.trim() || " ";
+    const sourceText = `${textById[slot.id] ?? ""}`.trim() || " ";
     const safeFontSize = Math.max(12, Math.floor(slot.font_size));
     const safeWidth = Math.max(64, Math.floor(slot.width));
     const safeHeight = Math.max(24, Math.floor(slot.height));
@@ -36,7 +32,6 @@ export const buildTextOverlaySvg = (
     const textAnchor = alignToAnchor(slot.align);
     const x = anchorX(slot.align, safeWidth);
     const fontFaceCss = buildFontFaceCss();
-    const fontFamily = mapFontFamily(slot.font_style);
     const fillColor = slot.font_color || "#222222";
     const tspans = lines
       .map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : lineHeight}">${escapeXml(line)}</tspan>`)
@@ -49,7 +44,7 @@ export const buildTextOverlaySvg = (
       fontFaceCss,
       "</style>",
       "</defs>",
-      `<text x="${x}" y="${safeFontSize}" font-family="${fontFamily}" font-size="${safeFontSize}" font-weight="${slot.font_weight === "bold" ? 700 : 400}" fill="${fillColor}" text-anchor="${textAnchor}">`,
+      `<text x="${x}" y="${safeFontSize}" font-family="InstagramOverlayFont, Noto Sans CJK KR, sans-serif" font-size="${safeFontSize}" font-weight="${slot.font_weight === "bold" ? 700 : 400}" fill="${fillColor}" text-anchor="${textAnchor}">`,
       tspans,
       "</text>",
       "</svg>"
@@ -64,48 +59,6 @@ export const buildTextOverlaySvg = (
       buffer: Buffer.from(svg)
     };
   });
-
-/**
- * Build one SVG buffer for badge text overlay.
- */
-export const buildBadgeSvg = (badge: TemplateBadge, text: string): Buffer => {
-  const safeText = text.trim() || badge.example_text || " ";
-  const safeWidth = Math.max(20, Math.floor(badge.width));
-  const safeHeight = Math.max(20, Math.floor(badge.height));
-  const safeFontSize = Math.max(10, Math.floor(badge.font_size));
-  const textAnchor = "middle";
-  const x = Math.floor(safeWidth / 2);
-  const y = Math.floor(safeHeight / 2 + safeFontSize * 0.35);
-  const fontFaceCss = buildFontFaceCss();
-  const fillColor = badge.font_color || "#FFFFFF";
-  const shape =
-    badge.type === "circle"
-      ? `<circle cx="${Math.floor(safeWidth / 2)}" cy="${Math.floor(safeHeight / 2)}" r="${Math.floor(Math.min(safeWidth, safeHeight) / 2)}" fill="white" fill-opacity="0"/>`
-      : `<rect x="0" y="0" width="${safeWidth}" height="${safeHeight}" fill="white" fill-opacity="0"/>`;
-
-  const svg = [
-    `<svg width="${safeWidth}" height="${safeHeight}" xmlns="http://www.w3.org/2000/svg">`,
-    "<defs>",
-    "<style>",
-    fontFaceCss,
-    "</style>",
-    badge.type === "circle"
-      ? `<clipPath id="badge-clip"><circle cx="${Math.floor(safeWidth / 2)}" cy="${Math.floor(safeHeight / 2)}" r="${Math.floor(
-          Math.min(safeWidth, safeHeight) / 2
-        )}"/></clipPath>`
-      : `<clipPath id="badge-clip"><rect x="0" y="0" width="${safeWidth}" height="${safeHeight}"/></clipPath>`,
-    "</defs>",
-    shape,
-    `<g clip-path="url(#badge-clip)">`,
-    `<text x="${x}" y="${y}" font-family="InstagramOverlayFont, Noto Sans CJK KR, sans-serif" font-size="${safeFontSize}" font-weight="${badge.font_weight === "bold" ? 700 : 400}" fill="${fillColor}" text-anchor="${textAnchor}">${escapeXml(
-      safeText
-    )}</text>`,
-    "</g>",
-    "</svg>"
-  ].join("");
-
-  return Buffer.from(svg);
-};
 
 const wrapText = (text: string, maxChars: number, maxLines: number): string[] => {
   if (text.length <= maxChars) {
@@ -167,11 +120,6 @@ const escapeXml = (value: string): string =>
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&apos;");
 
-const mapFontFamily = (fontStyle: string | undefined): string => {
-  const normalized = `${fontStyle ?? ""}`.trim().toLowerCase();
-  return FONT_STYLE_MAP[normalized] ?? "InstagramOverlayFont, Noto Sans CJK KR, sans-serif";
-};
-
 const buildFontFaceCss = (): string => {
   const regularPath = path.resolve(moduleDir, "templates", "fonts", "Pretendard-Regular.otf");
   const boldPath = path.resolve(moduleDir, "templates", "fonts", "Pretendard-Bold.otf");
@@ -179,11 +127,6 @@ const buildFontFaceCss = (): string => {
     ? [
         "@font-face {",
         "  font-family: 'InstagramOverlayFont';",
-        `  src: url('data:font/otf;base64,${fs.readFileSync(regularPath).toString("base64")}') format('opentype');`,
-        "  font-weight: 400;",
-        "}",
-        "@font-face {",
-        "  font-family: 'InstagramOverlayHandwritingFont';",
         `  src: url('data:font/otf;base64,${fs.readFileSync(regularPath).toString("base64")}') format('opentype');`,
         "  font-weight: 400;",
         "}"
@@ -194,11 +137,6 @@ const buildFontFaceCss = (): string => {
     ? [
         "@font-face {",
         "  font-family: 'InstagramOverlayFont';",
-        `  src: url('data:font/otf;base64,${fs.readFileSync(boldPath).toString("base64")}') format('opentype');`,
-        "  font-weight: 700;",
-        "}",
-        "@font-face {",
-        "  font-family: 'InstagramOverlayHandwritingFont';",
         `  src: url('data:font/otf;base64,${fs.readFileSync(boldPath).toString("base64")}') format('opentype');`,
         "  font-weight: 700;",
         "}"

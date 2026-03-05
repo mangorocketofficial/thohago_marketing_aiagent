@@ -82,9 +82,9 @@ export const selectImagesForInstagram = async (params: {
   requiredCount: number;
   manualSelections?: string[];
 }): Promise<ImageSelectionResult> => {
-  if (params.mode === "text_only") {
+  if (params.mode === "text_only" || params.requiredCount <= 0) {
     return {
-      mode: "text_only",
+      mode: params.mode,
       selectedImages: []
     };
   }

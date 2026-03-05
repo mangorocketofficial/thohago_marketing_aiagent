@@ -18,8 +18,8 @@ describe("Phase 7-2a template registry", () => {
     assert.ok(koica);
     assert.equal(koica?.size.width, 1080);
     assert.equal(koica?.size.height, 1080);
-    assert.ok((koica?.overlays.photos.length ?? 0) >= 1);
-    assert.ok((koica?.overlays.texts.length ?? 0) >= 1);
+    assert.ok((koica?.photos.length ?? 0) >= 1);
+    assert.ok((koica?.texts.length ?? 0) >= 1);
   });
 
   it("returns survey-friendly summaries", () => {

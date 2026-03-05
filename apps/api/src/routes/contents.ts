@@ -259,24 +259,19 @@ const updateInstagramMetadata = async (params: {
     requestImageFileIds: params.input.imageFileIds,
     metadata: content.metadata
   });
-  const requiredImageCount = template.overlays.photos.length;
+  const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
   validateImageSlotCount({
     requiredImageCount,
-    providedImageCount: selection.paths.length
+    providedImageCount: selection.paths.length,
+    maxImageCount: template.photos.length
   });
 
   const currentOverlayTexts = normalizeOverlayTextMap(content.metadata.overlay_texts, {});
   const overlayTexts = normalizeOverlayTextMap(params.input.overlayTexts, currentOverlayTexts);
-  const firstTextId = template.overlays.texts[0]?.id ?? null;
-  const secondTextId = template.overlays.texts[1]?.id ?? null;
-  const overlayMain = firstTextId ? asString(overlayTexts[firstTextId], "").trim() : "";
-  const overlaySub = secondTextId ? asString(overlayTexts[secondTextId], "").trim() : "";
 
   const nextMetadata: Record<string, unknown> = {
     ...content.metadata,
     template_id: templateId,
-    overlay_main: overlayMain,
-    overlay_sub: overlaySub,
     overlay_texts: overlayTexts,
     image_file_ids: selection.fileIds,
     image_paths: selection.paths,

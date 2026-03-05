@@ -120,3 +120,14 @@ Adopt asset-native template schema (`size + overlays.photos/texts/badge + header
 
 Reason  
 Real templates require variable text/photo slot counts and id-addressable overlays; fixed two-slot schema blocked editor scalability and badge support.
+
+## D-012
+
+Phase  
+7-2.2
+
+Decision  
+Lock the runtime render contract to `size + photos + texts` and persist overlay text only as `overlay_texts`.
+
+Reason  
+Style-specific runtime fields caused composer/editor branching and metadata drift; strict render fields with non-rendering `meta` keep composition deterministic while template visuals scale through baked assets.

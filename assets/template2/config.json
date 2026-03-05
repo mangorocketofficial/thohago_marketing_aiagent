@@ -1,135 +1,74 @@
 {
   "template_id": "oda_career_cover_01",
   "template_name": "ODA 채용소식 표지 (Cover)",
-  "description": "메인 사진 + 날짜 배지 + 채용소식 제목. 레트로 픽셀 아트 스타일.",
-  "style": "retro_pixel_8bit",
   "size": {
     "width": 1080,
     "height": 1080
   },
-  "overlays": {
-    "photos": [
-      {
-        "id": "main_photo",
-        "label": "메인 사진 (봉사활동 등)",
-        "x": 75,
-        "y": 45,
-        "width": 720,
-        "height": 525,
-        "fit": "cover",
-        "z_index": 1
-      }
-    ],
-    "texts": [
-      {
-        "id": "date_badge",
-        "label": "날짜 (배지 안)",
-        "x": 75,
-        "y": 95,
-        "width": 110,
-        "height": 70,
-        "font_size": 32,
-        "font_color": "#333333",
-        "font_weight": "bold",
-        "align": "center",
-        "bg_shape": "circle",
-        "bg_color": "#FFF032",
-        "example_text": "12월\n3~4주차"
-      },
-      {
-        "id": "oda_tag",
-        "label": "ODA취업하지? (형광 녹색 바)",
-        "x": 120,
-        "y": 650,
-        "width": 530,
-        "height": 70,
-        "font_size": 38,
-        "font_color": "#FFFFFF",
-        "font_weight": "bold",
-        "bg_color": "#50E682",
-        "align": "center",
-        "example_text": "ODA취업하지?"
-      },
-      {
-        "id": "center_tag",
-        "label": "개발협력커리어센터 (형광 노랑 바)",
-        "x": 240,
-        "y": 735,
-        "width": 460,
-        "height": 55,
-        "font_size": 28,
-        "font_color": "#333333",
-        "font_weight": "bold",
-        "bg_color": "#D2FF32",
-        "align": "center",
-        "example_text": "개발협력커리어센터"
-      },
-      {
-        "id": "main_title",
-        "label": "메인 제목 (큰 글씨, 보라색)",
-        "x": 80,
-        "y": 830,
-        "width": 620,
-        "height": 120,
-        "font_size": 72,
-        "font_color": "#5A46A0",
-        "font_weight": "bold",
-        "font_style": "pixel",
-        "align": "left",
-        "text_shadow": {
-          "color": "#2D2D37",
-          "offset_x": 4,
-          "offset_y": 4
-        },
-        "example_text": "채용소식"
-      }
-    ],
-    "decorations": [
-      {
-        "type": "pixel_heart",
-        "x": 30,
-        "y": 280,
-        "size": 8,
-        "color": "#E664B4"
-      },
-      {
-        "type": "pixel_heart",
-        "x": 10,
-        "y": 320,
-        "size": 6,
-        "color": "#C85096"
-      },
-      {
-        "type": "pixel_cursor",
-        "x": 880,
-        "y": 560,
-        "size": 8,
-        "color": "#FFFFFF"
-      },
-      {
-        "type": "pixel_chick",
-        "x": 800,
-        "y": 460,
-        "size": 8
-      },
-      {
-        "type": "pixel_glasses",
-        "x": 250,
-        "y": 720,
-        "size": 7
-      },
-      {
-        "type": "pixel_heart",
-        "x": 780,
-        "y": 830,
-        "size": 6,
-        "color": "#E664B4"
-      }
-    ]
-  },
-  "page_indicator": {
-    "total": 5,
-    "active": 0,
-    "y": 1045
+  "photos": [
+    {
+      "id": "main_photo",
+      "label": "메인 사진",
+      "x": 75,
+      "y": 45,
+      "width": 720,
+      "height": 525,
+      "fit": "cover"
+    }
+  ],
+  "texts": [
+    {
+      "id": "date_badge",
+      "label": "날짜",
+      "x": 75,
+      "y": 95,
+      "width": 110,
+      "height": 70,
+      "font_size": 32,
+      "font_color": "#333333",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "oda_tag",
+      "label": "ODA취업하지?",
+      "x": 120,
+      "y": 650,
+      "width": 530,
+      "height": 70,
+      "font_size": 38,
+      "font_color": "#FFFFFF",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "center_tag",
+      "label": "커리어센터",
+      "x": 240,
+      "y": 735,
+      "width": 460,
+      "height": 55,
+      "font_size": 28,
+      "font_color": "#333333",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "main_title",
+      "label": "메인 제목",
+      "x": 80,
+      "y": 830,
+      "width": 620,
+      "height": 120,
+      "font_size": 72,
+      "font_color": "#5A46A0",
+      "font_weight": "bold",
+      "align": "left"
+    }
+  ],
+  "meta": {
+    "description": "메인 사진 + 날짜 배지 + 채용소식 제목. 레트로 픽셀 아트 스타일.",
+    "style": "retro_pixel_8bit",
+    "baked_elements": ["dark background", "polaroid frame", "yellow circle (date badge bg)", "green bar (oda_tag bg)", "yellow-green bar (center_tag bg)", "purple title shadow", "pixel hearts/chick/cursor/glasses", "carousel dots"]
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityImageThumbnail } from "./ImagePickerModal";
 
 type TemplatePhotoSlot = {
@@ -9,7 +9,7 @@ type TemplatePhotoSlot = {
   width: number;
   height: number;
   fit: "cover" | "contain";
-  z_index?: number;
+  optional?: boolean;
 };
 
 type TemplateTextSlot = {
@@ -22,9 +22,7 @@ type TemplateTextSlot = {
   font_size: number;
   font_color: string;
   font_weight?: "normal" | "bold";
-  font_style?: string;
   align: "left" | "center" | "right";
-  example_text?: string;
 };
 
 type TemplateDefinition = {
@@ -36,75 +34,48 @@ type TemplateDefinition = {
     width: number;
     height: number;
   };
-  overlays: {
-    photos: TemplatePhotoSlot[];
-    texts: TemplateTextSlot[];
-    badge?: {
-      id: string;
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-      type: "circle" | "rect";
-      font_size: number;
-      font_color: string;
-      font_weight?: "normal" | "bold";
-      z_index?: number;
-      example_text?: string;
-    };
-  };
-  header?: {
-    logos: string[];
-    tag?: string;
-    position: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-  } | null;
+  photos: TemplatePhotoSlot[];
+  texts: TemplateTextSlot[];
+  meta?: Record<string, unknown> | null;
 };
 
 const RECOMPOSE_DEBOUNCE_MS = 800;
 
 export const DEFAULT_TEMPLATE: TemplateDefinition = {
   id: "koica_cover_01",
-  nameKo: "KOICA 표지 카드",
+  nameKo: "KOICA Cover Card",
   description: "",
   thumbnail: "thumbnails/koica_cover_01.png",
   size: {
     width: 1080,
     height: 1080
   },
-  overlays: {
-    photos: [
-      {
-        id: "main_photo",
-        label: "메인 사진",
-        x: 100,
-        y: 130,
-        width: 850,
-        height: 530,
-        fit: "cover",
-        z_index: 1
-      }
-    ],
-    texts: [
-      {
-        id: "title",
-        label: "제목",
-        x: 60,
-        y: 760,
-        width: 960,
-        height: 100,
-        font_size: 52,
-        font_color: "#222222",
-        font_weight: "bold",
-        align: "center"
-      }
-    ]
-  },
-  header: null
+  photos: [
+    {
+      id: "main_photo",
+      label: "Main photo",
+      x: 100,
+      y: 130,
+      width: 850,
+      height: 530,
+      fit: "cover"
+    }
+  ],
+  texts: [
+    {
+      id: "title",
+      label: "Title",
+      x: 60,
+      y: 760,
+      width: 960,
+      height: 100,
+      font_size: 52,
+      font_color: "#222222",
+      font_weight: "bold",
+      align: "center"
+    }
+  ],
+  meta: null
 };
 
 const asTemplateDefinitionArray = (value: unknown): TemplateDefinition[] => {
@@ -186,7 +157,8 @@ export const useInstagramPreviewRuntime = ({
     () => templates.find((template) => template.id === templateId) ?? DEFAULT_TEMPLATE,
     [templateId, templates]
   );
-  const requiredImageCount = currentTemplate.overlays.photos.length;
+  const requiredImageCount = currentTemplate.photos.filter((slot) => !slot.optional).length;
+  const maxImageCount = currentTemplate.photos.length;
 
   const requestRecompose = useCallback(
     async (patch?: RecomposePatch, options?: RecomposeOptions) => {
@@ -309,6 +281,7 @@ export const useInstagramPreviewRuntime = ({
     templates,
     currentTemplate,
     requiredImageCount,
+    maxImageCount,
     imageUrl,
     isRecomposing,
     pickerImages,

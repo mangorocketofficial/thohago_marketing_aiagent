@@ -119,8 +119,6 @@ export type InstagramEditorSeed = {
 export const buildInstagramEditorSeed = (content: Content): InstagramEditorSeed => {
   const metadata = asRecord(content.metadata);
   const templateId = asString(metadata.template_id, "koica_cover_01").trim() || "koica_cover_01";
-  const overlayMain = asString(metadata.overlay_main, "").trim();
-  const overlaySub = asString(metadata.overlay_sub, "").trim();
   const overlayTextsRaw = asRecord(metadata.overlay_texts);
   const overlayTexts: Record<string, string> = {};
   for (const [key, value] of Object.entries(overlayTextsRaw)) {
@@ -129,14 +127,6 @@ export const buildInstagramEditorSeed = (content: Content): InstagramEditorSeed 
       continue;
     }
     overlayTexts[id] = value;
-  }
-  if (Object.keys(overlayTexts).length === 0) {
-    if (overlayMain) {
-      overlayTexts.title = overlayMain;
-    }
-    if (overlaySub) {
-      overlayTexts.author = overlaySub;
-    }
   }
   const imageFileIds = asStringArray(metadata.image_file_ids);
   const imagePaths = asStringArray(metadata.image_paths);

@@ -1879,15 +1879,17 @@ const registerIpcHandlers = () => {
         })
         .filter((entry) => !!entry);
 
-      const requiredImageCount = template.overlays.photos.length;
-      if (requiredImageCount > 0 && resolvedImagePaths.length !== requiredImageCount) {
+      const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
+      const maxImageCount = template.photos.length;
+      if (resolvedImagePaths.length < requiredImageCount || resolvedImagePaths.length > maxImageCount) {
         return {
           ok: false,
           message: "Invalid image slot count for selected template.",
           code: "invalid_payload",
           status: 422,
           details: {
-            requiredImageCount,
+            minImageCount: requiredImageCount,
+            maxImageCount,
             providedImageCount: resolvedImagePaths.length
           }
         };

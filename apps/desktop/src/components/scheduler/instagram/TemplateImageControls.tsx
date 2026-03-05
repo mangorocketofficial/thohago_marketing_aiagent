@@ -9,6 +9,7 @@ type TemplateImageControlsProps = {
   currentImageNames: string[];
   selectedImageCount: number;
   requiredImageCount: number;
+  maxImageCount: number;
   availableTemplates: TemplateSummary[];
   onChangeTemplate: (templateId: string) => void;
   onAddImage: (slotIndex?: number) => void;
@@ -23,6 +24,7 @@ export const TemplateImageControls = ({
   currentImageNames,
   selectedImageCount,
   requiredImageCount,
+  maxImageCount,
   availableTemplates,
   onChangeTemplate,
   onAddImage,
@@ -48,9 +50,10 @@ export const TemplateImageControls = ({
       <div className="instagram-control-group">
         <label>
           Images{" "}
-          {requiredImageCount > 0 ? (
+          {maxImageCount > 0 ? (
             <span className="instagram-slot-count">
-              ({selectedImageCount}/{requiredImageCount})
+              ({selectedImageCount}/{maxImageCount}
+              {maxImageCount !== requiredImageCount ? `, required ${requiredImageCount}` : ""})
             </span>
           ) : null}
         </label>
@@ -69,7 +72,7 @@ export const TemplateImageControls = ({
             </span>
           ))}
 
-          {selectedImageCount < requiredImageCount ? (
+          {selectedImageCount < maxImageCount ? (
             <button
               type="button"
               className="instagram-image-add-btn"

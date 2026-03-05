@@ -103,7 +103,6 @@ type InstagramTemplateTextSlot = {
   font_size: number;
   font_color: string;
   font_weight?: "normal" | "bold";
-  font_style?: string;
   align: "center" | "left" | "right";
 };
 
@@ -115,33 +114,7 @@ type InstagramTemplatePhotoSlot = {
   width: number;
   height: number;
   fit: "cover" | "contain";
-  z_index?: number;
-};
-
-type InstagramTemplateBadge = {
-  id: string;
-  label?: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  type: "circle" | "rect";
-  font_size: number;
-  font_color: string;
-  font_weight?: "normal" | "bold";
-  z_index?: number;
-  example_text?: string;
-};
-
-type InstagramTemplateHeader = {
-  logos: string[];
-  tag?: string;
-  position: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
+  optional?: boolean;
 };
 
 type InstagramTemplateDefinition = {
@@ -153,12 +126,9 @@ type InstagramTemplateDefinition = {
     width: number;
     height: number;
   };
-  overlays: {
-    photos: InstagramTemplatePhotoSlot[];
-    texts: InstagramTemplateTextSlot[];
-    badge?: InstagramTemplateBadge;
-  };
-  header?: InstagramTemplateHeader | null;
+  photos: InstagramTemplatePhotoSlot[];
+  texts: InstagramTemplateTextSlot[];
+  meta?: Record<string, unknown> | null;
 };
 
 type ContentListInstagramTemplatesResult =

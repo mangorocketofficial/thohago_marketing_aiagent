@@ -1,49 +1,53 @@
-# Phase 7-2.2 Completion Report
+﻿# Phase 7-2.2 Completion Report
 
 - Phase: 7-2.2
-- Title: Template Schema Redesign (Dynamic Overlay Slots)
+- Title: Template Schema Redesign (Strict Render Contract)
 - Status: Done
 - Completed On: 2026-03-05
 
 ## Summary
 
-- Instagram 템플릿 스키마를 `main/sub` 고정 구조에서 `photos[]/texts[]/badge/header` 구조로 전환했다.
-- `koica_cover_01` 실자산 포맷을 기준으로 프리셋/레지스트리/합성 파이프라인을 정렬했다.
-- 에디터 텍스트 편집은 슬롯 `id` 기반 동적 렌더링으로 변경했다.
+- Locked Instagram template rendering schema to `size/photos/texts` with optional non-rendering `meta`.
+- Removed runtime styling branches (`overlays`, `badge`, `header`, `font_style`) and baked decorations into `background.png`.
+- Unified overlay text persistence and transport to `overlay_texts` only across API, orchestrator, and desktop flows.
 
 ## API Behavior Update
 
-- 템플릿 조회 응답은 `size + overlays + header` 구조를 반환한다.
-- 콘텐츠 메타데이터 저장은 `overlay_texts: Record<string,string>` 계약을 기본으로 사용한다.
-- 레거시 `overlay_main/sub`는 호환 목적으로만 병행 저장된다.
+- Template list contract now returns flattened `photos`, `texts`, and optional `meta`.
+- Instagram metadata patch validates image selection using template required/min-max slot counts.
+- Generation prompt/parser now uses `overlay_texts` JSON keyed by template text-slot IDs.
 
 ## UX Flow Update
 
-- Overlay 텍스트 편집 UI는 템플릿 `texts[]` 배열을 기준으로 자동 생성된다.
-- 이미지 슬롯 수는 템플릿 `photos[]` 정의를 기준으로 동적으로 계산된다.
-- Badge 텍스트는 슬롯 ID 맵에서 합성 가능하게 연결됐다.
+- Editor overlay text fields are rendered dynamically from `texts[]`.
+- Image controls now enforce template max slots and required slot count consistently.
+- Chat generation card and editor seed both read overlay text from `overlay_texts` only.
 
 ## Validation
 
 - `pnpm --filter @repo/media-engine build` passed.
-- `pnpm --filter @repo/api test:unit` passed (phase 7-2a golden 포함).
-- `pnpm --filter @repo/api type-check` and `pnpm --filter @repo/desktop type-check` passed.
-- `pnpm type-check` and `pnpm lint` passed.
+- `pnpm --filter @repo/api type-check` passed.
+- `pnpm --filter @repo/api test:unit` passed.
+- `pnpm --filter @repo/desktop type-check` passed.
 
 ## Follow-up
 
-- 자산 준비 완료 시 `koica_cover_01` 외 다중 프리셋을 동일 스키마로 확장.
-- 7-2c에서 편집/승인 워크플로우 메타데이터를 `overlay_texts` 단일 계약으로 완전 수렴.
+- 7-2c: add visual regression snapshot gates for composed image parity.
+- 7-2c: complete approval/revision workflow migration on the `overlay_texts`-only contract.
+- 7-2c: expand template preset catalog after asset QA on the strict schema.
 
 ### Decisions
 
-[D-011]
+[D-012]
 
 Why this approach:
-실제 자산 `config.json` 구조를 표준으로 채택해 템플릿 확장성과 에디터 슬롯 참조 일관성을 확보했다.
+Keeping runtime render contract minimal (`photos/texts`) prevents template-style growth from creating composer/editor branch complexity.
 
 Alternatives considered:
-- `mainText/subText` 고정 확장 — 템플릿 다양성(3~6 텍스트, badge) 수용 한계로 제외.
+- Keeping `overlays/badge/header` as runtime fields was rejected because each new visual pattern required additional rendering logic and UI coupling.
 
 Blockers hit:
-- 구 프리셋 잔여 파일이 dist에 남아 로딩 경고를 유발해 빌드 복사 단계에서 대상 디렉터리 초기화로 해결했다.
+- Legacy dual-field writes (`overlay_main/sub` + `overlay_texts`) created drift risk; removed legacy write path and standardized on `overlay_texts`.
+
+Tech debt introduced:
+- No new debt. Existing `DEBT-010` remains and affects Phase 7-2c.

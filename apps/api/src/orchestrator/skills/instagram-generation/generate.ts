@@ -71,8 +71,8 @@ export const generateAndPersistInstagram = async (params: {
 
   const parsedDraft = parseInstagramDraft(llm.text);
   const template = getTemplate(templateId);
-  const requiredCount = template?.overlays.photos.length ?? 1;
-  const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayMain, parsedDraft.overlaySub);
+  const requiredCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
+  const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayTexts);
 
   const selected = await selectImagesForInstagram({
     orgId: params.orgId,
@@ -98,8 +98,6 @@ export const generateAndPersistInstagram = async (params: {
     topic: effectiveTopic,
     caption,
     hashtags: parsedDraft.hashtags,
-    overlayMain: parsedDraft.overlayMain,
-    overlaySub: parsedDraft.overlaySub,
     overlayTexts,
     templateId,
     selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
@@ -133,8 +131,6 @@ export const generateAndPersistInstagram = async (params: {
     caption,
     model: llm.model,
     templateId,
-    overlayMain: parsedDraft.overlayMain,
-    overlaySub: parsedDraft.overlaySub,
     overlayTexts,
     imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
     selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
@@ -147,39 +143,57 @@ export const generateAndPersistInstagram = async (params: {
 const normalizeTemplateId = (templateId: string | null): TemplateId =>
   templateId && getTemplate(templateId) ? templateId : DEFAULT_TEMPLATE_ID;
 
-const buildOverlayTextMap = (
-  templateId: TemplateId,
-  overlayMain: string,
-  overlaySub: string
-): Record<string, string> => {
+const buildOverlayTextMap = (templateId: TemplateId, overlayTexts: Record<string, string>): Record<string, string> => {
   const template = getTemplate(templateId);
-  const textSlots = template?.overlays.texts ?? [];
+  const textSlots = template?.texts ?? [];
   const map: Record<string, string> = {};
   if (textSlots.length === 0) {
     return map;
   }
 
-  const titleSlot = textSlots.find((slot) => /title/i.test(slot.id)) ?? textSlots[0];
-  if (titleSlot) {
-    map[titleSlot.id] = overlayMain || titleSlot.example_text || "";
-  }
-
-  const subSlot = textSlots.find((slot) => /author|sub/i.test(slot.id)) ?? textSlots.find((slot) => slot.id !== titleSlot.id);
-  if (subSlot) {
-    map[subSlot.id] = overlaySub || subSlot.example_text || "";
-  }
-
+  const normalizedInput = normalizeOverlayTextMap(overlayTexts);
+  const titleFallback = pickFirstText(normalizedInput, ["title", "main", "headline"]);
+  const subFallback = pickFirstText(normalizedInput, ["author", "sub", "subtitle", "description"]);
   for (const slot of textSlots) {
-    if (!(slot.id in map)) {
-      map[slot.id] = slot.example_text || "";
+    const exact = normalizedInput[slot.id] ?? "";
+    if (exact) {
+      map[slot.id] = exact;
+      continue;
     }
-  }
-
-  if (template?.overlays.badge?.id) {
-    map[template.overlays.badge.id] = template.overlays.badge.example_text ?? "";
+    if (/title|headline|subject/i.test(slot.id) && titleFallback) {
+      map[slot.id] = titleFallback;
+      continue;
+    }
+    if (/author|sub|subtitle|desc/i.test(slot.id) && subFallback) {
+      map[slot.id] = subFallback;
+      continue;
+    }
+    map[slot.id] = "";
   }
 
   return map;
+};
+
+const normalizeOverlayTextMap = (value: Record<string, string>): Record<string, string> => {
+  const next: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const slotId = key.trim();
+    if (!slotId) {
+      continue;
+    }
+    next[slotId] = `${entry ?? ""}`.trim().slice(0, 120);
+  }
+  return next;
+};
+
+const pickFirstText = (overlayTexts: Record<string, string>, aliases: string[]): string => {
+  for (const alias of aliases) {
+    const value = overlayTexts[alias];
+    if (value) {
+      return value;
+    }
+  }
+  return "";
 };
 
 const composeCaption = (caption: string, hashtags: string[]): string => {

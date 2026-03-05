@@ -1,4 +1,5 @@
 import { truncateToTokenBudget } from "@repo/rag";
+import { getTemplate } from "@repo/media-engine";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { getSessionRollingSummaryText } from "../../conversation-memory";
 import { buildEnrichedCampaignContext } from "../../rag-context";
@@ -103,6 +104,8 @@ export const buildInstagramGenerationContext = async (params: {
 
   const activityFiles = truncateToTokenBudget(enriched.documentExtracts ?? "", ACTIVITY_FILES_BUDGET);
   const conversationMemory = truncateToTokenBudget(rollingSummary || enriched.memoryMd || "", CONVERSATION_MEMORY_BUDGET);
+  const template = getTemplate(params.templateId);
+  const textSlotIds = template?.texts.map((slot) => slot.id).filter((slotId) => !!slotId) ?? [];
 
   return {
     brandProfile: brandProfile || "(No brand profile context available)",
@@ -111,6 +114,7 @@ export const buildInstagramGenerationContext = async (params: {
     campaignContext,
     topic: params.topic,
     channel: "instagram",
-    templateId: params.templateId
+    templateId: params.templateId,
+    textSlotIds
   };
 };

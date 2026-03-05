@@ -72,16 +72,6 @@ export const readInstagramGenerationCardMeta = (message: ChatMessage): Instagram
         ? generatedCaption.length
         : null;
   const overlayTexts = asStringMap(metadata.overlay_texts);
-  if (Object.keys(overlayTexts).length === 0) {
-    const fallbackMain = asString(metadata.overlay_main, "").trim();
-    const fallbackSub = asString(metadata.overlay_sub, "").trim();
-    if (fallbackMain) {
-      overlayTexts.title = fallbackMain;
-    }
-    if (fallbackSub) {
-      overlayTexts.author = fallbackSub;
-    }
-  }
 
   return {
     contentId,

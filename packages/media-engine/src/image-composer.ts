@@ -1,20 +1,13 @@
 import sharp from "sharp";
-import {
-  applyRoundedCorners,
-  composeImage,
-  createSolidBackground,
-  preprocessUserImage,
-  type CompositeLayer
-} from "./sharp-client";
-import { buildBadgeSvg, buildTextOverlaySvg } from "./svg-renderer";
+import { composeImage, preprocessUserImage, type CompositeLayer } from "./sharp-client";
+import { buildTextOverlaySvg } from "./svg-renderer";
 import { getTemplate, getTemplateBackgroundPath } from "./templates/registry";
-import type { TemplateBadge, TemplateId } from "./templates/schema";
+import type { TemplateId } from "./templates/schema";
 
 export type ImageComposeInput = {
   templateId: TemplateId;
   userImages: string[];
   overlayTexts?: Record<string, string>;
-  badgeText?: string;
   outputFormat: "png" | "jpg";
 };
 
@@ -26,10 +19,9 @@ export type ImageComposeResult = {
   sizeBytes: number;
 };
 
-type LayerWithOrder = CompositeLayer & { zIndex: number };
-
 /**
- * Compose one Instagram image from template photo/text/badge overlay schema.
+ * Compose one Instagram image from template photo/text schema.
+ * Non-editable visual decorations must be pre-baked into background.png.
  */
 export const composeInstagramImage = async (input: ImageComposeInput): Promise<ImageComposeResult> => {
   const template = getTemplate(input.templateId);
@@ -40,63 +32,42 @@ export const composeInstagramImage = async (input: ImageComposeInput): Promise<I
   const width = template.size.width;
   const height = template.size.height;
   const background = await resolveBackground(input.templateId, width, height);
-  const overlays: LayerWithOrder[] = [];
+  const layers: CompositeLayer[] = [];
 
-  for (let index = 0; index < template.overlays.photos.length; index += 1) {
-    const slot = template.overlays.photos[index];
-    const imagePath = input.userImages[index % Math.max(1, input.userImages.length)];
+  for (let index = 0; index < template.photos.length; index += 1) {
+    const slot = template.photos[index];
+    const imagePath = input.userImages[index];
     if (!imagePath) {
-      continue;
+      if (slot.optional) {
+        continue;
+      }
+      throw new Error(`Missing required photo slot: ${slot.id}`);
     }
 
-    let processed = await preprocessUserImage(imagePath, slot.width, slot.height, slot.fit);
-    if (slot.fit === "cover") {
-      processed = await applyRoundedCorners(processed, slot.width, slot.height, 0);
-    }
-    overlays.push({
+    const processed = await preprocessUserImage(imagePath, slot.width, slot.height, slot.fit);
+    layers.push({
       type: "image",
       input: processed,
       left: slot.x,
-      top: slot.y,
-      zIndex: slot.z_index ?? 1
+      top: slot.y
     });
   }
 
   const textMap = resolveOverlayTextMap(input.overlayTexts ?? {});
-
-  for (const textLayer of buildTextOverlaySvg(template.overlays.texts, textMap)) {
-    overlays.push({
+  for (const textLayer of buildTextOverlaySvg(template.texts, textMap)) {
+    layers.push({
       type: "svg",
       input: textLayer.buffer,
       left: textLayer.x,
-      top: textLayer.y,
-      zIndex: 2
+      top: textLayer.y
     });
   }
 
-  if (template.overlays.badge) {
-    const badge = template.overlays.badge;
-    const badgeValue = resolveBadgeText({
-      badge,
-      textMap,
-      explicitBadgeText: input.badgeText
-    });
-    const badgeSvg = buildBadgeSvg(badge, badgeValue);
-    overlays.push({
-      type: "svg",
-      input: badgeSvg,
-      left: badge.x,
-      top: badge.y,
-      zIndex: badge.z_index ?? 3
-    });
-  }
-
-  overlays.sort((a, b) => a.zIndex - b.zIndex);
   const buffer = await composeImage({
     width,
     height,
     background,
-    layers: overlays.map(({ zIndex: _z, ...layer }) => layer),
+    layers,
     outputFormat: input.outputFormat
   });
 
@@ -111,10 +82,11 @@ export const composeInstagramImage = async (input: ImageComposeInput): Promise<I
 
 const resolveBackground = async (templateId: string, width: number, height: number): Promise<Buffer> => {
   const backgroundPath = getTemplateBackgroundPath(templateId);
-  if (backgroundPath) {
-    return sharp(backgroundPath).resize(width, height, { fit: "cover", position: "centre" }).png().toBuffer();
+  if (!backgroundPath) {
+    throw new Error(`Missing background.png for template: ${templateId}`);
   }
-  return createSolidBackground(width, height, "#FFFFFF");
+
+  return sharp(backgroundPath).resize(width, height, { fit: "cover", position: "centre" }).png().toBuffer();
 };
 
 const resolveOverlayTextMap = (overlayTexts: Record<string, string>): Record<string, string> => {
@@ -128,20 +100,4 @@ const resolveOverlayTextMap = (overlayTexts: Record<string, string>): Record<str
     next[slotId] = text;
   }
   return next;
-};
-
-const resolveBadgeText = (params: {
-  badge: TemplateBadge;
-  textMap: Record<string, string>;
-  explicitBadgeText?: string;
-}): string => {
-  const fromExplicit = `${params.explicitBadgeText ?? ""}`.trim();
-  if (fromExplicit) {
-    return fromExplicit;
-  }
-  const fromMap = `${params.textMap[params.badge.id] ?? ""}`.trim();
-  if (fromMap) {
-    return fromMap;
-  }
-  return `${params.badge.example_text ?? ""}`.trim();
 };
