@@ -1,0 +1,31 @@
+{
+  "scenario": "happy_instagram_survey_topic_to_image_selection",
+  "description": "When survey is at topic phase, a valid topic answer advances state to image_selection with the option prompt.",
+  "input": {
+    "state": {
+      "phase": "topic",
+      "topic": null,
+      "imageMode": null,
+      "selectedImagePaths": [],
+      "templateId": null,
+      "completed_at": null
+    },
+    "user_message": "봄 나들이 행사 홍보"
+  },
+  "output": {
+    "state": {
+      "phase": "image_selection",
+      "topic": "봄 나들이 행사 홍보",
+      "imageMode": null,
+      "selectedImagePaths": [],
+      "templateId": null,
+      "completed_at": null
+    },
+    "assistantMessage": "활동 폴더에서 사용할 이미지가 있나요?\n1) 폴더에서 AI가 자동 선택\n2) 직접 이미지 지정\n3) 이미지 없이 텍스트 디자인만",
+    "ready": false
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-05",
+  "approved_by": "Codex",
+  "version": "1"
+}

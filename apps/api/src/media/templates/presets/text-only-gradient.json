@@ -1,0 +1,32 @@
+{
+  "id": "text-only-gradient",
+  "name": "Text Only Gradient",
+  "nameKo": "텍스트 전용 (그라디언트)",
+  "description": "Gradient background with large centered text, no user photo",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/text-only-gradient.png",
+  "background": { "type": "gradient", "colors": ["#667EEA", "#764BA2"], "direction": "diagonal" },
+  "layers": {
+    "mainText": {
+      "x": 90,
+      "y": 400,
+      "maxWidth": 900,
+      "fontSize": 64,
+      "fontWeight": "bold",
+      "fontColor": "#FFFFFF",
+      "align": "center",
+      "lineSpacing": 1.5
+    },
+    "subText": {
+      "x": 90,
+      "y": 560,
+      "maxWidth": 900,
+      "fontSize": 36,
+      "fontWeight": "regular",
+      "fontColor": "#E8E8FF",
+      "align": "center"
+    }
+  }
+}

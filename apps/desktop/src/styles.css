@@ -1340,6 +1340,10 @@ th {
   gap: 10px;
 }
 
+.ui-content-editor-back-button {
+  margin-left: auto;
+}
+
 .ui-content-editor-preview {
   border: 1px solid #dbe4f0;
   border-radius: 10px;

@@ -86,15 +86,15 @@ export const GenericContentEditor = ({
   return (
     <section className="ui-content-editor">
       <div className="ui-content-editor-head">
-        <button type="button" onClick={onBack}>
-          Back to Schedule
-        </button>
         <div>
           <h2>{content.channel} editor</h2>
           <p className="sub-description">
             Status: <strong>{SLOT_STATUS_LABEL[slotStatus]}</strong> | Type: {content.content_type}
           </p>
         </div>
+        <button className="ui-content-editor-back-button" type="button" onClick={onBack}>
+          Back to Schedule
+        </button>
       </div>
 
       <div className="ui-content-editor-preview">

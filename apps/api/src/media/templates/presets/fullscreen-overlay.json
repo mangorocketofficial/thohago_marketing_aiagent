@@ -1,0 +1,32 @@
+{
+  "id": "fullscreen-overlay",
+  "name": "Fullscreen Overlay",
+  "nameKo": "전면 이미지 + 오버레이 텍스트",
+  "description": "User photo fills entire frame with dark overlay and white centered text",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/fullscreen-overlay.png",
+  "background": { "type": "image", "placeholder": "user_photo" },
+  "layers": {
+    "darkOverlay": { "opacity": 0.4 },
+    "mainText": {
+      "x": 60,
+      "y": 440,
+      "maxWidth": 960,
+      "fontSize": 56,
+      "fontWeight": "bold",
+      "fontColor": "#FFFFFF",
+      "align": "center"
+    },
+    "subText": {
+      "x": 60,
+      "y": 540,
+      "maxWidth": 960,
+      "fontSize": 30,
+      "fontWeight": "regular",
+      "fontColor": "#E0E0E0",
+      "align": "center"
+    }
+  }
+}

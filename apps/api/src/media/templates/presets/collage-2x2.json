@@ -1,0 +1,37 @@
+{
+  "id": "collage-2x2",
+  "name": "Collage 2x2",
+  "nameKo": "콜라주 (2x2)",
+  "description": "4 image slots in a 2x2 grid with text at bottom",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/collage-2x2.png",
+  "background": { "type": "solid", "color": "#FFFFFF" },
+  "layers": {
+    "userImageAreas": [
+      { "x": 10, "y": 10, "w": 525, "h": 400, "fit": "cover", "borderRadius": 8 },
+      { "x": 545, "y": 10, "w": 525, "h": 400, "fit": "cover", "borderRadius": 8 },
+      { "x": 10, "y": 420, "w": 525, "h": 400, "fit": "cover", "borderRadius": 8 },
+      { "x": 545, "y": 420, "w": 525, "h": 400, "fit": "cover", "borderRadius": 8 }
+    ],
+    "mainText": {
+      "x": 60,
+      "y": 860,
+      "maxWidth": 960,
+      "fontSize": 44,
+      "fontWeight": "bold",
+      "fontColor": "#1A1A1A",
+      "align": "center"
+    },
+    "subText": {
+      "x": 60,
+      "y": 930,
+      "maxWidth": 960,
+      "fontSize": 28,
+      "fontWeight": "regular",
+      "fontColor": "#666666",
+      "align": "center"
+    }
+  }
+}

@@ -56,6 +56,7 @@ export const SchedulerPage = () => {
   });
   const selectedEditorItem = viewModel.selectedItem;
   const selectedEditorContent = selectedEditorItem?.content ?? null;
+  const isEditorMode = !!selectedEditorItem && !!selectedEditorContent;
 
   const [dayDetailDate, setDayDetailDate] = useState<string | null>(null);
   const [dayDetailItems, setDayDetailItems] = useState<ScheduledContentItem[]>([]);
@@ -212,26 +213,30 @@ export const SchedulerPage = () => {
   return (
     <div className="app-shell ui-page-shell">
       <section className="panel ui-page-panel ui-scheduler-shell">
-        <div className="ui-scheduler-head">
-          <div>
-            <p className="eyebrow">Scheduler</p>
-          </div>
+        {!isEditorMode ? (
+          <>
+            <div className="ui-scheduler-head">
+              <div>
+                <p className="eyebrow">컨텐츠 캔바스</p>
+              </div>
 
-          <SchedulerFilters
-            viewMode={remote.viewMode}
-            currentDateKey={`${remote.activeWindow.startDate} -> ${remote.activeWindow.endDate}`}
-            filters={remote.filters}
-            campaigns={remote.campaignSummaries}
-            isLoading={remote.isLoading || remote.isLoadingMore || remote.isRescheduling}
-            connectionState={remote.connectionState}
-            onViewModeChange={remote.setViewMode}
-            onDateShift={remote.shiftCurrentDate}
-            onJumpToToday={remote.jumpToToday}
-            onFiltersChange={remote.setFilters}
-          />
-        </div>
+              <SchedulerFilters
+                viewMode={remote.viewMode}
+                currentDateKey={`${remote.activeWindow.startDate} -> ${remote.activeWindow.endDate}`}
+                filters={remote.filters}
+                campaigns={remote.campaignSummaries}
+                isLoading={remote.isLoading || remote.isLoadingMore || remote.isRescheduling}
+                connectionState={remote.connectionState}
+                onViewModeChange={remote.setViewMode}
+                onDateShift={remote.shiftCurrentDate}
+                onJumpToToday={remote.jumpToToday}
+                onFiltersChange={remote.setFilters}
+              />
+            </div>
 
-        {scheduleNotice ? <p className="notice">{scheduleNotice}</p> : null}
+            {scheduleNotice ? <p className="notice">{scheduleNotice}</p> : null}
+          </>
+        ) : null}
 
         {!selectedEditorItem || !selectedEditorContent ? (
           <>

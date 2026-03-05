@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import { requireApiSecret, requireUserJwt } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
+import { getTemplateSummaries } from "../media/templates/registry";
 import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import { parseRescheduleSlotRequest } from "../scheduler/http/reschedule-slot-request";
@@ -21,6 +22,7 @@ import {
   listSessionsForOrg,
   resumeSession
 } from "../orchestrator/service";
+import { listActivityImages } from "../orchestrator/skills/instagram-generation/image-selector";
 import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionStatus } from "../orchestrator/types";
 import { getSkillRegistry } from "../orchestrator/skills/router";
 
@@ -517,6 +519,70 @@ sessionsRouter.get("/skills", async (req, res) => {
     ok: true,
     items
   });
+});
+
+sessionsRouter.get("/orgs/:orgId/templates/instagram", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const templates = getTemplateSummaries();
+    res.json({
+      ok: true,
+      templates
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.get("/orgs/:orgId/activity-images", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const activityFolder = parseOptionalString(asQueryString(req.query.activity_folder));
+    if (!activityFolder) {
+      throw new HttpError(400, "invalid_payload", "activity_folder query is required.");
+    }
+
+    const limit = parseBoundedInt(req.query.limit, "limit", {
+      fallback: 40,
+      min: 1,
+      max: 100
+    });
+
+    const images = await listActivityImages({
+      orgId,
+      activityFolder,
+      limit
+    });
+
+    res.json({
+      ok: true,
+      images: images.map((image) => ({
+        fileId: image.fileId,
+        fileName: image.fileName,
+        relativePath: image.relativePath,
+        fileSize: image.fileSize,
+        detectedAt: image.detectedAt
+      }))
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 sessionsRouter.post("/sessions/:sessionId/resume", async (req, res) => {

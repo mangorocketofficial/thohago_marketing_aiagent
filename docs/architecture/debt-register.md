@@ -76,3 +76,14 @@ Reason
 
 Affects  
 Phase 7-2a
+
+DEBT-008
+
+Description  
+Instagram media artifacts use private bucket storage with signed URL support, but desktop UI does not yet expose signed preview/download actions.
+
+Reason  
+7-2a prioritized backend contract stability and rollback-safe storage semantics before cross-surface desktop UX wiring.
+
+Affects  
+Phase 7-2b

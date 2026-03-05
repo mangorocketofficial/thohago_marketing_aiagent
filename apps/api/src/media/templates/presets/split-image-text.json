@@ -1,0 +1,42 @@
+{
+  "id": "split-image-text",
+  "name": "Split Image + Text",
+  "nameKo": "좌측 이미지 + 우측 텍스트",
+  "description": "Left half image, right half solid color with text",
+  "width": 1080,
+  "height": 1080,
+  "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/split-image-text.png",
+  "background": { "type": "solid", "color": "#F5F0EB" },
+  "layers": {
+    "userImageAreas": [
+      { "x": 0, "y": 0, "w": 540, "h": 1080, "fit": "cover" }
+    ],
+    "mainText": {
+      "x": 580,
+      "y": 400,
+      "maxWidth": 460,
+      "fontSize": 48,
+      "fontWeight": "bold",
+      "fontColor": "#2D2D2D",
+      "align": "left",
+      "lineSpacing": 1.4
+    },
+    "subText": {
+      "x": 580,
+      "y": 540,
+      "maxWidth": 460,
+      "fontSize": 28,
+      "fontWeight": "regular",
+      "fontColor": "#777777",
+      "align": "left"
+    },
+    "brandLogo": {
+      "x": 930,
+      "y": 980,
+      "w": 120,
+      "h": 70,
+      "opacity": 0.75
+    }
+  }
+}

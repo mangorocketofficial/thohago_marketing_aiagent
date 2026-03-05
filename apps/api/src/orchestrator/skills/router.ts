@@ -1,6 +1,7 @@
 import type { OrchestratorSessionRow, ResumeEventRequest, SessionState } from "../types";
 import { SkillRegistry } from "./registry";
 import { createCampaignPlanSkill } from "./campaign-plan/index";
+import { createInstagramGenerationSkill } from "./instagram-generation/index";
 import { createNaverBlogGenerationSkill } from "./naverblog-generation/index";
 import type { SkillRouteDecision } from "./types";
 
@@ -43,6 +44,7 @@ export const getSkillRegistry = (): SkillRegistry => {
   const registry = new SkillRegistry();
   registry.register(createCampaignPlanSkill());
   registry.register(createNaverBlogGenerationSkill());
+  registry.register(createInstagramGenerationSkill());
   singletonRegistry = registry;
   return registry;
 };

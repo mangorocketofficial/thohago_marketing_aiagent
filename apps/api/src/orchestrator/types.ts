@@ -122,6 +122,7 @@ export type SessionState = {
   user_message: string | null;
   campaign_id: string | null;
   campaign_survey: CampaignSurveyState | null;
+  instagram_survey?: Record<string, unknown> | null;
   campaign_draft_version: number;
   campaign_chain_data: Record<string, unknown> | null;
   campaign_plan_document: string | null;

@@ -255,10 +255,11 @@ import sharp from "sharp";
 import path from "path";
 
 export type CompositeLayer = {
-  type: "image" | "svg";
+  type: "image" | "svg";      // explicit for type-check safety
   input: Buffer | string;        // Buffer for SVG/processed image, string for file path
   top: number;
   left: number;
+  opacity?: number;              // optional layer alpha (e.g., brand logo watermark)
 };
 
 export type ComposeOptions = {
@@ -355,10 +356,15 @@ const gradientCoords = (
 export const preprocessUserImage = async (
   imagePath: string,
   targetWidth: number,
-  targetHeight: number
+  targetHeight: number,
+  fit: "cover" | "contain" = "cover"
 ): Promise<Buffer> => {
   return sharp(imagePath)
-    .resize(targetWidth, targetHeight, { fit: "cover", position: "centre" })
+    .resize(targetWidth, targetHeight, {
+      fit: fit === "contain" ? "contain" : "cover",
+      position: "centre",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
     .png()
     .toBuffer();
 };
@@ -386,6 +392,37 @@ export const applyDarkOverlay = async (
 
   return sharp(imageBuffer)
     .composite([{ input: overlay, top: 0, left: 0 }])
+    .toBuffer();
+};
+
+/**
+ * Apply rounded corners mask for template image cards.
+ */
+export const applyRoundedCorners = async (
+  imageBuffer: Buffer,
+  width: number,
+  height: number,
+  radius: number
+): Promise<Buffer> => {
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="white" />
+    </svg>`;
+
+  return sharp(imageBuffer)
+    .composite([{ input: Buffer.from(svg), blend: "dest-in" }])
+    .png()
+    .toBuffer();
+};
+
+/**
+ * Apply global alpha to an image layer (e.g., brand logo watermark).
+ */
+export const applyImageOpacity = async (imageBuffer: Buffer, opacity: number): Promise<Buffer> => {
+  const normalized = Math.max(0, Math.min(1, opacity));
+  return sharp(imageBuffer)
+    .ensureAlpha(normalized)
+    .png()
     .toBuffer();
 };
 ```
@@ -553,7 +590,7 @@ export type TemplateDefinition = {
   aspectRatio: "1:1" | "4:5" | "16:9";
   background: BackgroundDef;
   layers: TemplateLayers;
-  thumbnail: string;       // path to preview thumbnail
+  thumbnail?: string;      // optional: defaults to /templates/instagram/{id}.png
 };
 
 export type BackgroundDef =
@@ -612,6 +649,7 @@ File: `apps/api/src/media/templates/presets/center-image-bottom-text.json`
   "width": 1080,
   "height": 1080,
   "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/center-image-bottom-text.png",
   "background": { "type": "solid", "color": "#FFFFFF" },
   "layers": {
     "userImageAreas": [
@@ -648,6 +686,7 @@ File: `apps/api/src/media/templates/presets/fullscreen-overlay.json`
   "width": 1080,
   "height": 1080,
   "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/fullscreen-overlay.png",
   "background": { "type": "image", "placeholder": "user_photo" },
   "layers": {
     "darkOverlay": { "opacity": 0.4 },
@@ -682,6 +721,7 @@ File: `apps/api/src/media/templates/presets/collage-2x2.json`
   "width": 1080,
   "height": 1080,
   "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/collage-2x2.png",
   "background": { "type": "solid", "color": "#FFFFFF" },
   "layers": {
     "userImageAreas": [
@@ -721,6 +761,7 @@ File: `apps/api/src/media/templates/presets/text-only-gradient.json`
   "width": 1080,
   "height": 1080,
   "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/text-only-gradient.png",
   "background": { "type": "gradient", "colors": ["#667eea", "#764ba2"], "direction": "diagonal" },
   "layers": {
     "mainText": {
@@ -755,6 +796,7 @@ File: `apps/api/src/media/templates/presets/split-image-text.json`
   "width": 1080,
   "height": 1080,
   "aspectRatio": "1:1",
+  "thumbnail": "thumbnails/split-image-text.png",
   "background": { "type": "solid", "color": "#F5F0EB" },
   "layers": {
     "userImageAreas": [
@@ -886,6 +928,9 @@ import {
   createGradientBackground,
   preprocessUserImage,
   applyDarkOverlay,
+  applyRoundedCorners,
+  applyImageOpacity,
+  type CompositeLayer,
 } from "./sharp-client";
 import { buildTextOverlaySvg } from "./svg-renderer";
 import { getTemplate } from "./templates/registry";
@@ -930,7 +975,7 @@ export const composeInstagramImage = async (
   }
 
   // 3. Build composite layers
-  const layers: Array<{ input: Buffer | string; top: number; left: number }> = [];
+  const layers: CompositeLayer[] = [];
 
   // User image layers (supports multiple for collage)
   if (template.layers.userImageAreas && input.userImages.length > 0) {
@@ -939,8 +984,11 @@ export const composeInstagramImage = async (
       const imagePath = input.userImages[i % input.userImages.length]; // cycle if fewer images
       if (!imagePath) continue;
 
-      const processedImage = await preprocessUserImage(imagePath, area.w, area.h);
-      layers.push({ input: processedImage, top: area.y, left: area.x });
+      let processedImage = await preprocessUserImage(imagePath, area.w, area.h, area.fit);
+      if (area.borderRadius && area.borderRadius > 0) {
+        processedImage = await applyRoundedCorners(processedImage, area.w, area.h, area.borderRadius);
+      }
+      layers.push({ type: "image", input: processedImage, top: area.y, left: area.x });
     }
   }
 
@@ -955,6 +1003,7 @@ export const composeInstagramImage = async (
     lineSpacing: template.layers.mainText.lineSpacing,
   });
   layers.push({
+    type: "svg",
     input: mainTextSvg,
     top: template.layers.mainText.y,
     left: template.layers.mainText.x,
@@ -971,6 +1020,7 @@ export const composeInstagramImage = async (
       maxWidth: template.layers.subText.maxWidth,
     });
     layers.push({
+      type: "svg",
       input: subTextSvg,
       top: template.layers.subText.y,
       left: template.layers.subText.x,
@@ -979,12 +1029,17 @@ export const composeInstagramImage = async (
 
   // Brand logo (optional)
   if (template.layers.brandLogo && input.brandLogoPath) {
-    const logoBuffer = await preprocessUserImage(
+    let logoBuffer = await preprocessUserImage(
       input.brandLogoPath,
       template.layers.brandLogo.w,
-      template.layers.brandLogo.h
+      template.layers.brandLogo.h,
+      "contain"
     );
+    if (template.layers.brandLogo.opacity < 1) {
+      logoBuffer = await applyImageOpacity(logoBuffer, template.layers.brandLogo.opacity);
+    }
     layers.push({
+      type: "image",
       input: logoBuffer,
       top: template.layers.brandLogo.y,
       left: template.layers.brandLogo.x,
@@ -1078,32 +1133,60 @@ const { data: content } = await supabaseAdmin
 The composed PNG/JPG needs to be stored. Two storage targets:
 
 1. **Supabase Storage** (remote) — for API access and scheduler preview.
-   - Bucket: `content-images`
-   - Path: `{orgId}/{contentId}/composed.png`
-   - URL stored in `contents.metadata.composed_image_url`
+   - Bucket: `content-images-private` (private bucket)
+   - Path: `{orgId}/{contentId}/composed.{ext}` (`ext` follows `outputFormat`)
+   - Metadata stores `storage_path` only; preview uses short-lived signed URL.
 
 2. **Local file** (via IPC) — for user's local archive.
    - Path follows 7-1a local save convention.
 
 ```typescript
-// Upload to Supabase Storage
-const storagePath = `${orgId}/${content.id}/composed.png`;
-await supabaseAdmin.storage
-  .from("content-images")
-  .upload(storagePath, composedBuffer, { contentType: "image/png" });
+const extension = outputFormat === "jpg" ? "jpg" : "png";
+const contentType = outputFormat === "jpg" ? "image/jpeg" : "image/png";
+const bucket = "content-images-private";
+const storagePath = `${orgId}/${content.id}/composed.${extension}`;
 
-const { data: { publicUrl } } = supabaseAdmin.storage
-  .from("content-images")
-  .getPublicUrl(storagePath);
+// 1) Upload image first
+const uploadRes = await supabaseAdmin.storage
+  .from(bucket)
+  .upload(storagePath, composedBuffer, { contentType, upsert: false });
+if (uploadRes.error) throw new Error(`storage_upload_failed:${uploadRes.error.message}`);
 
-// Update content metadata with image URL
-await supabaseAdmin
+// 2) Update content metadata with storage path
+const updateRes = await supabaseAdmin
   .from("contents")
-  .update({ metadata: { ...metadata, composed_image_url: publicUrl } })
-  .eq("id", content.id);
+  .update({
+    metadata: {
+      ...metadata,
+      composed_image_storage: { bucket, path: storagePath, content_type: contentType }
+    }
+  })
+  .eq("id", content.id)
+  .eq("org_id", orgId)
+  .select("id")
+  .maybeSingle();
+
+// 3) Rollback upload when DB update fails (atomicity guard)
+if (updateRes.error || !updateRes.data) {
+  await supabaseAdmin.storage.from(bucket).remove([storagePath]);
+  throw new Error(`content_metadata_update_failed:${updateRes.error?.message ?? "conflict"}`);
+}
+
+// 4) Create short-lived signed URL for preview API response (never persist public URL)
+const signedRes = await supabaseAdmin.storage
+  .from(bucket)
+  .createSignedUrl(storagePath, 60 * 30); // 30 min
+const previewUrl = signedRes.data?.signedUrl ?? null;
 ```
 
-### 9.3 Schedule slot linking
+### 9.3 Storage atomicity and idempotency notes
+
+- Idempotency key is stored on both slot metadata and content metadata (`request_idempotency_key`).
+- Re-run with same key first checks existing slot/content linkage before creating new rows.
+- If any step after upload fails, uploaded object is removed (`remove`) to avoid orphan files.
+- A daily cleanup job can safely remove orphan storage paths older than 24h.
+
+### 9.4 Schedule slot linking
 
 Same pattern as 7-1a:
 
@@ -1119,7 +1202,7 @@ await supabaseAdmin
   .eq("lock_version", currentLockVersion);
 ```
 
-### 9.4 On-demand slot creation
+### 9.5 On-demand slot creation
 
 Same pattern as 7-1a but with `channel: "instagram"` and `content_type: "image"`:
 
@@ -1169,8 +1252,8 @@ User: "인스타 게시물 만들어줘"
   5. Select image(s) via LLM or use user-selected paths
   6. Preprocess user image(s) via Sharp (resize + crop to template area)
   7. Build SVG text overlays for main + sub text
-  8. Compose image via Sharp composite (background + images + SVG text → PNG)
-  9. Upload composed image to Supabase Storage
+  8. Compose image via Sharp composite (background + images + SVG text → PNG/JPG)
+  9. Upload composed image to Supabase Storage private bucket
   10. Insert contents row (channel: instagram, content_type: image)
   11. Link content_id to schedule_slot, status → "draft"
   12. Save composed image + caption to local file via IPC
@@ -1204,12 +1287,19 @@ Returns available template summaries for the survey step. No auth beyond org mem
 Route: `GET /orgs/:orgId/activity-images`
 
 Returns indexed image files from the user's activity folder (from Phase 5-1 watcher data). Used by chat to display available images for manual selection.
+Do not expose absolute local paths in API responses; return `file_id` + relative path only.
 
 ```typescript
 // Response
 {
   images: [
-    { fileName: "event_photo.jpg", filePath: "활동폴더/photos/event_photo.jpg", fileSize: 2048000, detectedAt: "..." },
+    {
+      fileId: "8e3f...",
+      fileName: "event_photo.jpg",
+      relativePath: "활동폴더/photos/event_photo.jpg",
+      fileSize: 2048000,
+      detectedAt: "..."
+    },
     ...
   ]
 }
@@ -1248,16 +1338,18 @@ Returns indexed image files from the user's activity folder (from Phase 5-1 watc
 3. Campaign-scheduled flow skips survey and uses campaign plan context.
 4. Caption is generated with correct format (hook + body + CTA + hashtags).
 5. Overlay text (main + sub) is generated within character limits.
-6. Sharp composes template + user image + SVG text overlay into 1080x1080 PNG.
+6. Sharp composes template + user image + SVG text overlay into 1080x1080 PNG/JPG.
 7. Korean text renders correctly in composed image (Pretendard font via SVG `@font-face`).
 8. Gradient background renders correctly for `text-only-gradient` template.
 9. Collage template correctly places 2-4 images in grid layout.
-10. Composed image is uploaded to Supabase Storage with public URL.
+10. Composed image is uploaded to Supabase Storage private bucket and exposed via signed URL.
 11. Content is saved to `contents` table with `content_type: "image"`, caption in `body`.
 12. Schedule slot is created (on-demand) or linked (campaign) with `slot_status: "draft"`.
 13. LLM-assisted image selection picks relevant images from activity folder.
 14. Claude → GPT-4o-mini fallback works on transient failures (5xx, 429, timeout).
-15. `pnpm --filter @repo/api type-check` passes.
+15. Template `fit`, `borderRadius`, and `brandLogo.opacity` are applied in composition output.
+16. Storage upload + DB metadata update behaves atomically (rollback upload on DB failure).
+17. `pnpm --filter @repo/api type-check` passes.
 
 ---
 
@@ -1269,13 +1361,14 @@ Returns indexed image files from the user's activity folder (from Phase 5-1 watc
 4. Unit test: `buildTextOverlaySvg` with Korean text → verify SVG contains correct font-face and tspan elements
 5. Unit test: `createGradientBackground` → verify output buffer is valid PNG
 6. Manual: send "인스타 게시물 만들어" → verify survey flow completes
-7. Manual: verify composed PNG is 1080x1080 with correct text overlay and user image
+7. Manual: verify composed image (PNG/JPG) is 1080x1080 with correct text overlay and user image
 8. Manual: verify Korean text renders without garbled characters in composed image
-9. Manual: verify Supabase Storage upload and public URL accessibility
+9. Manual: verify Supabase Storage upload to private bucket and signed URL accessibility (expires as expected)
 10. Manual: verify contents + schedule_slots rows are correctly created and linked
 11. Manual: test text-only-gradient template → verify gradient background + text renders
 12. Manual: test collage-2x2 template with 4 images → verify grid layout
-13. Manual: test fallback by disabling Anthropic key → verify GPT-4o-mini generates caption
+13. Manual: force DB metadata update failure after storage upload → verify uploaded object is rolled back (no orphan)
+14. Manual: test fallback by disabling Anthropic key → verify GPT-4o-mini generates caption
 
 ---
 
@@ -1294,7 +1387,10 @@ Collage templates (2x2, future 3-grid, etc.) need multiple image placement areas
 Minimum viable template set covering the most common Instagram post layouts. Custom template creation (user-designed or AI-analyzed from existing posts) is deferred to a later phase.
 
 **Why Supabase Storage for composed images:**
-Scheduler board needs to display image previews. Local-only storage would require IPC round-trip for every preview. Supabase Storage provides public URLs for direct `<img>` rendering in the desktop app.
+Scheduler board needs to display image previews. Local-only storage would require IPC round-trip for every preview. Supabase Storage enables centralized preview delivery, while private bucket + signed URLs avoid exposing org image paths publicly.
+
+**Why rollback on storage/DB mismatch:**
+Content generation writes across two systems (Storage + Postgres). If DB update fails after upload, rollback (`storage.remove`) prevents orphan files and keeps retries idempotent.
 
 **Why mini survey for on-demand:**
 Instagram content requires more input than blog text (image choice, template, visual style). A 2-3 turn survey is the minimum to produce a reasonable result without over-engineering.

@@ -184,15 +184,15 @@ export const BlogContentEditor = ({
   return (
     <section className="ui-content-editor blog-content-editor">
       <div className="ui-content-editor-head">
-        <button type="button" onClick={handleBack}>
-          Back to Schedule
-        </button>
         <div>
           <h2>네이버 블로그</h2>
           <p className="sub-description">
             Status: <strong>{resolveStatusLabel(slotStatus)}</strong> | {resolveCampaignLabel(content)}
           </p>
         </div>
+        <button className="ui-content-editor-back-button" type="button" onClick={handleBack}>
+          Back to Schedule
+        </button>
       </div>
 
       <div className="blog-editor-surface">

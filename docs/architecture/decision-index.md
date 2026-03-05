@@ -76,3 +76,14 @@ Treat `skill_trigger` as a preferred hint and require LLM actionability gating b
 
 Reason  
 Forced routing on explicit skill selection produced wrong-topic generation for low-context user messages; deferring trigger execution until context sufficiency is confirmed prevents premature generation.
+
+## D-008
+
+Phase  
+7-2a
+
+Decision  
+Ship Instagram generation as a backend-contract slice first (intent, survey, media composition, storage) and defer desktop survey/signed-URL UX integration to 7-2b.
+
+Reason  
+Decoupling generation reliability from desktop rollout reduced cross-surface regression risk while allowing 7-2b to integrate on stable API and golden-test contracts.

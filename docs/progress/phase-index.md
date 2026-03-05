@@ -60,3 +60,4 @@
 | 7-1a | Naver Blog Generation Backend Core | Done | 2026-03-05 | [phase-7-1a-completion.md](./phase-7-1a-completion.md) |
 | 7-1b | Naver Blog Generation Frontend UX | Done | 2026-03-05 | [phase-7-1b-completion.md](./phase-7-1b-completion.md) |
 | 7-1b Patch | Skill Trigger Guardrails + Golden Contracts | Done | 2026-03-05 | [phase-7-1b-patch-completion.md](./phase-7-1b-patch-completion.md) |
+| 7-2a | Instagram Generation Backend Core | Done | 2026-03-05 | [phase-7-2a-completion.md](./phase-7-2a-completion.md) |

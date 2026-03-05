@@ -249,6 +249,7 @@ const emptyStateFromTrigger = (trigger: PipelineTriggerRow): SessionState => ({
   user_message: null,
   campaign_id: null,
   campaign_survey: null,
+  instagram_survey: null,
   campaign_draft_version: 0,
   campaign_chain_data: null,
   campaign_plan_document: null,
@@ -302,6 +303,10 @@ export const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): Se
     campaign_survey:
       row.campaign_survey && typeof row.campaign_survey === "object" && !Array.isArray(row.campaign_survey)
         ? (row.campaign_survey as SessionState["campaign_survey"])
+        : null,
+    instagram_survey:
+      row.instagram_survey && typeof row.instagram_survey === "object" && !Array.isArray(row.instagram_survey)
+        ? (row.instagram_survey as Record<string, unknown>)
         : null,
     campaign_draft_version:
       typeof row.campaign_draft_version === "number" && Number.isFinite(row.campaign_draft_version)
@@ -396,6 +401,7 @@ export const buildManualSessionState = (
     user_message: null,
     campaign_id: null,
     campaign_survey: null,
+    instagram_survey: null,
     campaign_draft_version: 0,
     campaign_chain_data: null,
     campaign_plan_document: null,
