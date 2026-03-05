@@ -11,6 +11,7 @@ export type ContextPanelMode = "page-context" | "agent-chat" | "hidden";
 export type WorkspaceHandoff = {
   focusWorkflowItemId?: string;
   focusSessionId?: string;
+  focusContentId?: string;
 };
 
 export type NavigateOptions = {

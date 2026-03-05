@@ -1,7 +1,7 @@
 # Phase 7-1b: Naver Blog Content Generation — Frontend UX
 
 - Date: 2026-03-05
-- Status: Planning
+- Status: Implemented (2026-03-05)
 - Scope: Unified WYSIWYG editor, copy-to-clipboard, scheduler board integration, chat generation UX
 - Depends on: Phase 7-1a (backend core), Phase 6-4a (scheduler board UX)
 - Maps to: Phase 7 content creation pipeline

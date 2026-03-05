@@ -58,3 +58,4 @@
 | 6-4a | Scheduler Scale UX + Window-Aware Reschedule Core | Done | 2026-03-05 | [phase-6-4a-completion.md](./phase-6-4a-completion.md) |
 | 6-4a Patch | Scheduler/Chat UX Polish + Session Resume Defaults | Done | 2026-03-05 | [phase-6-4a-ui-polish-completion.md](./phase-6-4a-ui-polish-completion.md) |
 | 7-1a | Naver Blog Generation Backend Core | Done | 2026-03-05 | [phase-7-1a-completion.md](./phase-7-1a-completion.md) |
+| 7-1b | Naver Blog Generation Frontend UX | Done | 2026-03-05 | [phase-7-1b-completion.md](./phase-7-1b-completion.md) |

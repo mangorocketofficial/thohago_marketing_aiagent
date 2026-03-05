@@ -3,6 +3,7 @@ import type { ChatMessage } from "@repo/types";
 import { useChatContext } from "../../context/ChatContext";
 import { useNavigation } from "../../context/NavigationContext";
 import { useSessionSelector } from "../../context/SessionSelectorContext";
+import { BlogGenerationCard, readBlogGenerationCardMeta } from "./BlogGenerationCard";
 
 const PANEL_DEFAULT_WIDTH = 360;
 const PANEL_MIN_WIDTH = 280;
@@ -93,7 +94,7 @@ const readSurveyPromptMeta = (message: ChatMessage): SurveyPromptMeta | null => 
 };
 
 export const GlobalChatPanel = () => {
-  const { activePage } = useNavigation();
+  const { activePage, navigate } = useNavigation();
   const {
     messages,
     chatInput,
@@ -126,6 +127,7 @@ export const GlobalChatPanel = () => {
   const [isSkillMenuOpen, setIsSkillMenuOpen] = useState(false);
   const [selectedSkillTrigger, setSelectedSkillTrigger] = useState<string | null>(null);
   const [chatSkillOptions, setChatSkillOptions] = useState<ChatSkillOption[]>(DEFAULT_CHAT_SKILL_OPTIONS);
+  const [pendingBlogTopic, setPendingBlogTopic] = useState("");
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +150,18 @@ export const GlobalChatPanel = () => {
     () => chatSkillOptions.find((entry) => entry.id === selectedSkillTrigger) ?? null,
     [chatSkillOptions, selectedSkillTrigger]
   );
+  const latestBlogGeneration = useMemo(() => {
+    for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
+      const parsed = readBlogGenerationCardMeta(timelineMessages[index]);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    return null;
+  }, [timelineMessages]);
+  const isBlogGenerationLoading =
+    isActionPending &&
+    (selectedSkillTrigger === "naverblog_generation" || selectedSession?.state?.active_skill === "naverblog_generation");
 
   useEffect(() => {
     window.localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
@@ -241,6 +255,13 @@ export const GlobalChatPanel = () => {
     }
     node.scrollTop = node.scrollHeight;
   }, [selectedSessionId, timelineMessages.length]);
+
+  useEffect(() => {
+    if (!latestBlogGeneration) {
+      return;
+    }
+    setPendingBlogTopic("");
+  }, [latestBlogGeneration]);
 
   if (isCollapsed) {
     return (
@@ -349,11 +370,31 @@ export const GlobalChatPanel = () => {
 
         <div className="ui-global-chat-timeline" ref={timelineRef}>
           {timelineMessages.length === 0 ? <p className="empty">No chat messages yet.</p> : null}
+          {isBlogGenerationLoading ? (
+            <div className="chat-item chat-assistant chat-blog-generation-loading">
+              <p>네이버 블로그 글 생성 중...</p>
+              <small>주제: {pendingBlogTopic || "요청 처리 중"}</small>
+            </div>
+          ) : null}
           {timelineMessages.map((message) => {
             const surveyPromptMeta = readSurveyPromptMeta(message);
+            const blogGenerationMeta = readBlogGenerationCardMeta(message);
             return (
               <div key={message.id} className={`chat-item chat-${message.role}`}>
-                <p>{message.content || "-"}</p>
+                {blogGenerationMeta ? (
+                  <BlogGenerationCard
+                    meta={blogGenerationMeta}
+                    onOpenEditor={(contentId) =>
+                      navigate("scheduler", {
+                        workspaceHandoff: {
+                          focusContentId: contentId
+                        }
+                      })
+                    }
+                  />
+                ) : (
+                  <p>{message.content || "-"}</p>
+                )}
                 {surveyPromptMeta ? (
                   <div className="chat-survey-options">
                     {surveyPromptMeta.choices.map((choice) => (
@@ -438,15 +479,24 @@ export const GlobalChatPanel = () => {
           <button
             className="primary"
             disabled={isUiBusy || !selectedSessionId || !chatInput.trim()}
-            onClick={() =>
+            onClick={() => {
+              const prompt = chatInput.trim();
+              if (!prompt) {
+                return;
+              }
+
+              if (selectedSkillTrigger === "naverblog_generation" || selectedSession?.state?.active_skill === "naverblog_generation") {
+                setPendingBlogTopic(prompt.slice(0, 90));
+              }
+
               void sendMessage({
                 ...(selectedSkillTrigger ? { skillTrigger: selectedSkillTrigger } : {}),
                 uiContext: {
                   source: "global-chat-panel",
                   pageId: activePage
                 }
-              })
-            }
+              });
+            }}
           >
             Send
           </button>

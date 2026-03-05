@@ -201,6 +201,14 @@ export const SchedulerPage = () => {
     window.dispatchEvent(new CustomEvent("ui:open-global-chat"));
   };
 
+  const handleRegenerateFromEditor = useCallback(
+    (_contentId: string) => {
+      setChatInput("이 블로그 글을 다시 생성해주세요");
+      window.dispatchEvent(new CustomEvent("ui:open-global-chat"));
+    },
+    [setChatInput]
+  );
+
   return (
     <div className="app-shell ui-page-shell">
       <section className="panel ui-page-panel ui-scheduler-shell">
@@ -274,6 +282,10 @@ export const SchedulerPage = () => {
             isActionPending={isActionPending}
             onBack={() => viewModel.setSelectedContentId(null)}
             onSubmitAction={(payload) => dispatchCardAction(payload)}
+            onRegenerateRequest={handleRegenerateFromEditor}
+            onAfterSave={() => {
+              void remote.refreshNow();
+            }}
           />
         )}
       </section>

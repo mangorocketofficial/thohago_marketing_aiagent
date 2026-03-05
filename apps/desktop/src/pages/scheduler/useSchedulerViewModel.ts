@@ -36,6 +36,7 @@ type SchedulerItem = {
   channel: string;
   contentType: string;
   title: string;
+  charCount: number | null;
 };
 
 type SchedulerViewModelParams = {
@@ -44,7 +45,7 @@ type SchedulerViewModelParams = {
   pendingContentWorkflowHints: Record<string, WorkflowLinkHint>;
   activeWindow: { startDate: string; endDate: string };
   filters: SchedulerFilterState;
-  workspaceHandoff: { focusWorkflowItemId?: string } | null;
+  workspaceHandoff: { focusWorkflowItemId?: string; focusContentId?: string } | null;
   clearWorkspaceHandoff: () => void;
 };
 
@@ -63,6 +64,39 @@ export const useSchedulerViewModel = ({
   setSelectedContentId: (contentId: string | null) => void;
 } => {
   const [selectedContentId, setSelectedContentId] = useState<string | null>(null);
+
+  const summarizeTitle = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return "(Scheduled slot)";
+    }
+    if (trimmed.length <= 72) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, 69)}...`;
+  };
+
+  const extractBodyTitle = (body: string | null): string => {
+    const normalized = (body ?? "").trim();
+    if (!normalized) {
+      return "";
+    }
+
+    const lines = normalized
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      return "";
+    }
+
+    const headingLine = lines.find((line) => /^#{1,6}\s+/.test(line));
+    if (headingLine) {
+      return headingLine.replace(/^#{1,6}\s+/, "").trim();
+    }
+
+    return lines[0];
+  };
 
   const schedulerItems = useMemo(() => {
     const withinWindow = (dateKey: string): boolean => dateKey >= activeWindow.startDate && dateKey <= activeWindow.endDate;
@@ -99,10 +133,12 @@ export const useSchedulerViewModel = ({
       if (!matchesStatus(slotStatus) || !matchesChannel(channel) || !matchesCampaign(raw.campaign_id ?? content?.campaign_id ?? null)) {
         continue;
       }
-      const title =
-        content?.body?.trim() ||
-        (typeof raw.title === "string" && raw.title.trim()) ||
-        "(Scheduled slot)";
+      const title = summarizeTitle(
+        extractBodyTitle(content?.body ?? null) ||
+          (typeof raw.title === "string" ? raw.title : "") ||
+          "(Scheduled slot)"
+      );
+      const charCount = typeof content?.body === "string" ? content.body.length : null;
       const itemKey = contentId ?? `slot:${raw.slot_id}`;
       byId.set(itemKey, {
         slotId: raw.slot_id,
@@ -115,7 +151,8 @@ export const useSchedulerViewModel = ({
         scheduledTime: raw.scheduled_time || content?.scheduled_at || null,
         channel,
         contentType,
-        title: title.slice(0, 72)
+        title,
+        charCount
       });
     }
 
@@ -135,6 +172,7 @@ export const useSchedulerViewModel = ({
       if (!matchesStatus(slotStatus) || !matchesChannel(content.channel) || !matchesCampaign(content.campaign_id)) {
         continue;
       }
+      const title = summarizeTitle(extractBodyTitle(content.body) || "(No body)");
       byId.set(content.id, {
         slotId: null,
         contentId: content.id,
@@ -146,7 +184,8 @@ export const useSchedulerViewModel = ({
         scheduledTime: content.scheduled_at || null,
         channel: content.channel,
         contentType: content.content_type,
-        title: (content.body?.trim() || "(No body)").slice(0, 72)
+        title,
+        charCount: typeof content.body === "string" ? content.body.length : null
       });
     }
 
@@ -185,6 +224,16 @@ export const useSchedulerViewModel = ({
   }, [schedulerItems, selectedContentId]);
 
   useEffect(() => {
+    const focusContentId = workspaceHandoff?.focusContentId?.trim();
+    if (focusContentId) {
+      const target = schedulerItems.find((item) => item.contentId === focusContentId);
+      if (target?.contentId) {
+        setSelectedContentId(target.contentId);
+      }
+      clearWorkspaceHandoff();
+      return;
+    }
+
     if (!workspaceHandoff?.focusWorkflowItemId) {
       return;
     }

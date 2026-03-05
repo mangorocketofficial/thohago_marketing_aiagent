@@ -1,6 +1,7 @@
 import express from "express";
 import { env } from "./lib/env";
 import { supabaseAdmin } from "./lib/supabase-admin";
+import { contentsRouter } from "./routes/contents";
 import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
 import { memoryRouter } from "./routes/memory";
@@ -21,6 +22,7 @@ app.use(
 app.use(healthRouter);
 app.use(triggerRouter);
 app.use(sessionsRouter);
+app.use(contentsRouter);
 app.use(onboardingRouter);
 app.use(memoryRouter);
 app.use(ragRouter);
@@ -37,6 +39,7 @@ app.use((_req, res) => {
 const requiredTables = [
   "pipeline_triggers",
   "campaigns",
+  "contents",
   "chat_messages",
   "session_memory",
   "conversation_preferences",

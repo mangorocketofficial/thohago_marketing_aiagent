@@ -54,3 +54,14 @@ Deliver Naver Blog generation as backend-contract-first (intent/slot/persistence
 
 Reason  
 Stabilizing deterministic backend outputs first lowers integration risk across API, orchestrator routing, IPC metadata, and upcoming 7-1b/7-2 UI flows.
+
+## D-006
+
+Phase  
+7-1b
+
+Decision  
+Implement Naver blog editor UX on top of a new optimistic-concurrency save-body API and content-level scheduler handoff.
+
+Reason  
+Editor copy/save/regenerate UX needed deterministic cross-surface state; adding `content:save-body` and `focusContentId` handoff avoided UI-only divergence between chat, scheduler, and storage.

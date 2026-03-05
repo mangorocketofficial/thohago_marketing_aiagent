@@ -11,6 +11,7 @@ type SchedulerBoardItem = {
   channel: string;
   contentType: string;
   title: string;
+  charCount: number | null;
 };
 
 type SchedulerBoardProps = {
@@ -26,6 +27,26 @@ type SchedulerBoardProps = {
 };
 
 const MONTH_VISIBLE_LIMIT = 3;
+
+const toChannelLabel = (channel: string): string => {
+  const normalized = channel.trim().toLowerCase();
+  if (normalized === "naver_blog") {
+    return "네이버 블로그";
+  }
+  if (normalized === "instagram") {
+    return "Instagram";
+  }
+  if (normalized === "threads") {
+    return "Threads";
+  }
+  if (normalized === "youtube") {
+    return "YouTube";
+  }
+  if (normalized === "facebook") {
+    return "Facebook";
+  }
+  return normalized || "Unknown";
+};
 
 const formatDateLabel = (dateKey: string): string => {
   const parsed = new Date(`${dateKey}T00:00:00`);
@@ -119,6 +140,13 @@ const renderCard = (params: {
   const { item, isSelected, isRescheduling, onSelectContent } = params;
   const canOpen = item.hasContent && !!item.contentId;
   const key = item.contentId ?? `slot:${item.slotId ?? `${item.dateKey}:${item.title}`}`;
+  const isNaverDraft = item.channel === "naver_blog" && item.slotStatus === "pending_approval";
+  const badgeClassName = isNaverDraft ? "is-draft" : `is-${item.slotStatus}`;
+  const badgeLabel = isNaverDraft ? "Draft" : SLOT_STATUS_LABEL[item.slotStatus];
+  const metaParts = [item.contentType];
+  if (item.charCount !== null && item.charCount >= 0) {
+    metaParts.unshift(`${item.charCount.toLocaleString()}자`);
+  }
 
   return (
     <button
@@ -147,11 +175,11 @@ const renderCard = (params: {
       }}
     >
       <span className="ui-scheduler-card-head">
-        <strong>{item.channel}</strong>
-        <span className={`ui-slot-badge is-${item.slotStatus}`}>{SLOT_STATUS_LABEL[item.slotStatus]}</span>
+        <strong>{toChannelLabel(item.channel)}</strong>
+        <span className={`ui-slot-badge ${badgeClassName}`}>{badgeLabel}</span>
       </span>
       <span className="ui-scheduler-card-body">{item.title}</span>
-      <span className="ui-scheduler-card-meta">{item.contentType}</span>
+      <span className="ui-scheduler-card-meta">{metaParts.join(" | ")}</span>
     </button>
   );
 };

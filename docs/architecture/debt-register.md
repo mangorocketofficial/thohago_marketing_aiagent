@@ -54,3 +54,14 @@ Reason
 
 Affects  
 Phase 7-1b
+
+DEBT-006
+
+Description  
+Blog generation completion chat cards currently duplicate full `generated_body` in chat metadata to support one-click copy.
+
+Reason  
+7-1b prioritized immediate copy UX without adding a separate content-body fetch path for chat cards.
+
+Affects  
+Phase 7-2a

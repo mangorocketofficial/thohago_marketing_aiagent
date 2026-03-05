@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     openFolder: () => ipcRenderer.invoke("watcher:open-folder")
   },
   content: {
+    saveBody: (payload) => ipcRenderer.invoke("content:save-body", payload),
     saveLocal: (payload) => ipcRenderer.invoke("content:save-local", payload)
   },
   onboarding: {

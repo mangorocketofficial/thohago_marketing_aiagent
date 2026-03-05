@@ -1518,6 +1518,84 @@ const registerIpcHandlers = () => {
     };
   });
 
+  ipcMain.handle("content:save-body", async (_, payload) => {
+    const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
+    if (!contentId) {
+      return {
+        ok: false,
+        message: "contentId is required.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    if (typeof payload?.body !== "string") {
+      return {
+        ok: false,
+        message: "body must be a string.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    let expectedUpdatedAt = null;
+    try {
+      expectedUpdatedAt = parseOptionalIsoDateTime(payload?.expectedUpdatedAt, "expectedUpdatedAt");
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "expectedUpdatedAt must be a valid ISO datetime.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/body`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            body: payload.body,
+            ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {})
+          })
+        }
+      );
+
+      const contentRow = body?.content && typeof body.content === "object" ? body.content : null;
+      const nextId = typeof contentRow?.id === "string" ? contentRow.id.trim() : contentId;
+      const nextBody = typeof contentRow?.body === "string" ? contentRow.body : payload.body;
+      const nextUpdatedAt = typeof contentRow?.updated_at === "string" ? contentRow.updated_at.trim() : "";
+
+      if (!nextId || !nextUpdatedAt) {
+        return {
+          ok: false,
+          message: "save-body response did not include content metadata.",
+          code: "invalid_response",
+          status: 502
+        };
+      }
+
+      return {
+        ok: true,
+        content: {
+          id: nextId,
+          body: nextBody,
+          updated_at: nextUpdatedAt
+        }
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to save content body.");
+      return {
+        ok: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
   ipcMain.handle("content:save-local", async (_, payload) => {
     const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
     if (!watchPath) {

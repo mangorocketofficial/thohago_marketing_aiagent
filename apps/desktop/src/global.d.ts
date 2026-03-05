@@ -63,6 +63,29 @@ type ContentSaveLocalPayload = {
   encoding?: "utf8";
 };
 
+type ContentSaveBodyPayload = {
+  contentId: string;
+  body: string;
+  expectedUpdatedAt?: string;
+};
+
+type ContentSaveBodyResult =
+  | {
+      ok: true;
+      content: {
+        id: string;
+        body: string;
+        updated_at: string;
+      };
+    }
+  | {
+      ok: false;
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
 type ContentSaveLocalResult = {
   ok: boolean;
   filePath?: string;
@@ -425,6 +448,7 @@ declare global {
         openFolder: () => Promise<WatcherOpenFolderResult>;
       };
       content: {
+        saveBody: (payload: ContentSaveBodyPayload) => Promise<ContentSaveBodyResult>;
         saveLocal: (payload: ContentSaveLocalPayload) => Promise<ContentSaveLocalResult>;
       };
       onboarding: {

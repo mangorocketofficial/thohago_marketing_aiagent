@@ -97,6 +97,9 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
       metadata: {
         content_id: generated.contentId,
         slot_id: generated.slotId,
+        topic: generated.topic,
+        char_count: generated.body.length,
+        generated_body: generated.body,
         local_save_suggestion: {
           relative_path: generated.localSaveSuggestion.relativePath,
           file_name: generated.localSaveSuggestion.fileName,
