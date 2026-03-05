@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
 import { requireApiSecret, requireUserJwt } from "../lib/auth";
 import { HttpError, toHttpError } from "../lib/errors";
-import { getTemplateSummaries } from "../media/templates/registry";
+import { getAllTemplates } from "../media/templates/registry";
 import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import { parseRescheduleSlotRequest } from "../scheduler/http/reschedule-slot-request";
@@ -13,6 +13,7 @@ import {
 import { listActiveCampaignSummaries } from "../scheduler/queries/list-active-campaign-summaries";
 import { listScheduledContentBySlotWindow } from "../scheduler/queries/list-scheduled-content";
 import { rescheduleScheduleSlot } from "../scheduler/queries/reschedule-schedule-slot";
+import { getInstagramContentSignedUrl, recomposeInstagramContent } from "../orchestrator/instagram-editor";
 import {
   createSessionForOrg,
   getActiveSessionForOrg,
@@ -110,6 +111,25 @@ const parseOptionalBoolean = (value: unknown, field: string, fallback: boolean):
     return false;
   }
   throw new HttpError(400, "invalid_payload", `${field} must be true/false.`);
+};
+
+const parseOptionalStringArray = (value: unknown, field: string, maxItems = 8): string[] | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "invalid_payload", `${field} must be an array of strings.`);
+  }
+
+  const normalized = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => !!entry);
+
+  if (normalized.length > maxItems) {
+    throw new HttpError(400, "invalid_payload", `${field} must contain at most ${maxItems} values.`);
+  }
+
+  return normalized;
 };
 
 const parseSessionStatuses = (value: unknown): SessionStatus[] => {
@@ -532,7 +552,15 @@ sessionsRouter.get("/orgs/:orgId/templates/instagram", async (req, res) => {
       return;
     }
 
-    const templates = getTemplateSummaries();
+    const templates = getAllTemplates().map((template) => ({
+      id: template.id,
+      nameKo: template.nameKo,
+      description: template.description,
+      thumbnail: template.thumbnail ?? `thumbnails/${template.id}.png`,
+      width: template.width,
+      height: template.height,
+      layers: template.layers
+    }));
     res.json({
       ok: true,
       templates
@@ -554,9 +582,6 @@ sessionsRouter.get("/orgs/:orgId/activity-images", async (req, res) => {
     }
 
     const activityFolder = parseOptionalString(asQueryString(req.query.activity_folder));
-    if (!activityFolder) {
-      throw new HttpError(400, "invalid_payload", "activity_folder query is required.");
-    }
 
     const limit = parseBoundedInt(req.query.limit, "limit", {
       fallback: 40,
@@ -566,7 +591,7 @@ sessionsRouter.get("/orgs/:orgId/activity-images", async (req, res) => {
 
     const images = await listActivityImages({
       orgId,
-      activityFolder,
+      ...(activityFolder ? { activityFolder } : {}),
       limit
     });
 
@@ -579,6 +604,78 @@ sessionsRouter.get("/orgs/:orgId/activity-images", async (req, res) => {
         fileSize: image.fileSize,
         detectedAt: image.detectedAt
       }))
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.post("/orgs/:orgId/contents/:contentId/recompose", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const contentId = parseRequiredString(req.params.contentId, "contentId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const templateId = parseOptionalString(req.body?.templateId);
+    const overlayMain =
+      typeof req.body?.overlayMain === "string" ? req.body.overlayMain : req.body?.overlayMain === null ? "" : undefined;
+    const overlaySub =
+      typeof req.body?.overlaySub === "string" ? req.body.overlaySub : req.body?.overlaySub === null ? "" : undefined;
+    const imageFileIds = parseOptionalStringArray(req.body?.imageFileIds, "imageFileIds");
+    const clientRequestId = parseOptionalString(req.body?.clientRequestId);
+
+    const result = await recomposeInstagramContent({
+      orgId,
+      contentId,
+      templateId,
+      overlayMain,
+      overlaySub,
+      imageFileIds: imageFileIds ?? undefined,
+      clientRequestId
+    });
+
+    res.json({
+      ok: true,
+      requestId: result.requestId,
+      signedImageUrl: result.signedImageUrl,
+      expiresAt: result.expiresAt,
+      updated_at: result.updatedAt,
+      requiredImageCount: result.requiredImageCount,
+      providedImageCount: result.providedImageCount
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.get("/orgs/:orgId/contents/:contentId/signed-url", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const contentId = parseRequiredString(req.params.contentId, "contentId");
+    if (!(await requireActiveSubscription(res, orgId))) {
+      return;
+    }
+
+    const result = await getInstagramContentSignedUrl({
+      orgId,
+      contentId
+    });
+
+    res.json({
+      ok: true,
+      signedImageUrl: result.signedImageUrl,
+      expiresAt: result.expiresAt,
+      updated_at: result.updatedAt
     });
   } catch (error) {
     sendError(res, error);

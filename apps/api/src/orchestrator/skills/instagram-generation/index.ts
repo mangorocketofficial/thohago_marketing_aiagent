@@ -106,7 +106,9 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
         },
         source: generated.source,
         generation_model: generated.model,
-        generation_reused: generated.reused
+        generation_reused: generated.reused,
+        generated_caption: generated.caption,
+        char_count: generated.caption.length
       }
     });
 
@@ -203,7 +205,9 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
       },
       source: generated.source,
       generation_model: generated.model,
-      generation_reused: generated.reused
+      generation_reused: generated.reused,
+      generated_caption: generated.caption,
+      char_count: generated.caption.length
     }
   });
 

@@ -30,7 +30,7 @@ import { collectInitialFiles, startWatcher } from "./watcher.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const electron = require("electron");
-const { app, BrowserWindow, dialog, ipcMain, shell } = electron;
+const { app, BrowserWindow, dialog, ipcMain, shell, nativeImage } = electron;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 const triggerEndpoint = (process.env.PIPELINE_TRIGGER_ENDPOINT ?? "").trim();
 const configuredApiBase = (process.env.ORCHESTRATOR_API_BASE ?? "").trim();
@@ -244,6 +244,39 @@ const ensurePathInsideRoot = (rootPath, targetPath) => {
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Resolved file path escaped watch root.");
   }
+};
+
+const resolveWatchRootPath = () => {
+  const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
+  if (!watchPath) {
+    throw new Error("watchPath is not configured.");
+  }
+  return path.resolve(watchPath);
+};
+
+const resolveAbsolutePathFromRelativePath = (relativePath) => {
+  const rootPath = resolveWatchRootPath();
+  const relativeSegments = sanitizeRelativeSegments(relativePath, "relativePath");
+  if (relativeSegments.length === 0) {
+    throw new Error("relativePath is required.");
+  }
+  const absolutePath = path.resolve(rootPath, ...relativeSegments);
+  ensurePathInsideRoot(rootPath, absolutePath);
+  return absolutePath;
+};
+
+const toThumbnailDataUrl = (absolutePath, maxSize = 200) => {
+  const source = nativeImage.createFromPath(absolutePath);
+  if (source.isEmpty()) {
+    return null;
+  }
+
+  const resized = source.resize({
+    width: Math.max(1, Math.floor(maxSize)),
+    height: Math.max(1, Math.floor(maxSize)),
+    quality: "good"
+  });
+  return resized.toDataURL();
 };
 
 const parseOptionalSchedulerCursor = (value) => {
@@ -1630,6 +1663,277 @@ const registerIpcHandlers = () => {
         ok: false,
         error: "invalid_path",
         message
+      };
+    }
+  });
+
+  ipcMain.handle("content:list-instagram-templates", async () => {
+    try {
+      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/templates/instagram`, {
+        method: "GET"
+      });
+      return {
+        ok: true,
+        templates: Array.isArray(body?.templates) ? body.templates : []
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to load instagram templates.");
+      return {
+        ok: false,
+        templates: [],
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:get-signed-url", async (_, payload) => {
+    const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
+    if (!contentId) {
+      return {
+        ok: false,
+        message: "contentId is required.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/signed-url`,
+        {
+          method: "GET"
+        }
+      );
+      return {
+        ok: true,
+        signedImageUrl: typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "",
+        expiresAt: typeof body?.expiresAt === "string" ? body.expiresAt : "",
+        updatedAt: typeof body?.updated_at === "string" ? body.updated_at : ""
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to load signed image URL.");
+      return {
+        ok: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:recompose", async (_, payload) => {
+    const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
+    if (!contentId) {
+      return {
+        ok: false,
+        message: "contentId is required.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    const templateId = typeof payload?.templateId === "string" ? payload.templateId.trim() : "";
+    if (!templateId) {
+      return {
+        ok: false,
+        message: "templateId is required.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    const overlayMain = typeof payload?.overlayMain === "string" ? payload.overlayMain : "";
+    const overlaySub = typeof payload?.overlaySub === "string" ? payload.overlaySub : "";
+    const imageFileIds = Array.isArray(payload?.imageFileIds)
+      ? payload.imageFileIds.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter((entry) => !!entry)
+      : undefined;
+    const clientRequestId = typeof payload?.clientRequestId === "string" ? payload.clientRequestId.trim() : "";
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/recompose`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            templateId,
+            overlayMain,
+            overlaySub,
+            ...(imageFileIds ? { imageFileIds } : {}),
+            ...(clientRequestId ? { clientRequestId } : {})
+          })
+        }
+      );
+
+      return {
+        ok: true,
+        signedImageUrl: typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "",
+        expiresAt: typeof body?.expiresAt === "string" ? body.expiresAt : "",
+        updatedAt: typeof body?.updated_at === "string" ? body.updated_at : "",
+        requestId: typeof body?.requestId === "string" ? body.requestId : clientRequestId
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to re-compose instagram image.");
+      return {
+        ok: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:load-activity-thumbnails", async (_, payload) => {
+    const activityFolder = typeof payload?.activityFolder === "string" ? payload.activityFolder.trim() : "";
+    const limitRaw = payload?.limit;
+    const limit = parsePositiveInteger(limitRaw);
+    if (limitRaw !== undefined && limit === null) {
+      return {
+        ok: false,
+        images: [],
+        message: "limit must be a positive integer.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    const params = new URLSearchParams();
+    if (activityFolder) {
+      params.set("activity_folder", activityFolder);
+    }
+    if (limit !== null) {
+      params.set("limit", String(limit));
+    }
+
+    const suffix = params.toString();
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/activity-images${suffix ? `?${suffix}` : ""}`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+      const images = Array.isArray(body?.images) ? body.images : [];
+      const thumbnails = images
+        .map((entry) => {
+          const row = entry && typeof entry === "object" ? entry : {};
+          const fileId = typeof row.fileId === "string" ? row.fileId.trim() : "";
+          const fileName = typeof row.fileName === "string" ? row.fileName.trim() : "";
+          const relativePath = typeof row.relativePath === "string" ? row.relativePath.trim() : "";
+          if (!fileId || !relativePath) {
+            return null;
+          }
+
+          try {
+            const absolutePath = resolveAbsolutePathFromRelativePath(relativePath);
+            const thumbnailDataUrl = toThumbnailDataUrl(absolutePath);
+            if (!thumbnailDataUrl) {
+              return null;
+            }
+            return {
+              fileId,
+              fileName: fileName || path.basename(relativePath),
+              thumbnailDataUrl
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry) => !!entry);
+
+      return {
+        ok: true,
+        images: thumbnails
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to load activity thumbnails.");
+      return {
+        ok: false,
+        images: [],
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:download-image", async (_, payload) => {
+    const contentId = typeof payload?.contentId === "string" ? payload.contentId.trim() : "";
+    if (!contentId) {
+      return {
+        ok: false,
+        cancelled: false,
+        message: "contentId is required.",
+        code: "invalid_payload",
+        status: 400
+      };
+    }
+
+    const suggestedFileName =
+      typeof payload?.suggestedFileName === "string" && payload.suggestedFileName.trim()
+        ? payload.suggestedFileName.trim()
+        : `instagram_${contentId}.png`;
+
+    const result = await dialog.showSaveDialog({
+      defaultPath: suggestedFileName,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg"] }]
+    });
+    if (!result.filePath) {
+      return {
+        ok: false,
+        cancelled: true
+      };
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/contents/${encodeURIComponent(contentId)}/signed-url`,
+        {
+          method: "GET"
+        }
+      );
+      const signedImageUrl = typeof body?.signedImageUrl === "string" ? body.signedImageUrl : "";
+      if (!signedImageUrl) {
+        return {
+          ok: false,
+          cancelled: false,
+          message: "signed image url is missing from API response.",
+          code: "invalid_response",
+          status: 502
+        };
+      }
+
+      const response = await fetch(signedImageUrl);
+      if (!response.ok) {
+        return {
+          ok: false,
+          cancelled: false,
+          message: `Failed to download image. HTTP ${response.status}`,
+          code: "download_failed",
+          status: response.status
+        };
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      await fs.promises.writeFile(result.filePath, buffer);
+      return {
+        ok: true,
+        cancelled: false,
+        filePath: result.filePath
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to download image.");
+      return {
+        ok: false,
+        cancelled: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
       };
     }
   });

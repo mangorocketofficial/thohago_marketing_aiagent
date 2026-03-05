@@ -4,6 +4,7 @@ import { useChatContext } from "../../context/ChatContext";
 import { useNavigation } from "../../context/NavigationContext";
 import { useSessionSelector } from "../../context/SessionSelectorContext";
 import { BlogGenerationCard, readBlogGenerationCardMeta } from "./BlogGenerationCard";
+import { InstagramGenerationCard, readInstagramGenerationCardMeta } from "./InstagramGenerationCard";
 
 const PANEL_DEFAULT_WIDTH = 360;
 const PANEL_MIN_WIDTH = 280;
@@ -379,11 +380,23 @@ export const GlobalChatPanel = () => {
           {timelineMessages.map((message) => {
             const surveyPromptMeta = readSurveyPromptMeta(message);
             const blogGenerationMeta = readBlogGenerationCardMeta(message);
+            const instagramGenerationMeta = readInstagramGenerationCardMeta(message);
             return (
               <div key={message.id} className={`chat-item chat-${message.role}`}>
                 {blogGenerationMeta ? (
                   <BlogGenerationCard
                     meta={blogGenerationMeta}
+                    onOpenEditor={(contentId) =>
+                      navigate("scheduler", {
+                        workspaceHandoff: {
+                          focusContentId: contentId
+                        }
+                      })
+                    }
+                  />
+                ) : instagramGenerationMeta ? (
+                  <InstagramGenerationCard
+                    meta={instagramGenerationMeta}
                     onOpenEditor={(contentId) =>
                       navigate("scheduler", {
                         workspaceHandoff: {

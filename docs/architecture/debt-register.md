@@ -87,3 +87,14 @@ Reason
 
 Affects  
 Phase 7-2b
+
+DEBT-009
+
+Description  
+Instagram editor action bar does not yet expose scoped regenerate execution (`all`, `caption_only`, `image_only`) even though follow-up flow expects deterministic scope control.
+
+Reason  
+7-2b prioritized safe re-compose/signed-preview/editor wiring first; regenerate scope API and UX sequencing were deferred to keep this slice shippable.
+
+Affects  
+Phase 7-2c

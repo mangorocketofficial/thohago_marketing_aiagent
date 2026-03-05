@@ -23,23 +23,25 @@ export type ImageSelectionResult = {
  */
 export const listActivityImages = async (params: {
   orgId: string;
-  activityFolder: string;
+  activityFolder?: string | null;
   limit?: number;
 }): Promise<ActivityImageEntry[]> => {
-  const activityFolder = params.activityFolder.trim();
-  if (!activityFolder) {
-    return [];
-  }
+  const activityFolder = typeof params.activityFolder === "string" ? params.activityFolder.trim() : "";
 
   const limit = Math.max(1, Math.min(100, params.limit ?? 40));
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("local_files")
     .select("id,file_name,file_path,file_size,indexed_at,status,activity_folder")
     .eq("org_id", params.orgId)
     .eq("file_type", "image")
-    .eq("activity_folder", activityFolder)
     .order("indexed_at", { ascending: false })
     .limit(limit);
+
+  if (activityFolder) {
+    query = query.eq("activity_folder", activityFolder);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new HttpError(500, "db_error", `Failed to list activity images: ${error.message}`);
@@ -55,7 +57,7 @@ export const listActivityImages = async (params: {
 
       const filePath = asString(record.file_path).trim();
       const fileName = asString(record.file_name).trim() || path.basename(filePath);
-      const folder = asString(record.activity_folder, activityFolder).trim() || activityFolder;
+      const folder = asString(record.activity_folder, activityFolder).trim();
 
       return {
         fileId: asString(record.id).trim(),
@@ -210,6 +212,9 @@ const normalizeManualSelection = (values?: string[]): string[] =>
 const toRelativePath = (absoluteOrRelativePath: string, activityFolder: string, fileName: string): string => {
   const normalized = absoluteOrRelativePath.replace(/\\/g, "/");
   const normalizedFolder = activityFolder.replace(/\\/g, "/");
+  if (!normalizedFolder) {
+    return fileName;
+  }
   const index = normalized.lastIndexOf(`/${normalizedFolder}/`);
   if (index >= 0) {
     return normalized.slice(index + 1).replace(/^\/+/, "");

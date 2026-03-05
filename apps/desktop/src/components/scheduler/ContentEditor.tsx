@@ -3,6 +3,7 @@ import type { WorkflowLinkHint } from "../../context/ChatContext";
 import type { SlotStatus } from "./status-model";
 import { BlogContentEditor } from "./BlogContentEditor";
 import { GenericContentEditor } from "./GenericContentEditor";
+import { InstagramContentEditor } from "./InstagramContentEditor";
 
 export type ContentEditorProps = {
   content: Content;
@@ -32,6 +33,9 @@ export type ContentEditorProps = {
 export const ContentEditor = (props: ContentEditorProps) => {
   if (props.content.channel === "naver_blog") {
     return <BlogContentEditor {...props} />;
+  }
+  if (props.content.channel === "instagram") {
+    return <InstagramContentEditor {...props} />;
   }
 
   return <GenericContentEditor {...props} />;

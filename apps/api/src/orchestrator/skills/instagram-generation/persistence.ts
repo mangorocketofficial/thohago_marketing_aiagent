@@ -115,12 +115,14 @@ export const insertDraftInstagramContent = async (params: {
   orgId: string;
   slot: ScheduleSlotRow;
   source: SlotSource;
+  activityFolder: string;
   topic: string;
   caption: string;
   hashtags: string[];
   overlayMain: string;
   overlaySub: string;
   templateId: string;
+  selectedImageFileIds: string[];
   selectedImagePaths: string[];
   model: "claude" | "gpt-4o-mini";
   promptTokens: number | null;
@@ -158,11 +160,13 @@ export const insertDraftInstagramContent = async (params: {
         },
         topic: params.topic,
         source: params.source,
+        activity_folder: params.activityFolder,
         campaign_id: params.slot.campaign_id,
         hashtags: params.hashtags,
         template_id: params.templateId,
         overlay_main: params.overlayMain,
         overlay_sub: params.overlaySub,
+        image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,
         output_format: params.outputFormat,
         local_save_suggestion: {

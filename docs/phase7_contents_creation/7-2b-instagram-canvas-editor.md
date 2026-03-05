@@ -452,12 +452,22 @@ const ImagePickerModal = ({ images, isLoading, targetSlotIndex, onSelect, onClos
 
 File: `apps/desktop/electron/main.mjs` (modify)
 
-Instead of exposing `file://` URLs directly, the main process generates thumbnails and returns base64 data URLs:
+Instead of exposing `file://` URLs directly, the main process generates thumbnails and returns base64 data URLs.
+Security boundary rule: renderer does not control `orgId`; main process always uses authenticated `runtimeState.orgId`.
 
 ```javascript
-ipcMain.handle("content:load-activity-thumbnails", async (_, { orgId }) => {
+ipcMain.handle("content:load-activity-thumbnails", async (_, payload) => {
+  const orgId = runtimeState.orgId; // trust boundary: do not accept orgId from renderer
+  const activityFolder = typeof payload?.activityFolder === "string" ? payload.activityFolder.trim() : "";
+  if (!activityFolder) {
+    throw new Error("activityFolder is required.");
+  }
+
   // 1. Fetch image list from API
-  const { images } = await apiCall("GET", `/orgs/${orgId}/activity-images`);
+  const { images } = await apiCall(
+    "GET",
+    `/orgs/${orgId}/activity-images?activity_folder=${encodeURIComponent(activityFolder)}`
+  );
 
   // 2. Generate thumbnails via Sharp (or read + resize in main process)
   const results = await Promise.all(
@@ -505,7 +515,7 @@ User edits overlay text on preview
     → Upload new image to Supabase Storage private bucket (upsert)
     → Update contents.metadata
     → Create signed URL for response
-  → Response: { ok, signedImageUrl, expiresAt }
+  → Response: { ok, signedImageUrl, expiresAt, requestId }
   → ImagePreview refreshes with new signed URL
 ```
 
@@ -520,6 +530,7 @@ Route: `POST /orgs/:orgId/contents/:contentId/recompose`
   overlayMain: string;
   overlaySub: string;
   imageFileIds?: string[];  // only if image changed; resolved to paths server-side
+  clientRequestId?: string; // opaque id for race-safe reconciliation
 }
 
 // Response
@@ -527,6 +538,7 @@ Route: `POST /orgs/:orgId/contents/:contentId/recompose`
   ok: boolean;
   signedImageUrl: string;   // short-lived signed URL (30 min)
   expiresAt: string;        // ISO timestamp
+  requestId: string;        // echoes clientRequestId (or server-generated id)
   updated_at: string;
 }
 ```
@@ -537,12 +549,49 @@ File: `apps/api/src/orchestrator/service.ts` (modify — add `recomposeContent()
 The `recomposeContent()` service method:
 1. Loads content metadata from DB.
 2. Resolves `imageFileIds` to absolute paths via activity file index.
-3. Calls `composeInstagramImage()` from 7-2a with new parameters.
-4. Uploads composed buffer to private bucket (upsert overwrites previous).
-5. Updates `contents.metadata` with new `composed_image_storage`, `template_id`, overlay texts.
-6. Returns signed URL for the new image.
+3. Validates image slot count against selected template (`requiredImageCount`).
+4. Returns `422 invalid_payload` when `providedImageCount !== requiredImageCount` for collage templates.
+5. Calls `composeInstagramImage()` from 7-2a with new parameters.
+6. Uploads composed buffer to private bucket (upsert overwrites previous).
+7. Updates `contents.metadata` with new `composed_image_storage`, `template_id`, overlay texts.
+8. Returns signed URL for the new image.
 
-### 6.2 IPC handler
+### 6.2 Recompose race-condition guard (latest-wins)
+
+Re-compose requests are asynchronous and can return out of order. Renderer applies only the latest response.
+
+```typescript
+const requestSeqRef = useRef(0);
+
+const requestRecompose = async (input: RecomposeInput) => {
+  const seq = requestSeqRef.current + 1;
+  requestSeqRef.current = seq;
+  setIsRecomposing(true);
+
+  const result = await runtime.content.recompose({
+    ...input,
+    clientRequestId: `${contentId}:${seq}`,
+  });
+
+  // Ignore stale responses that finished late.
+  if (seq < requestSeqRef.current) {
+    return;
+  }
+
+  setIsRecomposing(false);
+  if (!result.ok) {
+    setNotice(result.message ?? "Failed to re-compose image.");
+    return;
+  }
+
+  setImageUrl(result.signedImageUrl);
+  setSignedUrlExpiresAt(result.expiresAt);
+};
+```
+
+IPC/API should pass through `clientRequestId` as `requestId` to support tracing and debugging.
+
+### 6.3 IPC handler
 
 File: `apps/desktop/electron/main.mjs` (modify)
 
@@ -553,12 +602,13 @@ ipcMain.handle("content:recompose", async (_, payload) => {
     overlayMain: payload.overlayMain,
     overlaySub: payload.overlaySub,
     imageFileIds: payload.imageFileIds,
+    clientRequestId: payload.clientRequestId,
   });
   return response;
 });
 ```
 
-### 6.3 Signed URL refresh
+### 6.4 Signed URL refresh
 
 Since signed URLs expire (30 min), the editor needs a refresh mechanism:
 
@@ -821,7 +871,6 @@ type InstagramActionBarProps = {
   isRecomposing: boolean;
   localSaveStatus: "idle" | "saved" | "error";
   onDownloadImage: () => void;
-  onCopyCaption: () => void;
   onSave: () => void;
   onRegenerate: () => void;
 };
@@ -1233,9 +1282,11 @@ File: `apps/desktop/src/styles/scheduler.css` (modify — add Instagram editor s
 12. Regenerate button opens dialog with scope selection (all / caption only / image only).
 13. Save button persists all changes (caption, hashtags, overlay, template, images) to DB + local file.
 14. Re-compose shows loading overlay on image during processing.
-15. Signed URL auto-refreshes before expiry (5 min buffer).
-16. Chat completion card shows thumbnail preview of composed image.
-17. `pnpm --filter desktop type-check` passes.
+15. Re-compose latest-wins guard ignores stale out-of-order responses.
+16. API returns `422 invalid_payload` when collage image slot count is invalid.
+17. Signed URL auto-refreshes before expiry (5 min buffer).
+18. Chat completion card shows thumbnail preview of composed image.
+19. `pnpm --filter desktop type-check` passes.
 
 ---
 
@@ -1254,9 +1305,11 @@ File: `apps/desktop/src/styles/scheduler.css` (modify — add Instagram editor s
 11. Manual: copy caption → verify clipboard contains caption + hashtag line
 12. Manual: download image → verify Electron save dialog → file saved correctly
 13. Manual: click regenerate → verify dialog opens with scope options → confirm → verify result
-14. Manual: save → verify DB update + local file written
-15. Manual: wait for signed URL near-expiry → verify auto-refresh
-16. Manual: verify chat completion card shows image thumbnail
+14. Manual: rapid overlay edits (3+ requests) → verify stale response does not overwrite latest preview
+15. Manual: collage template with invalid image count → verify API 422 + editor error notice
+16. Manual: save → verify DB update + local file written
+17. Manual: wait for signed URL near-expiry → verify auto-refresh
+18. Manual: verify chat completion card shows image thumbnail
 
 ---
 

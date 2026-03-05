@@ -38,7 +38,12 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
   },
   content: {
     saveBody: (payload) => ipcRenderer.invoke("content:save-body", payload),
-    saveLocal: (payload) => ipcRenderer.invoke("content:save-local", payload)
+    saveLocal: (payload) => ipcRenderer.invoke("content:save-local", payload),
+    listInstagramTemplates: () => ipcRenderer.invoke("content:list-instagram-templates"),
+    getSignedUrl: (payload) => ipcRenderer.invoke("content:get-signed-url", payload),
+    recompose: (payload) => ipcRenderer.invoke("content:recompose", payload),
+    loadActivityThumbnails: (payload) => ipcRenderer.invoke("content:load-activity-thumbnails", payload),
+    downloadImage: (payload) => ipcRenderer.invoke("content:download-image", payload)
   },
   onboarding: {
     onCrawlProgress: (cb) => subscribe("onboarding:crawl-progress", cb),

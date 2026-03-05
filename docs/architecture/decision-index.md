@@ -87,3 +87,14 @@ Ship Instagram generation as a backend-contract slice first (intent, survey, med
 
 Reason  
 Decoupling generation reliability from desktop rollout reduced cross-surface regression risk while allowing 7-2b to integrate on stable API and golden-test contracts.
+
+## D-009
+
+Phase  
+7-2b
+
+Decision  
+Use server-side Sharp re-compose + signed URL refresh as the canonical preview path, with client latest-wins gating for async updates.
+
+Reason  
+Keeping composition on the API avoids renderer/output drift from duplicate canvas logic, while request ordering guards prevent stale previews during fast overlay/template/image edits.

@@ -93,6 +93,140 @@ type ContentSaveLocalResult = {
   message?: string;
 };
 
+type InstagramTemplateTextLayer = {
+  x: number;
+  y: number;
+  maxWidth: number;
+  fontSize: number;
+  align: "center" | "left" | "right";
+};
+
+type InstagramTemplateImageArea = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fit: "cover" | "contain";
+  borderRadius?: number;
+};
+
+type InstagramTemplateDefinition = {
+  id: string;
+  nameKo: string;
+  description: string;
+  thumbnail: string;
+  width: number;
+  height: number;
+  layers: {
+    mainText: InstagramTemplateTextLayer;
+    subText?: InstagramTemplateTextLayer;
+    userImageAreas?: InstagramTemplateImageArea[];
+  };
+};
+
+type ContentListInstagramTemplatesResult =
+  | {
+      ok: true;
+      templates: InstagramTemplateDefinition[];
+    }
+  | {
+      ok: false;
+      templates: InstagramTemplateDefinition[];
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
+type ContentGetSignedUrlPayload = {
+  contentId: string;
+};
+
+type ContentGetSignedUrlResult =
+  | {
+      ok: true;
+      signedImageUrl: string;
+      expiresAt: string;
+      updatedAt: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
+type ContentRecomposePayload = {
+  contentId: string;
+  templateId: string;
+  overlayMain: string;
+  overlaySub: string;
+  imageFileIds?: string[];
+  clientRequestId?: string;
+};
+
+type ContentRecomposeResult =
+  | {
+      ok: true;
+      signedImageUrl: string;
+      expiresAt: string;
+      updatedAt: string;
+      requestId: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
+type ActivityImageThumbnail = {
+  fileId: string;
+  fileName: string;
+  thumbnailDataUrl: string;
+};
+
+type ContentLoadActivityThumbnailsPayload = {
+  activityFolder?: string;
+  limit?: number;
+};
+
+type ContentLoadActivityThumbnailsResult =
+  | {
+      ok: true;
+      images: ActivityImageThumbnail[];
+    }
+  | {
+      ok: false;
+      images: ActivityImageThumbnail[];
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
+type ContentDownloadImagePayload = {
+  contentId: string;
+  suggestedFileName?: string;
+};
+
+type ContentDownloadImageResult =
+  | {
+      ok: true;
+      cancelled: false;
+      filePath: string;
+    }
+  | {
+      ok: false;
+      cancelled: boolean;
+      message?: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
 type ChatAction =
   | "get-active-session"
   | "send-message"
@@ -450,6 +584,13 @@ declare global {
       content: {
         saveBody: (payload: ContentSaveBodyPayload) => Promise<ContentSaveBodyResult>;
         saveLocal: (payload: ContentSaveLocalPayload) => Promise<ContentSaveLocalResult>;
+        listInstagramTemplates: () => Promise<ContentListInstagramTemplatesResult>;
+        getSignedUrl: (payload: ContentGetSignedUrlPayload) => Promise<ContentGetSignedUrlResult>;
+        recompose: (payload: ContentRecomposePayload) => Promise<ContentRecomposeResult>;
+        loadActivityThumbnails: (
+          payload?: ContentLoadActivityThumbnailsPayload
+        ) => Promise<ContentLoadActivityThumbnailsResult>;
+        downloadImage: (payload: ContentDownloadImagePayload) => Promise<ContentDownloadImageResult>;
       };
       onboarding: {
         onCrawlProgress: (cb: (payload: {
