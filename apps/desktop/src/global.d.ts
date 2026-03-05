@@ -149,13 +149,46 @@ type ChatScheduledContentItem = {
   content_id: string | null;
   session_id: string | null;
   title: string | null;
+  metadata: Record<string, unknown>;
   workflow_status: WorkflowStatus | null;
+  updated_at: string;
   content: Content | null;
+};
+
+type ChatScheduledContentListPayload = {
+  startDate?: string;
+  endDate?: string;
+  timezone?: string;
+  campaignId?: string | "adhoc";
+  channel?: "instagram" | "threads" | "naver_blog" | "facebook" | "youtube";
+  status?: "scheduled" | "generating" | "pending_approval" | "approved" | "published" | "skipped" | "failed";
+  limit?: number;
+  cursor?: string | null;
 };
 
 type ChatScheduledContentListResult = {
   ok: boolean;
   items: ChatScheduledContentItem[];
+  page: {
+    next_cursor: string | null;
+    has_more: boolean;
+  };
+  query: {
+    timezone: string;
+    start_date: string;
+    end_date: string;
+  } | null;
+  message?: string;
+};
+
+type ChatActiveCampaignSummary = {
+  id: string;
+  title: string;
+};
+
+type ChatActiveCampaignSummariesResult = {
+  ok: boolean;
+  items: ChatActiveCampaignSummary[];
   message?: string;
 };
 
@@ -367,7 +400,8 @@ declare global {
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
         listInboxItems: (payload?: { limit?: number }) => Promise<ChatInboxListResult>;
-        listScheduledContent: (payload?: { limit?: number }) => Promise<ChatScheduledContentListResult>;
+        listScheduledContent: (payload?: ChatScheduledContentListPayload) => Promise<ChatScheduledContentListResult>;
+        listActiveCampaignSummaries: () => Promise<ChatActiveCampaignSummariesResult>;
         listFolderUpdates: (payload?: { limit?: number }) => Promise<ChatFolderUpdateListResult>;
         acknowledgeFolderUpdates: (payload: {
           activityFolder: string;

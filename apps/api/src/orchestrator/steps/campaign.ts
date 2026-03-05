@@ -19,6 +19,7 @@ import type {
   SessionState,
   SessionStatus
 } from "../types";
+import { completeReservedSlotGeneration, reserveNextSlotForGeneration } from "../scheduler-slot-transition";
 
 type EnsureCampaignWorkflowItemForStateInput = {
   session: OrchestratorSessionRow;
@@ -279,6 +280,13 @@ export const applyCampaignApprovedStep = async (
   const firstChannel = deps.normalizeChannel(firstSchedule?.channel);
   const payloadTopic = deps.asString(payload?.topic, "").trim();
   const topic = payloadTopic || deps.asString(firstSchedule?.type, "").trim() || state.activity_folder;
+  const reservedSlotId = await reserveNextSlotForGeneration({
+    orgId: session.org_id,
+    campaignId,
+    sessionId: session.id,
+    channel: firstChannel,
+    contentType: "text"
+  });
 
   const generated = await deps.generateContentDraftWithForbiddenCheck({
     orgId: session.org_id,
@@ -326,6 +334,16 @@ export const applyCampaignApprovedStep = async (
     contentId,
     eventIdempotencyKey
   });
+  if (reservedSlotId) {
+    await completeReservedSlotGeneration({
+      orgId: session.org_id,
+      slotId: reservedSlotId,
+      contentId,
+      workflowItemId: contentWorkflowItem.id,
+      sessionId: session.id,
+      title: draft.slice(0, 72)
+    });
+  }
   const contentMessageId = await deps.emitContentActionCardProjection({
     orgId: session.org_id,
     sessionId: session.id,

@@ -44,6 +44,7 @@ const requiredTables = [
   "orchestrator_sessions",
   "workflow_items",
   "workflow_events",
+  "schedule_slots",
   "org_brand_settings",
   "org_subscriptions"
 ] as const;
@@ -57,7 +58,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260304153000_phase_s5b_workflow_session_projection.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305183000_phase_6_2_scheduler_foundation.sql on the connected project.`
       );
       continue;
     }
@@ -78,7 +79,7 @@ const verifyPhase32ProjectionColumns = async () => {
 
   if (/column .+ does not exist/i.test(error.message) || /Could not find the column/i.test(error.message)) {
     console.warn(
-      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260304153000_phase_s5b_workflow_session_projection.sql on the connected project.`
+      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305183000_phase_6_2_scheduler_foundation.sql on the connected project.`
     );
     return;
   }

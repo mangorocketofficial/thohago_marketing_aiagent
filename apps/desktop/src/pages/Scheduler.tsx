@@ -1,33 +1,11 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import type { Content } from "@repo/types";
+import { useMemo } from "react";
 import { useChatContext } from "../context/ChatContext";
 import { useNavigation } from "../context/NavigationContext";
 import { ContentEditor } from "../components/scheduler/ContentEditor";
 import { SchedulerBoard } from "../components/scheduler/SchedulerBoard";
-import { formatDateKey, resolveSlotStatus, type SlotStatus } from "../components/scheduler/status-model";
-
-type ScheduledContentItem = Awaited<
-  ReturnType<Window["desktopRuntime"]["chat"]["listScheduledContent"]>
->["items"][number];
-
-const isSlotStatus = (value: unknown): value is SlotStatus =>
-  value === "scheduled" ||
-  value === "generating" ||
-  value === "pending_approval" ||
-  value === "approved" ||
-  value === "published" ||
-  value === "skipped" ||
-  value === "failed";
-
-const getScheduledSlotStatus = (item: ScheduledContentItem, content: Content): SlotStatus => {
-  if (isSlotStatus(item.slot_status)) {
-    return item.slot_status;
-  }
-  return resolveSlotStatus({
-    contentStatus: content.status,
-    workflowStatus: item.workflow_status ?? undefined
-  });
-};
+import { SchedulerFilters } from "../components/scheduler/SchedulerFilters";
+import { useSchedulerRemoteData } from "./scheduler/useSchedulerRemoteData";
+import { useSchedulerViewModel } from "./scheduler/useSchedulerViewModel";
 
 export const SchedulerPage = () => {
   const {
@@ -40,130 +18,23 @@ export const SchedulerPage = () => {
   } = useChatContext();
   const { workspaceHandoff, clearWorkspaceHandoff } = useNavigation();
 
-  const [viewMode, setViewMode] = useState<"week" | "list">("week");
-  const [statusFilter, setStatusFilter] = useState<"all" | "review" | "scheduled">("all");
-  const [selectedContentId, setSelectedContentId] = useState<string | null>(null);
-  const [scheduledItems, setScheduledItems] = useState<ScheduledContentItem[]>([]);
-  const [scheduleNotice, setScheduleNotice] = useState("");
+  const remote = useSchedulerRemoteData(pendingContents.length);
+  const viewModel = useSchedulerViewModel({
+    scheduledItems: remote.scheduledItems,
+    pendingContents,
+    pendingContentWorkflowHints,
+    activeWindow: remote.activeWindow,
+    filters: remote.filters,
+    workspaceHandoff,
+    clearWorkspaceHandoff
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      const response = await window.desktopRuntime.chat.listScheduledContent({ limit: 300 });
-      if (cancelled) {
-        return;
-      }
-
-      if (!response.ok) {
-        setScheduleNotice(response.message ?? "Failed to load scheduled content.");
-        return;
-      }
-
-      setScheduleNotice("");
-      setScheduledItems(response.items ?? []);
-    };
-
-    void load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingContents.length]);
-
-  const schedulerItems = useMemo(() => {
-    const byId = new Map<
-      string,
-      {
-        content: Content;
-        workflowHint: (typeof pendingContentWorkflowHints)[string] | null;
-        slotStatus: SlotStatus;
-        dateKey: string;
-      }
-    >();
-
-    for (const raw of scheduledItems) {
-      if (!raw.content?.id) {
-        continue;
-      }
-      const content = raw.content;
-      const workflowHint = pendingContentWorkflowHints[content.id] ?? null;
-      byId.set(content.id, {
-        content,
-        workflowHint,
-        slotStatus: getScheduledSlotStatus(raw, content),
-        dateKey: raw.scheduled_date || formatDateKey(content.scheduled_at || content.created_at)
-      });
+  const scheduleNotice = useMemo(() => {
+    if (remote.isOffline) {
+      return "Offline mode: showing last synced scheduler data.";
     }
-
-    for (const content of pendingContents) {
-      if (byId.has(content.id)) {
-        continue;
-      }
-      const workflowHint = pendingContentWorkflowHints[content.id] ?? null;
-      byId.set(content.id, {
-        content,
-        workflowHint,
-        slotStatus: resolveSlotStatus({
-          contentStatus: content.status,
-          workflowStatus: workflowHint?.workflowStatus
-        }),
-        dateKey: formatDateKey(content.scheduled_at || content.created_at)
-      });
-    }
-
-    return [...byId.values()].sort((left, right) => {
-      if (left.dateKey === right.dateKey) {
-        return right.content.created_at.localeCompare(left.content.created_at);
-      }
-      return left.dateKey.localeCompare(right.dateKey);
-    });
-  }, [pendingContentWorkflowHints, pendingContents, scheduledItems]);
-
-  const filteredItems = useMemo(() => {
-    if (statusFilter === "review") {
-      return schedulerItems.filter((item) => item.slotStatus === "pending_approval");
-    }
-    if (statusFilter === "scheduled") {
-      return schedulerItems.filter((item) => item.slotStatus === "scheduled");
-    }
-    return schedulerItems;
-  }, [schedulerItems, statusFilter]);
-
-  const selectedItem = useMemo(() => {
-    if (!selectedContentId) {
-      return null;
-    }
-    return filteredItems.find((item) => item.content.id === selectedContentId) ?? null;
-  }, [filteredItems, selectedContentId]);
-
-  useEffect(() => {
-    if (!selectedContentId) {
-      return;
-    }
-    if (filteredItems.some((item) => item.content.id === selectedContentId)) {
-      return;
-    }
-    setSelectedContentId(null);
-  }, [filteredItems, selectedContentId]);
-
-  useEffect(() => {
-    if (!workspaceHandoff?.focusWorkflowItemId) {
-      return;
-    }
-
-    const workflowItemId = workspaceHandoff.focusWorkflowItemId.trim();
-    if (!workflowItemId) {
-      clearWorkspaceHandoff();
-      return;
-    }
-
-    const target = filteredItems.find((item) => item.workflowHint?.workflowItemId === workflowItemId);
-    if (target) {
-      setSelectedContentId(target.content.id);
-    }
-    clearWorkspaceHandoff();
-  }, [clearWorkspaceHandoff, filteredItems, workspaceHandoff]);
+    return remote.scheduleNotice;
+  }, [remote.isOffline, remote.scheduleNotice]);
 
   const handleCreateContent = () => {
     setChatInput("Create content for today.");
@@ -180,40 +51,48 @@ export const SchedulerPage = () => {
             <p className="description">Daily management board for scheduled content and approvals.</p>
           </div>
 
-          <div className="ui-scheduler-controls">
-            <select value={viewMode} onChange={(event) => setViewMode(event.target.value as "week" | "list")}>
-              <option value="week">Week</option>
-              <option value="list">List</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as "all" | "review" | "scheduled")}
-            >
-              <option value="all">All</option>
-              <option value="review">Pending Review</option>
-              <option value="scheduled">Scheduled</option>
-            </select>
-          </div>
+          <SchedulerFilters
+            viewMode={remote.viewMode}
+            currentDateKey={`${remote.activeWindow.startDate} -> ${remote.activeWindow.endDate}`}
+            filters={remote.filters}
+            campaigns={remote.campaignSummaries}
+            isLoading={remote.isLoading || remote.isLoadingMore}
+            connectionState={remote.connectionState}
+            onViewModeChange={remote.setViewMode}
+            onDateShift={remote.shiftCurrentDate}
+            onJumpToToday={remote.jumpToToday}
+            onFiltersChange={remote.setFilters}
+          />
         </div>
 
         {scheduleNotice ? <p className="notice">{scheduleNotice}</p> : null}
 
-        {!selectedItem ? (
-          <SchedulerBoard
-            items={filteredItems}
-            selectedContentId={selectedContentId}
-            viewMode={viewMode}
-            onSelectContent={setSelectedContentId}
-            onCreateContent={handleCreateContent}
-          />
+        {!viewModel.selectedItem ? (
+          <>
+            <SchedulerBoard
+              items={viewModel.schedulerItems}
+              selectedContentId={viewModel.selectedContentId}
+              viewMode={remote.viewMode}
+              weekStartDate={remote.activeWindow.startDate}
+              onSelectContent={(contentId) => viewModel.setSelectedContentId(contentId)}
+              onCreateContent={handleCreateContent}
+            />
+            {remote.viewMode === "list" && remote.hasMore ? (
+              <div className="button-row">
+                <button type="button" onClick={() => void remote.loadMore()} disabled={remote.isLoadingMore || remote.isOffline}>
+                  {remote.isLoadingMore ? "Loading..." : "Load more"}
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : (
           <ContentEditor
-            content={selectedItem.content}
-            workflowHint={selectedItem.workflowHint}
-            slotStatus={selectedItem.slotStatus}
+            content={viewModel.selectedItem.content}
+            workflowHint={viewModel.selectedItem.workflowHint}
+            slotStatus={viewModel.selectedItem.slotStatus}
             selectedSessionId={selectedSessionId}
             isActionPending={isActionPending}
-            onBack={() => setSelectedContentId(null)}
+            onBack={() => viewModel.setSelectedContentId(null)}
             onSubmitAction={(payload) => dispatchCardAction(payload)}
           />
         )}

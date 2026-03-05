@@ -7,12 +7,14 @@ type SchedulerBoardItem = {
   workflowHint: WorkflowLinkHint | null;
   slotStatus: SlotStatus;
   dateKey: string;
+  scheduledTime: string | null;
 };
 
 type SchedulerBoardProps = {
   items: SchedulerBoardItem[];
   selectedContentId: string | null;
   viewMode: "week" | "list";
+  weekStartDate: string;
   onSelectContent: (contentId: string) => void;
   onCreateContent: () => void;
 };
@@ -29,17 +31,13 @@ const formatDateLabel = (dateKey: string): string => {
   });
 };
 
-const weekdayColumns = (): string[] => {
-  const today = new Date();
-  const day = today.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
-
+const weekdayColumns = (weekStartDate: string): string[] => {
+  const parsed = new Date(`${weekStartDate}T00:00:00.000Z`);
+  const monday = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   const columns: string[] = [];
   for (let index = 0; index < 7; index += 1) {
-    const next = new Date(monday);
-    next.setDate(monday.getDate() + index);
+    const next = new Date(monday.getTime());
+    next.setUTCDate(monday.getUTCDate() + index);
     columns.push(next.toISOString().slice(0, 10));
   }
   return columns;
@@ -74,6 +72,7 @@ export const SchedulerBoard = ({
   items,
   selectedContentId,
   viewMode,
+  weekStartDate,
   onSelectContent,
   onCreateContent
 }: SchedulerBoardProps) => {
@@ -100,7 +99,7 @@ export const SchedulerBoard = ({
     );
   }
 
-  const columns = weekdayColumns();
+  const columns = weekdayColumns(weekStartDate);
 
   return (
     <section className="ui-scheduler-board">
@@ -113,7 +112,9 @@ export const SchedulerBoard = ({
 
       <div className="ui-scheduler-week-grid">
         {columns.map((dateKey) => {
-          const dayItems = items.filter((item) => item.dateKey === dateKey);
+          const dayItems = items
+            .filter((item) => item.dateKey === dateKey)
+            .sort((left, right) => (left.scheduledTime ?? "").localeCompare(right.scheduledTime ?? ""));
           return (
             <article key={dateKey} className="ui-scheduler-day-column">
               <header>

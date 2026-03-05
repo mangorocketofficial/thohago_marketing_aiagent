@@ -67,6 +67,7 @@ export type ContentStepDeps = {
   mirrorContentStatusFromWorkflow: (params: {
     orgId: string;
     contentId: string;
+    workflowItemId: string;
     workflowStatus: WorkflowStatus;
     editedBody?: string;
     publishedAt?: string;
@@ -132,6 +133,7 @@ export const applyContentApprovedStep = async (
   await deps.mirrorContentStatusFromWorkflow({
     orgId: session.org_id,
     contentId,
+    workflowItemId: contentApproval.item.id,
     workflowStatus: contentApproval.item.status,
     editedBody,
     publishedAt
@@ -303,6 +305,7 @@ export const applyContentRevisionStep = async (
   await deps.mirrorContentStatusFromWorkflow({
     orgId: session.org_id,
     contentId,
+    workflowItemId: resubmitted.item.id,
     workflowStatus: resubmitted.item.status
   });
 
@@ -375,6 +378,7 @@ const applyContentTerminalRejectStep = async (
   await deps.mirrorContentStatusFromWorkflow({
     orgId: session.org_id,
     contentId,
+    workflowItemId: contentRejection.item.id,
     workflowStatus: contentRejection.item.status
   });
 

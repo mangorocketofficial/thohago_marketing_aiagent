@@ -4,6 +4,12 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { requireActiveSubscription } from "../lib/subscription";
 import {
+  encodeScheduledContentCursor,
+  parseScheduledContentQuery
+} from "../scheduler/http/scheduled-content-query";
+import { listActiveCampaignSummaries } from "../scheduler/queries/list-active-campaign-summaries";
+import { listScheduledContentBySlotWindow } from "../scheduler/queries/list-scheduled-content";
+import {
   createSessionForOrg,
   getActiveSessionForOrg,
   getRecommendedSessionForWorkspace,
@@ -12,7 +18,6 @@ import {
   listSessionsForOrg,
   resumeSession
 } from "../orchestrator/service";
-import { listScheduledContentForOrg } from "../orchestrator/scheduled-content";
 import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionStatus } from "../orchestrator/types";
 
 const SUPPORTED_EVENTS = new Set<ResumeEventType>([
@@ -363,12 +368,45 @@ sessionsRouter.get("/orgs/:orgId/scheduled-content", async (req, res) => {
 
   try {
     const orgId = parseRequiredString(req.params.orgId, "orgId");
-    const limit = parseBoundedInt(req.query.limit, "limit", { fallback: 200, min: 1, max: 500 });
-    const items = await listScheduledContentForOrg({
+    const parsed = parseScheduledContentQuery(req.query as Record<string, unknown>);
+    const result = await listScheduledContentBySlotWindow({
       orgId,
-      limit
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      timezone: parsed.timezone,
+      campaignId: parsed.campaignId,
+      channel: parsed.channel,
+      status: parsed.status,
+      limit: parsed.limit,
+      cursor: parsed.cursor
     });
 
+    res.json({
+      ok: true,
+      items: result.items,
+      page: {
+        next_cursor: result.page.nextCursor ? encodeScheduledContentCursor(result.page.nextCursor) : null,
+        has_more: result.page.hasMore
+      },
+      query: {
+        timezone: result.query.timezone,
+        start_date: result.query.startDate,
+        end_date: result.query.endDate
+      }
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.get("/orgs/:orgId/campaigns/active-summaries", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const items = await listActiveCampaignSummaries(orgId);
     res.json({
       ok: true,
       items

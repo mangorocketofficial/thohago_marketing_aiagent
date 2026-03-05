@@ -105,6 +105,17 @@ const buildUserMessageIdempotencyKey = (sessionId, content) => {
 };
 
 const normalizeEditableInput = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SLOT_STATUS_SET = new Set([
+  "scheduled",
+  "generating",
+  "pending_approval",
+  "approved",
+  "published",
+  "skipped",
+  "failed"
+]);
+const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
 
 const parsePositiveInteger = (value) => {
   const parsed =
@@ -117,6 +128,48 @@ const parsePositiveInteger = (value) => {
     return null;
   }
   return Math.floor(parsed);
+};
+
+const parseOptionalDateString = (value, field) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!ISO_DATE_RE.test(normalized)) {
+    throw new Error(`${field} must be YYYY-MM-DD.`);
+  }
+  return normalized;
+};
+
+const parseOptionalSchedulerCursor = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim();
+  return normalized || null;
+};
+
+const parseOptionalSchedulerStatus = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim();
+  if (!SLOT_STATUS_SET.has(normalized)) {
+    throw new Error("status is invalid.");
+  }
+  return normalized;
+};
+
+const parseOptionalSchedulerChannel = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!CHANNEL_SET.has(normalized)) {
+    throw new Error("channel is invalid.");
+  }
+  return normalized;
 };
 
 const buildChatActionIdempotencyKey = (params) => {
@@ -1779,9 +1832,46 @@ const registerIpcHandlers = () => {
       throw new Error("limit must be a positive integer.");
     }
 
+    const startDate = parseOptionalDateString(payload?.startDate, "startDate");
+    const endDate = parseOptionalDateString(payload?.endDate, "endDate");
+    if (startDate && endDate && startDate > endDate) {
+      throw new Error("startDate must be on or before endDate.");
+    }
+
+    const timezoneRaw = typeof payload?.timezone === "string" ? payload.timezone.trim() : "";
+    if (payload?.timezone !== undefined && !timezoneRaw) {
+      throw new Error("timezone must be non-empty when provided.");
+    }
+
+    const campaignIdRaw = typeof payload?.campaignId === "string" ? payload.campaignId.trim() : "";
+    const channel = parseOptionalSchedulerChannel(payload?.channel);
+    const status = parseOptionalSchedulerStatus(payload?.status);
+    const cursor = parseOptionalSchedulerCursor(payload?.cursor);
+
     const params = new URLSearchParams();
     if (limit !== null) {
       params.set("limit", String(Math.max(1, Math.min(500, limit))));
+    }
+    if (startDate) {
+      params.set("start_date", startDate);
+    }
+    if (endDate) {
+      params.set("end_date", endDate);
+    }
+    if (timezoneRaw) {
+      params.set("timezone", timezoneRaw);
+    }
+    if (campaignIdRaw) {
+      params.set("campaign_id", campaignIdRaw);
+    }
+    if (channel) {
+      params.set("channel", channel);
+    }
+    if (status) {
+      params.set("status", status);
+    }
+    if (cursor) {
+      params.set("cursor", cursor);
     }
 
     const suffix = params.toString();
@@ -1794,10 +1884,49 @@ const registerIpcHandlers = () => {
 
       return {
         ok: true,
-        items: Array.isArray(body?.items) ? body.items : []
+        items: Array.isArray(body?.items) ? body.items : [],
+        page: {
+          next_cursor: typeof body?.page?.next_cursor === "string" ? body.page.next_cursor : null,
+          has_more: body?.page?.has_more === true
+        },
+        query:
+          body?.query && typeof body.query === "object"
+            ? {
+                timezone: typeof body.query.timezone === "string" ? body.query.timezone : "",
+                start_date: typeof body.query.start_date === "string" ? body.query.start_date : "",
+                end_date: typeof body.query.end_date === "string" ? body.query.end_date : ""
+              }
+            : null
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load scheduled content.";
+      return {
+        ok: false,
+        items: [],
+        page: {
+          next_cursor: null,
+          has_more: false
+        },
+        query: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("chat:list-active-campaign-summaries", async () => {
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/campaigns/active-summaries`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        items: Array.isArray(body?.items) ? body.items : []
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load campaign summaries.";
       return {
         ok: false,
         items: [],

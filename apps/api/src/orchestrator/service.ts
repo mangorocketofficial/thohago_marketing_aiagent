@@ -31,6 +31,7 @@ import {
 } from "./service-helpers";
 import { runContentApprovalSideEffects } from "./side-effects";
 import { applyContentApprovedStep, applyContentRejectStep } from "./steps/content";
+import { syncSlotStatusFromWorkflow } from "./scheduler-slot-transition";
 import type { CampaignStepDeps } from "./steps/campaign";
 import type { ContentStepDeps } from "./steps/content";
 import { routeSkill } from "./skills/router";
@@ -589,6 +590,7 @@ const mirrorCampaignStatusFromWorkflow = async (
 const mirrorContentStatusFromWorkflow = async (params: {
   orgId: string;
   contentId: string;
+  workflowItemId: string;
   workflowStatus: WorkflowStatus;
   editedBody?: string;
   publishedAt?: string;
@@ -616,6 +618,14 @@ const mirrorContentStatusFromWorkflow = async (params: {
   if (error) {
     throw new HttpError(500, "db_error", `Failed to mirror content status from workflow: ${error.message}`);
   }
+
+  await syncSlotStatusFromWorkflow({
+    orgId: params.orgId,
+    workflowItemId: params.workflowItemId,
+    contentId: params.contentId,
+    workflowStatus: params.workflowStatus,
+    publishedAt: params.publishedAt ?? null
+  });
 };
 
 const bindSessionContextLabelIfEmpty = async (sessionId: string, activityFolder: string): Promise<void> => {

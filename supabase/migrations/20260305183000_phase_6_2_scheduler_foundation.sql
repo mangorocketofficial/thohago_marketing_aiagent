@@ -1,4 +1,4 @@
-﻿-- Phase 6-2 foundation
+-- Phase 6-2 foundation
 -- 1) Scheduler slot model (Option B)
 -- 2) Campaign plan audit/version history store
 -- 3) Scheduler job lock/idempotency foundation
