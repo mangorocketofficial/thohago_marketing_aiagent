@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { ContextPanel } from "../components/ContextPanel";
+import { GlobalChatPanel } from "../components/chat/GlobalChatPanel";
 import { TopBarNav } from "../components/TopBarNav";
 import { useNavigation } from "../context/NavigationContext";
 import type { PageId } from "../types/navigation";
 
 type MainLayoutProps = {
-  workspacePage: ReactNode;
+  schedulerPage: ReactNode;
   dashboardPage: ReactNode;
   brandReviewPage: ReactNode;
   analyticsPage: ReactNode;
@@ -15,8 +15,8 @@ type MainLayoutProps = {
 
 const resolvePageNode = (props: MainLayoutProps, pageId: PageId): ReactNode => {
   switch (pageId) {
-    case "workspace":
-      return props.workspacePage;
+    case "scheduler":
+      return props.schedulerPage;
     case "dashboard":
       return props.dashboardPage;
     case "brand-review":
@@ -33,14 +33,7 @@ const resolvePageNode = (props: MainLayoutProps, pageId: PageId): ReactNode => {
 };
 
 export const MainLayout = (props: MainLayoutProps) => {
-  const {
-    activePage,
-    contextPanelMode,
-    contextPanelCollapsed,
-    isContextPanelHidden,
-    setContextPanelMode,
-    toggleContextPanelCollapsed
-  } = useNavigation();
+  const { activePage } = useNavigation();
 
   return (
     <div className="ui-main-layout">
@@ -48,16 +41,7 @@ export const MainLayout = (props: MainLayoutProps) => {
 
       <div className="ui-main-body">
         <main className="ui-main-content">{resolvePageNode(props, activePage)}</main>
-
-        {!isContextPanelHidden ? (
-          <ContextPanel
-            activePage={activePage}
-            mode={contextPanelMode}
-            isCollapsed={contextPanelCollapsed}
-            onModeChange={setContextPanelMode}
-            onToggleCollapsed={toggleContextPanelCollapsed}
-          />
-        ) : null}
+        <GlobalChatPanel />
       </div>
     </div>
   );

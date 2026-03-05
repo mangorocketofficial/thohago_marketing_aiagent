@@ -12,6 +12,7 @@ import {
   listSessionsForOrg,
   resumeSession
 } from "../orchestrator/service";
+import { listScheduledContentForOrg } from "../orchestrator/scheduled-content";
 import type { ResumeEventRequest, ResumeEventType, SessionListCursor, SessionStatus } from "../orchestrator/types";
 
 const SUPPORTED_EVENTS = new Set<ResumeEventType>([
@@ -342,6 +343,28 @@ sessionsRouter.get("/orgs/:orgId/workspace-inbox-items", async (req, res) => {
     const orgId = parseRequiredString(req.params.orgId, "orgId");
     const limit = parseBoundedInt(req.query.limit, "limit", { fallback: 50, min: 1, max: 100 });
     const items = await listWorkspaceInboxItemsForOrg({
+      orgId,
+      limit
+    });
+
+    res.json({
+      ok: true,
+      items
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+sessionsRouter.get("/orgs/:orgId/scheduled-content", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const limit = parseBoundedInt(req.query.limit, "limit", { fallback: 200, min: 1, max: 500 });
+    const items = await listScheduledContentForOrg({
       orgId,
       limit
     });

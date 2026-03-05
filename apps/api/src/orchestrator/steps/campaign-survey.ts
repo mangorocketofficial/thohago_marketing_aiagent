@@ -2,6 +2,7 @@ import { HttpError } from "../../lib/errors";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { generateCampaignPlan } from "../ai";
 import { buildEnrichedCampaignContext } from "../rag-context";
+import { buildCampaignPlanSummary } from "../service-helpers";
 import type { CampaignPlanChainData, ChainStepName } from "../skills/campaign-plan/chain-types";
 import {
   SURVEY_QUESTIONS,
@@ -16,7 +17,7 @@ import {
   isSurveyComplete,
   parseSurveyAnswer
 } from "../skills/campaign-plan/survey";
-import type { CampaignSurveyState, SurveyAnswer, SurveyQuestionId } from "../types";
+import type { CampaignPlan, CampaignSurveyState, SurveyAnswer, SurveyQuestionId } from "../types";
 import type { SkillExecutionContext, SkillResult } from "../skills/types";
 
 type DraftReviewIntentDeps = {
@@ -61,6 +62,106 @@ const mergeAnswers = (base: SurveyAnswer[], updates: SurveyAnswer[]): SurveyAnsw
 };
 
 const buildConfirmationPrompt = (): string => "이 계획을 최종 확정하여 캠페인으로 진행하시겠습니까?";
+
+const isMissingRelationError = (error: unknown): boolean =>
+  !!error && typeof error === "object" && (error as { code?: string }).code === "42P01";
+
+const persistCampaignPlanVersion = async (params: {
+  orgId: string;
+  sessionId: string;
+  campaignId?: string;
+  draftVersion: number;
+  source: "draft_generated" | "revision_generated" | "finalized";
+  activityFolder: string;
+  userMessage: string | null;
+  revisionReason?: string | null;
+  plan: CampaignPlan;
+  planDocument?: string | null;
+  planChainData?: Record<string, unknown> | null;
+  createdByUserId?: string | null;
+}): Promise<void> => {
+  const { error } = await supabaseAdmin.from("campaign_plan_versions").insert({
+    org_id: params.orgId,
+    session_id: params.sessionId,
+    campaign_id: params.campaignId ?? null,
+    draft_version: Math.max(1, params.draftVersion),
+    source: params.source,
+    activity_folder: params.activityFolder,
+    user_message: params.userMessage,
+    revision_reason: params.revisionReason ?? null,
+    plan: params.plan,
+    plan_document: params.planDocument ?? null,
+    plan_chain_data: params.planChainData ?? null,
+    plan_summary: buildCampaignPlanSummary({
+      plan: params.plan,
+      planChainData: params.planChainData ?? null
+    }),
+    created_by_user_id: params.createdByUserId ?? null
+  });
+
+  if (!error) {
+    return;
+  }
+  if (isMissingRelationError(error)) {
+    console.warn("[CAMPAIGN_SURVEY] campaign_plan_versions table is missing; skipping audit persistence.");
+    return;
+  }
+  throw new HttpError(500, "db_error", `Failed to persist campaign plan version: ${error.message}`);
+};
+
+const createScheduleSlotsForCampaign = async (params: {
+  orgId: string;
+  sessionId: string;
+  campaignId: string;
+  activityFolder: string;
+  plan: {
+    suggested_schedule?: Array<{ day?: number; channel?: string; type?: string }>;
+  };
+}): Promise<void> => {
+  const schedule = Array.isArray(params.plan.suggested_schedule) ? params.plan.suggested_schedule : [];
+  if (schedule.length === 0) {
+    return;
+  }
+
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+
+  const rows = schedule.map((entry, index) => {
+    const dayOffsetRaw = typeof entry.day === "number" && Number.isFinite(entry.day) ? Math.floor(entry.day) : 1;
+    const dayOffset = Math.max(1, dayOffsetRaw);
+    const slotDate = new Date(start);
+    slotDate.setUTCDate(start.getUTCDate() + dayOffset - 1);
+    const channel = typeof entry.channel === "string" && entry.channel.trim() ? entry.channel.trim().toLowerCase() : "instagram";
+    const title = typeof entry.type === "string" && entry.type.trim() ? entry.type.trim() : `Post ${index + 1}`;
+
+    return {
+      org_id: params.orgId,
+      campaign_id: params.campaignId,
+      session_id: params.sessionId,
+      channel,
+      content_type: "text",
+      title,
+      scheduled_date: slotDate.toISOString().slice(0, 10),
+      slot_status: "scheduled",
+      metadata: {
+        activity_folder: params.activityFolder,
+        suggested_day: dayOffset,
+        suggested_type: title,
+        sequence: index + 1
+      }
+    };
+  });
+
+  const { error } = await supabaseAdmin.from("schedule_slots").insert(rows);
+  if (!error) {
+    return;
+  }
+  if (isMissingRelationError(error)) {
+    console.warn("[CAMPAIGN_SURVEY] schedule_slots table is missing; skipping slot creation.");
+    return;
+  }
+  throw new HttpError(500, "db_error", `Failed to create schedule slots: ${error.message}`);
+};
 
 const buildSurveyState = (params: {
   previous?: CampaignSurveyState | null;
@@ -108,6 +209,33 @@ const finalizeCampaignPlan = async (params: {
     throw new HttpError(500, "db_error", `Failed to create finalized campaign: ${campaignError?.message ?? "unknown"}`);
   }
 
+  const campaignId = context.deps.asString(asRecord(campaign).id, "");
+  if (!campaignId) {
+    throw new HttpError(500, "db_error", "Failed to resolve finalized campaign id.");
+  }
+
+  await createScheduleSlotsForCampaign({
+    orgId: context.session.org_id,
+    sessionId: context.session.id,
+    campaignId,
+    activityFolder: context.state.activity_folder,
+    plan: context.state.campaign_plan
+  });
+
+  await persistCampaignPlanVersion({
+    orgId: context.session.org_id,
+    sessionId: context.session.id,
+    campaignId,
+    draftVersion: Math.max(1, context.state.campaign_draft_version || 1),
+    source: "finalized",
+    activityFolder: context.state.activity_folder,
+    userMessage: context.state.user_message,
+    plan: context.state.campaign_plan,
+    planDocument: context.state.campaign_plan_document,
+    planChainData: context.state.campaign_chain_data,
+    createdByUserId: context.session.created_by_user_id
+  });
+
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
@@ -119,7 +247,7 @@ const finalizeCampaignPlan = async (params: {
     handled: true,
     outcome: "session_done",
     statePatch: {
-      campaign_id: context.deps.asString(asRecord(campaign).id, ""),
+      campaign_id: campaignId,
       campaign_survey: {
         ...surveyState,
         completed_at: surveyState.completed_at ?? new Date().toISOString(),
@@ -154,6 +282,20 @@ const generateAndPresentDraft = async (params: {
       orgName: params.context.state.activity_folder
     }
   );
+
+  await persistCampaignPlanVersion({
+    orgId: params.context.session.org_id,
+    sessionId: params.context.session.id,
+    draftVersion: Math.max(1, params.draftVersion),
+    source: params.revisionReason ? "revision_generated" : "draft_generated",
+    activityFolder: params.context.state.activity_folder,
+    userMessage: params.context.state.user_message,
+    revisionReason: params.revisionReason ?? null,
+    plan: generated.plan,
+    planDocument: generated.planDocument,
+    planChainData: generated.chainData ? (generated.chainData as unknown as Record<string, unknown>) : null,
+    createdByUserId: params.context.session.created_by_user_id
+  });
 
   const draftHeader =
     params.draftVersion > 1

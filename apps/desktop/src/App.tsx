@@ -12,7 +12,7 @@ import { BrandReviewPage } from "./pages/BrandReview";
 import { DashboardPage } from "./pages/Dashboard";
 import { EmailAutomationPage } from "./pages/EmailAutomation";
 import { SettingsPage } from "./pages/Settings";
-import { WorkspacePage } from "./pages/Workspace";
+import { SchedulerPage } from "./pages/Scheduler";
 import type { OrchestratorSession } from "@repo/types";
 
 type UiMode = "loading" | "onboarding" | "dashboard";
@@ -473,7 +473,7 @@ const App = () => {
           refreshActiveSession={refreshActiveSession}
         >
           <MainLayout
-            workspacePage={<WorkspacePage formatDateTime={formatDateTime} />}
+            schedulerPage={<SchedulerPage />}
             dashboardPage={
               <DashboardPage
                 runtimeSummary={runtimeSummary}

@@ -90,6 +90,7 @@
       "orgLabel": "Desktop Organization"
     },
     "nav": {
+      "scheduler": "Scheduler",
       "workspace": "Workspace",
       "dashboard": "Dashboard",
       "brand-review": "Brand Review",
@@ -99,6 +100,7 @@
     },
     "contextPanel": {
       "titleByPage": {
+        "scheduler": "Scheduler Context",
         "workspace": "Workspace Context",
         "dashboard": "Dashboard Context",
         "brand-review": "Brand Review Context",
@@ -114,6 +116,11 @@
       "closeMiniChat": "Close Mini Chat"
     },
     "pages": {
+      "scheduler": {
+        "eyebrow": "Scheduler",
+        "title": "Scheduler",
+        "description": "Calendar-first board for daily content management."
+      },
       "workspace": {
         "eyebrow": "Workspace",
         "title": "Workspace",
@@ -186,7 +193,7 @@
       "reviewAll": "Review all tasks",
       "reviewAllTitle": "All Sessions",
       "newSession": "New session",
-      "openHub": "Open Workspace",
+      "openHub": "Open Scheduler",
       "refreshList": "Refresh session list",
       "recommendedLabel": "Recommended",
       "continueCurrent": "Continue current",

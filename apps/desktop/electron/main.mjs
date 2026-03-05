@@ -1772,6 +1772,40 @@ const registerIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle("chat:list-scheduled-content", async (_, payload) => {
+    const limitInput = payload?.limit;
+    const limit = parsePositiveInteger(limitInput);
+    if (limitInput !== undefined && limit === null) {
+      throw new Error("limit must be a positive integer.");
+    }
+
+    const params = new URLSearchParams();
+    if (limit !== null) {
+      params.set("limit", String(Math.max(1, Math.min(500, limit))));
+    }
+
+    const suffix = params.toString();
+    const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/scheduled-content${suffix ? `?${suffix}` : ""}`;
+
+    try {
+      const body = await callOrchestratorApi(route, {
+        method: "GET"
+      });
+
+      return {
+        ok: true,
+        items: Array.isArray(body?.items) ? body.items : []
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load scheduled content.";
+      return {
+        ok: false,
+        items: [],
+        message
+      };
+    }
+  });
+
   ipcMain.handle("chat:list-folder-updates", async (_, payload) => {
     const limitInput = payload?.limit;
     const limit = parsePositiveInteger(limitInput);

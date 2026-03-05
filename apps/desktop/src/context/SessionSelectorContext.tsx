@@ -177,7 +177,7 @@ const resolveWorkspaceContext = (pageId: PageId, selectedSession: OrchestratorSe
     };
   }
 
-  if (pageId === "workspace") {
+  if (pageId === "scheduler") {
     const workspaceType = normalizeWorkspaceType(selectedSession?.workspace_type);
     const scopeId = normalizeScopeId(selectedSession?.scope_id);
     return {

@@ -72,7 +72,7 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
                     type="button"
                     className="ui-system-notice-link"
                     onClick={() =>
-                      navigate("workspace", {
+                      navigate("scheduler", {
                         workspaceHandoff: {
                           focusWorkflowItemId: workflowNotice.workflowItemId,
                           focusSessionId: workflowNotice.sessionId ?? undefined
@@ -106,7 +106,7 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
             void sendMessage({
               uiContext: {
                 source: "workspace-chat",
-                pageId: "workspace"
+                pageId: "scheduler"
               }
             })
           }

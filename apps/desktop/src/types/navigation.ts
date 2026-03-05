@@ -1,5 +1,5 @@
 export type PageId =
-  | "workspace"
+  | "scheduler"
   | "dashboard"
   | "brand-review"
   | "analytics"
@@ -32,7 +32,7 @@ export type NavItem = {
   section: "primary" | "secondary";
 };
 
-export const FULL_WIDTH_PAGES: readonly PageId[] = ["workspace", "settings"] as const;
+export const FULL_WIDTH_PAGES: readonly PageId[] = ["scheduler", "settings"] as const;
 
 const FULL_WIDTH_PAGE_SET = new Set<PageId>(FULL_WIDTH_PAGES);
 
@@ -42,7 +42,7 @@ export const defaultContextPanelModeForPage = (pageId: PageId): ContextPanelMode
   isFullWidthPage(pageId) ? "hidden" : "page-context";
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { id: "workspace", label: "Workspace", icon: "WS", section: "primary" },
+  { id: "scheduler", label: "Scheduler", icon: "SC", section: "primary" },
   { id: "dashboard", label: "Dashboard", icon: "DB", section: "primary" },
   { id: "brand-review", label: "Brand Review", icon: "BR", section: "primary" },
   { id: "analytics", label: "Analytics", icon: "AN", section: "primary" },

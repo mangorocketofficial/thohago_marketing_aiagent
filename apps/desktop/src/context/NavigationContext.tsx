@@ -25,8 +25,8 @@ type NavigationContextValue = NavigationState & {
 };
 
 const INITIAL_NAVIGATION_STATE: NavigationState = {
-  activePage: "workspace",
-  contextPanelMode: defaultContextPanelModeForPage("workspace"),
+  activePage: "scheduler",
+  contextPanelMode: defaultContextPanelModeForPage("scheduler"),
   contextPanelCollapsed: false,
   workspaceHandoff: null
 };
@@ -38,7 +38,7 @@ export const NavigationProvider = ({ children }: PropsWithChildren) => {
 
   const navigate = useCallback((pageId: PageId, options?: NavigateOptions) => {
     const nextHandoff: WorkspaceHandoff | null =
-      pageId === "workspace" ? (options?.workspaceHandoff ?? null) : null;
+      pageId === "scheduler" ? (options?.workspaceHandoff ?? null) : null;
 
     setState((previous) => ({
       ...previous,

@@ -37,7 +37,7 @@ export type WorkflowLinkHint = {
 };
 
 export type ChatUiContext = {
-  source: "workspace-chat" | "context-panel-widget";
+  source: "workspace-chat" | "context-panel-widget" | "global-chat-panel";
   pageId: PageId;
   contextPanelMode?: "agent-chat" | "page-context";
   focusWorkflowItemId?: string;

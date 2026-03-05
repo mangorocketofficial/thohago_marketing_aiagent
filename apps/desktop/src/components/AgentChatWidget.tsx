@@ -167,7 +167,7 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
           <button type="button" onClick={() => void createSessionForCurrentWorkspace()} disabled={isUiBusy}>
             {t("chat.sessionSelector.newSession")}
           </button>
-          <button type="button" onClick={() => navigate("workspace")} disabled={isUiBusy}>
+          <button type="button" onClick={() => navigate("scheduler")} disabled={isUiBusy}>
             {t("chat.sessionSelector.openHub")}
           </button>
         </div>
@@ -208,7 +208,7 @@ export const AgentChatWidget = ({ pageId }: AgentChatWidgetProps) => {
                     type="button"
                     className="ui-system-notice-link"
                     onClick={() =>
-                      navigate("workspace", {
+                      navigate("scheduler", {
                         workspaceHandoff: {
                           focusWorkflowItemId: workflowNotice.workflowItemId,
                           focusSessionId: workflowNotice.sessionId ?? undefined

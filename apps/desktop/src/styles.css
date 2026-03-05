@@ -674,6 +674,8 @@ th {
   display: flex;
   min-height: 0;
   flex: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .ui-sidebar {
@@ -781,6 +783,311 @@ th {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+}
+
+.ui-global-chat {
+  position: relative;
+  border-left: 1px solid var(--ui-border-color);
+  background: var(--ui-bg-panel);
+  display: flex;
+  min-height: 0;
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.4);
+}
+
+.ui-global-chat-resizer {
+  width: 8px;
+  cursor: ew-resize;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+}
+
+.ui-global-chat-resizer:hover {
+  border-left-color: #c7d2e4;
+  border-right-color: #c7d2e4;
+}
+
+.ui-global-chat-inner {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  overflow: hidden;
+}
+
+.ui-global-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-global-chat-head strong {
+  font-size: 14px;
+}
+
+.ui-global-chat-head .button-row {
+  margin: 0;
+}
+
+.ui-global-chat-session-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.ui-global-chat-session-row select {
+  border: 1px solid #c8d2e1;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.ui-global-chat-folder-list {
+  display: grid;
+  gap: 7px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.ui-global-chat-timeline {
+  border: 1px solid #d8e0ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+  min-height: 240px;
+}
+
+.ui-global-chat-timeline .chat-item {
+  width: fit-content;
+  max-width: 88%;
+  border-radius: 12px;
+}
+
+.ui-global-chat-timeline .chat-user {
+  align-self: flex-end;
+  background: #2f5ea8;
+  border-color: #2f5ea8;
+  color: #fff;
+}
+
+.ui-global-chat-timeline .chat-assistant {
+  align-self: flex-start;
+  background: #ffffff;
+}
+
+.ui-global-chat-recent-block {
+  display: grid;
+  gap: 8px;
+}
+
+.ui-global-chat-collapsed {
+  width: 36px;
+  min-width: 36px;
+  border-left: 1px solid var(--ui-border-color);
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  background: var(--ui-bg-panel);
+}
+
+.ui-global-chat-collapsed button {
+  width: 26px;
+  height: 64px;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.ui-scheduler-shell {
+  width: min(1680px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
+.ui-scheduler-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ui-scheduler-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ui-scheduler-controls select {
+  border: 1px solid #c8d2e1;
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.ui-scheduler-board,
+.ui-content-editor {
+  border: 1px solid var(--ui-card-border);
+  border-radius: var(--ui-radius-md);
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.ui-scheduler-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-scheduler-toolbar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ui-scheduler-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(150px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.ui-scheduler-day-column {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  padding: 8px;
+  background: #f9fbff;
+  display: grid;
+  gap: 8px;
+  min-height: 280px;
+}
+
+.ui-scheduler-day-column header strong {
+  font-size: 12px;
+  color: #2f4566;
+}
+
+.ui-scheduler-day-list,
+.ui-scheduler-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.ui-scheduler-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d6e1ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.ui-scheduler-card.is-selected {
+  border-color: #2f5ea8;
+  box-shadow: 0 0 0 2px rgba(47, 94, 168, 0.16);
+}
+
+.ui-scheduler-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-scheduler-card-head strong {
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.ui-scheduler-card-body {
+  font-size: 13px;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.ui-scheduler-card-meta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ui-slot-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #d0d5dd;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.ui-slot-badge.is-scheduled {
+  border-color: #a8bdd9;
+  background: #eef4ff;
+  color: #1d4d8f;
+}
+
+.ui-slot-badge.is-generating {
+  border-color: #d5c48b;
+  background: #fff8e8;
+  color: #805b00;
+}
+
+.ui-slot-badge.is-pending_approval {
+  border-color: #f7cc7a;
+  background: #fff7e8;
+  color: #8a4b00;
+}
+
+.ui-slot-badge.is-approved {
+  border-color: #a7e2b8;
+  background: #eefbf1;
+  color: #166534;
+}
+
+.ui-slot-badge.is-published {
+  border-color: #8bc9a8;
+  background: #e6f7ed;
+  color: #14532d;
+}
+
+.ui-slot-badge.is-skipped,
+.ui-slot-badge.is-failed {
+  border-color: #f2b5bc;
+  background: #fff0f2;
+  color: #9f1239;
+}
+
+.ui-content-editor-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ui-content-editor-preview {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.ui-content-editor-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
 }
 
 .ui-main-content .app-shell {
@@ -1440,5 +1747,34 @@ th {
   .ui-workspace-shell.is-session-rail-hidden {
     grid-template-columns: 280px minmax(420px, 1fr);
     min-width: 760px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .ui-global-chat {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    background: rgba(251, 252, 254, 0.98);
+  }
+
+  .ui-global-chat-collapsed {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 21;
+  }
+}
+
+@media (max-width: 920px) {
+  .ui-scheduler-week-grid {
+    grid-template-columns: repeat(7, minmax(180px, 1fr));
+  }
+
+  .ui-scheduler-head {
+    align-items: stretch;
   }
 }

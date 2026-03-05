@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     getActiveSession: () => ipcRenderer.invoke("chat:get-active-session"),
     listSessions: (payload) => ipcRenderer.invoke("chat:list-sessions", payload),
     listInboxItems: (payload) => ipcRenderer.invoke("chat:list-inbox-items", payload),
+    listScheduledContent: (payload) => ipcRenderer.invoke("chat:list-scheduled-content", payload),
     listFolderUpdates: (payload) => ipcRenderer.invoke("chat:list-folder-updates", payload),
     acknowledgeFolderUpdates: (payload) => ipcRenderer.invoke("chat:acknowledge-folder-updates", payload),
     createSession: (payload) => ipcRenderer.invoke("chat:create-session", payload),

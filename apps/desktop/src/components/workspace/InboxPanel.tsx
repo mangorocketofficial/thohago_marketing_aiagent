@@ -147,7 +147,7 @@ export const InboxPanel = ({ formatDateTime }: InboxPanelProps) => {
   );
 
   useEffect(() => {
-    if (activePage !== "workspace" || !workspaceHandoff?.focusWorkflowItemId) {
+    if (activePage !== "scheduler" || !workspaceHandoff?.focusWorkflowItemId) {
       return;
     }
     const targetWorkflowItemId = workspaceHandoff.focusWorkflowItemId.trim();

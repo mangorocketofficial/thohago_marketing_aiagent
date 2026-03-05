@@ -51,3 +51,5 @@
 | 5-2 | Enriched RAG Context for Campaign Planning | Done | 2026-03-04 | [phase-5-2-completion.md](./phase-5-2-completion.md) |
 | 5-3 | Full Campaign Plan Generation (4-Step Chain) | Done | 2026-03-04 | [phase-5-3-completion.md](./phase-5-3-completion.md) |
 | 5-4 | Campaign Plan Workspace UX Integration (Pre-Canvas) | Done | 2026-03-04 | [phase-5-4-completion.md](./phase-5-4-completion.md) |
+| 6-1 | Conversation Memory and Caching Foundation | Done | 2026-03-05 | [phase-6-1-completion.md](./phase-6-1-completion.md) |
+| 6-2 | Scheduler Board UX Redesign + S-5A Campaign Finalization Foundation | Done | 2026-03-05 | [phase-6-2-completion.md](./phase-6-2-completion.md) |

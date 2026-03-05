@@ -137,6 +137,28 @@ type ChatInboxListResult = {
   message?: string;
 };
 
+type ChatScheduledContentItem = {
+  slot_id: string;
+  scheduled_date: string;
+  scheduled_time: string | null;
+  slot_status: "scheduled" | "generating" | "pending_approval" | "approved" | "published" | "skipped" | "failed";
+  channel: string;
+  content_type: string;
+  campaign_id: string | null;
+  workflow_item_id: string | null;
+  content_id: string | null;
+  session_id: string | null;
+  title: string | null;
+  workflow_status: WorkflowStatus | null;
+  content: Content | null;
+};
+
+type ChatScheduledContentListResult = {
+  ok: boolean;
+  items: ChatScheduledContentItem[];
+  message?: string;
+};
+
 type ChatPendingFolderUpdate = {
   activity_folder: string;
   pending_count: number;
@@ -208,7 +230,7 @@ type ChatDispatchActionPayload = {
 };
 
 type ChatSendUiContext = {
-  source: "workspace-chat" | "context-panel-widget";
+  source: "workspace-chat" | "context-panel-widget" | "global-chat-panel";
   pageId: string;
   contextPanelMode?: "agent-chat" | "page-context";
   focusWorkflowItemId?: string;
@@ -345,6 +367,7 @@ declare global {
         getActiveSession: () => Promise<ChatActiveSessionResult>;
         listSessions: (payload?: ChatSessionListParams) => Promise<ChatSessionListResult>;
         listInboxItems: (payload?: { limit?: number }) => Promise<ChatInboxListResult>;
+        listScheduledContent: (payload?: { limit?: number }) => Promise<ChatScheduledContentListResult>;
         listFolderUpdates: (payload?: { limit?: number }) => Promise<ChatFolderUpdateListResult>;
         acknowledgeFolderUpdates: (payload: {
           activityFolder: string;

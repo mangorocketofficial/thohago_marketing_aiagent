@@ -105,7 +105,7 @@ export const DashboardPage = ({
       <section className="panel panel-split">
         <article className="subpanel">
           <h2>Campaign Pending View</h2>
-          <p className="sub-description">Read-only status view. Approval decisions execute in Workspace Inbox.</p>
+          <p className="sub-description">Read-only status view. Approval decisions execute in Scheduler Editor.</p>
           {campaignToReview ? (
             <div className="campaign-card">
               <p>
@@ -120,14 +120,14 @@ export const DashboardPage = ({
                 <button
                   className="primary"
                   onClick={() =>
-                    navigate("workspace", {
+                    navigate("scheduler", {
                       workspaceHandoff: {
                         focusWorkflowItemId: campaignWorkflowHint?.workflowItemId
                       }
                     })
                   }
                 >
-                  Open in Workspace
+                  Open in Scheduler
                 </button>
               </div>
             </div>
@@ -162,14 +162,14 @@ export const DashboardPage = ({
                       <button
                         className="primary"
                         onClick={() =>
-                          navigate("workspace", {
+                          navigate("scheduler", {
                             workspaceHandoff: {
                               focusWorkflowItemId: workflowHint?.workflowItemId
                             }
                           })
                         }
                       >
-                        Open in Workspace
+                        Open in Scheduler
                       </button>
                     </div>
                   </div>

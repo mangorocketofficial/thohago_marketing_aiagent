@@ -90,6 +90,7 @@
       "orgLabel": "데스크톱 조직"
     },
     "nav": {
+      "scheduler": "스케줄러",
       "workspace": "워크스페이스",
       "dashboard": "대시보드",
       "brand-review": "브랜드 리뷰",
@@ -99,6 +100,7 @@
     },
     "contextPanel": {
       "titleByPage": {
+        "scheduler": "스케줄러 컨텍스트",
         "workspace": "워크스페이스 컨텍스트",
         "dashboard": "대시보드 컨텍스트",
         "brand-review": "브랜드 리뷰 컨텍스트",
@@ -114,6 +116,11 @@
       "closeMiniChat": "미니 채팅 닫기"
     },
     "pages": {
+      "scheduler": {
+        "eyebrow": "스케줄러",
+        "title": "스케줄러",
+        "description": "일일 콘텐츠 운영을 위한 캘린더 중심 보드입니다."
+      },
       "workspace": {
         "eyebrow": "워크스페이스",
         "title": "워크스페이스",
@@ -186,7 +193,7 @@
       "reviewAll": "전체 작업 보기",
       "reviewAllTitle": "전체 세션",
       "newSession": "새 세션",
-      "openHub": "워크스페이스 열기",
+      "openHub": "스케줄러 열기",
       "refreshList": "세션 목록 새로고침",
       "recommendedLabel": "추천 세션",
       "continueCurrent": "현재 유지",
