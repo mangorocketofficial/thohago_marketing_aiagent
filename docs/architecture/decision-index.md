@@ -131,3 +131,14 @@ Lock the runtime render contract to `size + photos + texts` and persist overlay 
 
 Reason  
 Style-specific runtime fields caused composer/editor branching and metadata drift; strict render fields with non-rendering `meta` keep composition deterministic while template visuals scale through baked assets.
+
+## D-013
+
+Phase  
+7-2.2 Patch
+
+Decision  
+Honor explicit `skill_trigger` as deterministic initial routing and move actionability checks to skill execution flow.
+
+Reason  
+Deferring explicit trigger through LLM gating caused false misses and generic fallback responses; deterministic routing plus skill-level clarification preserves user intent and runtime stability.

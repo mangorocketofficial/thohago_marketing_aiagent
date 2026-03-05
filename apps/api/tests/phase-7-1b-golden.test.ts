@@ -43,7 +43,12 @@ type RouteSkillDecisionGolden = GoldenMeta & {
     state_active_skill: string | null;
     state_skill_lock_id: string | null;
   };
-  output: null;
+  output: {
+    skill_id: string;
+    reason: string;
+    confidence: number | null;
+    note?: string;
+  } | null;
 };
 
 const loadGolden = <T>(fileName: string): T => {
@@ -107,6 +112,18 @@ const buildUserMessageEvent = (params: {
   }
 });
 
+const normalizeRouteDecision = (routed: ReturnType<typeof routeSkill>): RouteSkillDecisionGolden["output"] => {
+  if (!routed) {
+    return null;
+  }
+  return {
+    skill_id: routed.skill.id,
+    reason: routed.reason,
+    confidence: routed.confidence,
+    ...(routed.note ? { note: routed.note } : {})
+  };
+};
+
 describe("Phase 7-1b golden snapshots", () => {
   it("matches content save-body happy parser golden", () => {
     const golden = loadGolden<ContentBodyHappyGolden>("phase7-1b-happy-content-save-body-parser-20260305-v1.golden.json");
@@ -131,9 +148,9 @@ describe("Phase 7-1b golden snapshots", () => {
     );
   });
 
-  it("matches explicit skill-trigger defer routing golden", () => {
+  it("matches explicit skill-trigger initial routing golden", () => {
     const golden = loadGolden<RouteSkillDecisionGolden>("phase7-1b-edge-explicit-skill-trigger-defer-routing-20260305-v1.golden.json");
-    const routed = routeSkill({
+    const routed = normalizeRouteDecision(routeSkill({
       event: buildUserMessageEvent({
         content: golden.input.event.content,
         skillTrigger: golden.input.event.skill_trigger
@@ -143,7 +160,7 @@ describe("Phase 7-1b golden snapshots", () => {
         activeSkill: golden.input.state_active_skill,
         skillLockId: golden.input.state_skill_lock_id
       })
-    });
+    }));
     assert.deepEqual(routed, golden.output);
   });
 });

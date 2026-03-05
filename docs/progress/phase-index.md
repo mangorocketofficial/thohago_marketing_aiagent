@@ -64,3 +64,4 @@
 | 7-2b | Instagram Canvas Editor + Template Rendering | Done | 2026-03-05 | [phase-7-2b-completion.md](./phase-7-2b-completion.md) |
 | 7-2.1 | Local Image Generation Refactor | Done | 2026-03-05 | [phase-7-2.1-completion.md](./phase-7-2.1-completion.md) |
 | 7-2.2 | Template Schema Redesign (Strict Render Contract) | Done | 2026-03-05 | [phase-7-2.2-completion.md](./phase-7-2.2-completion.md) |
+| 7-2.2 Patch | Instagram Skill Routing + Generation Stability Patch | Done | 2026-03-05 | [phase-7-2.2-patch-completion.md](./phase-7-2.2-patch-completion.md) |

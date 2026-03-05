@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TemplateTextSlot } from "./templates/schema";
+import type { TemplateTextSlot } from "./templates/schema.js";
 
 type TextOverlaySvg = {
   slotId: string;

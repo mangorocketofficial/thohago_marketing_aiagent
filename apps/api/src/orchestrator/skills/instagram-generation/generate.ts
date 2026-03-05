@@ -8,7 +8,8 @@ import {
   insertDraftInstagramContent,
   linkContentToSlot,
   loadCampaignTitle,
-  loadExistingGeneratedResult
+  loadExistingGeneratedResult,
+  markSlotGenerationFailed
 } from "./persistence";
 import { buildInstagramPrompt, parseInstagramDraft } from "./prompt";
 import { resolveInstagramGenerationSlot } from "./slot";
@@ -38,106 +39,116 @@ export const generateAndPersistInstagram = async (params: {
     idempotencyKey: params.idempotencyKey
   });
 
-  const effectiveTopic = target.slot.title?.trim() || params.topic;
-  const existing = await loadExistingGeneratedResult({
-    orgId: params.orgId,
-    slot: target.slot,
-    source: target.source,
-    topic: effectiveTopic
-  });
-  if (existing) {
-    return existing;
-  }
-
-  const templateId = normalizeTemplateId(params.templateId);
-  const context = await buildInstagramGenerationContext({
-    orgId: params.orgId,
-    sessionId: params.sessionId,
-    activityFolder: params.activityFolder,
-    campaignId: target.slot.campaign_id,
-    topic: effectiveTopic,
-    templateId
-  });
-
-  const llm = await callWithFallback({
-    orgId: params.orgId,
-    prompt: buildInstagramPrompt(context),
-    maxTokens: 2048
-  });
-
-  if (!llm.text) {
-    throw new HttpError(502, "generation_failed", llm.errorMessage ?? "Failed to generate instagram caption.");
-  }
-
-  const parsedDraft = parseInstagramDraft(llm.text);
-  const template = getTemplate(templateId);
-  const requiredCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
-  const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayTexts);
-
-  const selected = await selectImagesForInstagram({
-    orgId: params.orgId,
-    activityFolder: params.activityFolder,
-    topic: effectiveTopic,
-    mode: params.imageMode,
-    requiredCount,
-    manualSelections: params.manualImageSelections
-  });
-
-  const outputFormat: "png" | "jpg" = "png";
-  const campaignTitle = await loadCampaignTitle({
-    orgId: params.orgId,
-    campaignId: target.slot.campaign_id
-  });
-
-  const caption = composeCaption(parsedDraft.caption, parsedDraft.hashtags);
-  const inserted = await insertDraftInstagramContent({
-    orgId: params.orgId,
-    slot: target.slot,
-    source: target.source,
-    activityFolder: params.activityFolder,
-    topic: effectiveTopic,
-    caption,
-    hashtags: parsedDraft.hashtags,
-    overlayTexts,
-    templateId,
-    selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
-    selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
-    model: llm.model,
-    promptTokens: llm.promptTokens,
-    completionTokens: llm.completionTokens,
-    idempotencyKey: params.idempotencyKey,
-    outputFormat,
-    campaignTitle
-  });
-
   try {
-    await linkContentToSlot({
+    const effectiveTopic = target.slot.title?.trim() || params.topic;
+    const existing = await loadExistingGeneratedResult({
       orgId: params.orgId,
       slot: target.slot,
-      contentId: inserted.contentId,
       source: target.source,
-      idempotencyKey: params.idempotencyKey
+      topic: effectiveTopic
     });
+    if (existing) {
+      return existing;
+    }
+
+    const templateId = normalizeTemplateId(params.templateId);
+    const context = await buildInstagramGenerationContext({
+      orgId: params.orgId,
+      sessionId: params.sessionId,
+      activityFolder: params.activityFolder,
+      campaignId: target.slot.campaign_id,
+      topic: effectiveTopic,
+      templateId
+    });
+
+    const llm = await callWithFallback({
+      orgId: params.orgId,
+      prompt: buildInstagramPrompt(context),
+      maxTokens: 2048
+    });
+
+    if (!llm.text) {
+      throw new HttpError(502, "generation_failed", llm.errorMessage ?? "Failed to generate instagram caption.");
+    }
+
+    const parsedDraft = parseInstagramDraft(llm.text);
+    const template = getTemplate(templateId);
+    const requiredCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
+    const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayTexts);
+
+    const selected = await selectImagesForInstagram({
+      orgId: params.orgId,
+      activityFolder: params.activityFolder,
+      topic: effectiveTopic,
+      mode: params.imageMode,
+      requiredCount,
+      manualSelections: params.manualImageSelections
+    });
+
+    const outputFormat: "png" | "jpg" = "png";
+    const campaignTitle = await loadCampaignTitle({
+      orgId: params.orgId,
+      campaignId: target.slot.campaign_id
+    });
+
+    const caption = composeCaption(parsedDraft.caption, parsedDraft.hashtags);
+    const inserted = await insertDraftInstagramContent({
+      orgId: params.orgId,
+      slot: target.slot,
+      source: target.source,
+      activityFolder: params.activityFolder,
+      topic: effectiveTopic,
+      caption,
+      hashtags: parsedDraft.hashtags,
+      overlayTexts,
+      templateId,
+      selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
+      selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      model: llm.model,
+      promptTokens: llm.promptTokens,
+      completionTokens: llm.completionTokens,
+      idempotencyKey: params.idempotencyKey,
+      outputFormat,
+      campaignTitle
+    });
+
+    try {
+      await linkContentToSlot({
+        orgId: params.orgId,
+        slot: target.slot,
+        contentId: inserted.contentId,
+        source: target.source,
+        idempotencyKey: params.idempotencyKey
+      });
+    } catch (error) {
+      await deleteContentDraft({ orgId: params.orgId, contentId: inserted.contentId });
+      throw error;
+    }
+
+    return {
+      contentId: inserted.contentId,
+      slotId: target.slot.id,
+      source: target.source,
+      topic: effectiveTopic,
+      caption,
+      model: llm.model,
+      templateId,
+      overlayTexts,
+      imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
+      selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      requiresLocalCompose: true,
+      localSaveSuggestion: inserted.localSaveSuggestion,
+      reused: false
+    };
   } catch (error) {
-    await deleteContentDraft({ orgId: params.orgId, contentId: inserted.contentId });
+    const reason = error instanceof Error ? error.message : "Unknown instagram generation error";
+    await markSlotGenerationFailed({
+      orgId: params.orgId,
+      slot: target.slot,
+      reason
+    });
     throw error;
   }
-
-  return {
-    contentId: inserted.contentId,
-    slotId: target.slot.id,
-    source: target.source,
-    topic: effectiveTopic,
-    caption,
-    model: llm.model,
-    templateId,
-    overlayTexts,
-    imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
-    selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
-    requiresLocalCompose: true,
-    localSaveSuggestion: inserted.localSaveSuggestion,
-    reused: false
-  };
 };
 
 const normalizeTemplateId = (templateId: string | null): TemplateId =>

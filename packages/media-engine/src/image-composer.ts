@@ -1,8 +1,8 @@
 import sharp from "sharp";
-import { composeImage, preprocessUserImage, type CompositeLayer } from "./sharp-client";
-import { buildTextOverlaySvg } from "./svg-renderer";
-import { getTemplate, getTemplateBackgroundPath } from "./templates/registry";
-import type { TemplateId } from "./templates/schema";
+import { composeImage, preprocessUserImage, type CompositeLayer } from "./sharp-client.js";
+import { buildTextOverlaySvg } from "./svg-renderer.js";
+import { getTemplate, getTemplateBackgroundPath } from "./templates/registry.js";
+import type { TemplateId } from "./templates/schema.js";
 
 export type ImageComposeInput = {
   templateId: TemplateId;

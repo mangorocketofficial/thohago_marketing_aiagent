@@ -83,6 +83,60 @@ export const routeSkill = (params: {
   const content = asString(params.event.payload?.content, "").trim();
   const normalized = normalizeMessage(content);
 
+  const payload = asRecord(params.event.payload);
+  const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
+  if (explicitTrigger) {
+    const explicitSkill = registry.findById(explicitTrigger);
+    if (
+      explicitSkill &&
+      explicitSkill.handlesEvents.includes("user_message")
+    ) {
+      const pinnedSkillId = params.state.skill_lock_id || params.state.active_skill || null;
+      if (pinnedSkillId && pinnedSkillId !== explicitSkill.id) {
+        return {
+          skill: explicitSkill,
+          reason: "explicit_trigger",
+          confidence: 1,
+          note: "explicit_trigger_override_active_or_lock"
+        };
+      }
+
+      if (!params.state.active_skill && !params.state.skill_lock_id) {
+        return {
+          skill: explicitSkill,
+          reason: "explicit_trigger",
+          confidence: 1,
+          note: "explicit_trigger_initial_routing"
+        };
+      }
+    }
+  }
+
+  const pinnedSkillId = params.state.skill_lock_id || params.state.active_skill || null;
+  if (pinnedSkillId) {
+    const overrideMatch = registry.matchIntent(
+      {
+        session: params.session,
+        state: {
+          ...params.state,
+          active_skill: null,
+          skill_lock_id: null
+        },
+        normalizedMessage: normalized,
+        tokens: tokenize(normalized)
+      },
+      {
+        threshold: INTENT_CONFIDENCE_THRESHOLD
+      }
+    );
+    if (overrideMatch && overrideMatch.skill.id !== pinnedSkillId) {
+      return {
+        ...overrideMatch,
+        note: `intent_override_pinned_skill:${pinnedSkillId}->${overrideMatch.skill.id}`
+      };
+    }
+  }
+
   const lockedSkill = registry.findById(params.state.skill_lock_id);
   if (lockedSkill && lockedSkill.handlesEvents.includes("user_message")) {
     return {
@@ -91,20 +145,6 @@ export const routeSkill = (params: {
       confidence: 1,
       note: "skill_lock_continuation"
     };
-  }
-
-  const payload = asRecord(params.event.payload);
-  const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
-  if (explicitTrigger) {
-    const explicitSkill = registry.findById(explicitTrigger);
-    if (
-      explicitSkill &&
-      explicitSkill.handlesEvents.includes("user_message") &&
-      !params.state.active_skill &&
-      !params.state.skill_lock_id
-    ) {
-      return null;
-    }
   }
 
   if (activeSkill && activeSkill.handlesEvents.includes("user_message")) {

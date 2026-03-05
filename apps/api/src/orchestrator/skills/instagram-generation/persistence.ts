@@ -240,7 +240,7 @@ export const linkContentToSlot = async (params: {
     .from("schedule_slots")
     .update({
       content_id: params.contentId,
-      slot_status: "draft",
+      slot_status: "pending_approval",
       lock_version: params.slot.lock_version + 1,
       metadata: nextMetadata
     })
@@ -257,4 +257,35 @@ export const linkContentToSlot = async (params: {
 
 export const deleteContentDraft = async (params: { orgId: string; contentId: string }): Promise<void> => {
   await supabaseAdmin.from("contents").delete().eq("org_id", params.orgId).eq("id", params.contentId);
+};
+
+/**
+ * Mark generating slot as failed when instagram generation pipeline aborts.
+ * Best-effort only; failure should not hide the original error.
+ */
+export const markSlotGenerationFailed = async (params: {
+  orgId: string;
+  slot: ScheduleSlotRow;
+  reason: string;
+}): Promise<void> => {
+  const nextMetadata = {
+    ...params.slot.metadata,
+    generation_failed_at: new Date().toISOString(),
+    generation_error: params.reason.slice(0, 500)
+  };
+
+  const { error } = await supabaseAdmin
+    .from("schedule_slots")
+    .update({
+      slot_status: "failed",
+      metadata: nextMetadata
+    })
+    .eq("org_id", params.orgId)
+    .eq("id", params.slot.id)
+    .eq("slot_status", "generating")
+    .is("content_id", null);
+
+  if (error) {
+    console.warn(`[INSTAGRAM_SKILL] Failed to mark slot as failed: ${error.message}`);
+  }
 };

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TemplateConfig, TemplateId, TemplatePhotoSlot, TemplateTextSlot } from "./schema";
+import type { TemplateConfig, TemplateId, TemplatePhotoSlot, TemplateTextSlot } from "./schema.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const PRESETS_DIR = path.resolve(moduleDir, "presets");

@@ -58,14 +58,16 @@ const buildUserMessageEvent = (content: string, skillTrigger?: string): ResumeEv
 });
 
 describe("Phase 7-1b skill routing guardrails", () => {
-  it("defers explicit skill trigger to LLM gating when no active skill exists", () => {
+  it("routes explicit skill trigger immediately when no active skill exists", () => {
     const routed = routeSkill({
       event: buildUserMessageEvent("네이버 블로그 글 작성해줘", "naverblog_generation"),
       session: buildSession(),
       state: buildState()
     });
 
-    assert.equal(routed, null);
+    assert.ok(routed);
+    assert.equal(routed?.reason, "explicit_trigger");
+    assert.equal(routed?.skill.id, "naverblog_generation");
   });
 
   it("keeps active skill continuation even when skill_trigger payload exists", () => {
@@ -80,5 +82,35 @@ describe("Phase 7-1b skill routing guardrails", () => {
     assert.ok(routed);
     assert.equal(routed?.reason, "active_skill");
     assert.equal(routed?.skill.id, "naverblog_generation");
+  });
+
+  it("allows explicit skill trigger to override a different pinned skill", () => {
+    const routed = routeSkill({
+      event: buildUserMessageEvent("?몄뒪?洹몃옩 寃뚯떆臾?留뚮뱾?댁쨾", "instagram_generation"),
+      session: buildSession(),
+      state: buildState({
+        active_skill: "naverblog_generation",
+        skill_lock_id: "naverblog_generation"
+      })
+    });
+
+    assert.ok(routed);
+    assert.equal(routed?.reason, "explicit_trigger");
+    assert.equal(routed?.skill.id, "instagram_generation");
+  });
+
+  it("allows strong cross-skill intent to override pinned skill without explicit trigger", () => {
+    const routed = routeSkill({
+      event: buildUserMessageEvent("create instagram post for recruitment"),
+      session: buildSession(),
+      state: buildState({
+        active_skill: "naverblog_generation",
+        skill_lock_id: "naverblog_generation"
+      })
+    });
+
+    assert.ok(routed);
+    assert.equal(routed?.reason, "intent");
+    assert.equal(routed?.skill.id, "instagram_generation");
   });
 });

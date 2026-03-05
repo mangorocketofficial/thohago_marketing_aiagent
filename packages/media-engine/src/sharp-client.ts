@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import sharp from "sharp";
-import type { TemplateImageFit } from "./templates/schema";
+import type { TemplateImageFit } from "./templates/schema.js";
 
 export type CompositeLayer = {
   type: "image" | "svg";
