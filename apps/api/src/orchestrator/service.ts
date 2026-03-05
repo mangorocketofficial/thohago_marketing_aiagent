@@ -768,11 +768,15 @@ const handleGeneralUserMessage = async (params: {
   await insertChatMessage({
     orgId: params.session.org_id,
     sessionId: params.session.id,
+    userId: params.session.created_by_user_id,
     role: "user",
     content
   });
 
   const assistantReply = await generateGeneralAssistantReply({
+    orgId: params.session.org_id,
+    sessionId: params.session.id,
+    userId: params.session.created_by_user_id,
     activityFolder: params.state.activity_folder,
     currentStep: params.session.current_step,
     userMessage: content,
@@ -783,6 +787,7 @@ const handleGeneralUserMessage = async (params: {
   await insertChatMessage({
     orgId: params.session.org_id,
     sessionId: params.session.id,
+    userId: params.session.created_by_user_id,
     role: "assistant",
     content: assistantReply
   });

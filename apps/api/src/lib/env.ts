@@ -173,6 +173,17 @@ const ragTier2LocalDocBudget = parsePositiveInt(readEnv("RAG_TIER2_LOCAL_DOC_BUD
 const ragTier2ChatPatternBudget = parsePositiveInt(readEnv("RAG_TIER2_CHAT_PATTERN_BUDGET", "500"), 500);
 const ragForbiddenCheckEnabled = parseBoolean(readEnv("RAG_FORBIDDEN_CHECK_ENABLED", "true"), true);
 const ragForbiddenMaxRetries = parseNonNegativeInt(readEnv("RAG_FORBIDDEN_MAX_RETRIES", "1"), 1);
+const workingMemoryMaxTurns = parsePositiveInt(readEnv("WORKING_MEMORY_MAX_TURNS", "12"), 12);
+const workingMemoryTokenBudget = parsePositiveInt(readEnv("WORKING_MEMORY_TOKEN_BUDGET", "900"), 900);
+const sessionSummaryTokenBudget = parsePositiveInt(readEnv("SESSION_SUMMARY_TOKEN_BUDGET", "250"), 250);
+const sessionSummaryUpdateEveryTurns = parsePositiveInt(
+  readEnv("SESSION_SUMMARY_UPDATE_EVERY_TURNS", "4"),
+  4
+);
+const preferenceMemoryMaxItems = parsePositiveInt(readEnv("PREFERENCE_MEMORY_MAX_ITEMS", "8"), 8);
+const llmResponseCacheEnabled = parseBoolean(readEnv("LLM_RESPONSE_CACHE_ENABLED", "true"), true);
+const llmResponseCacheTtlSeconds = parsePositiveInt(readEnv("LLM_RESPONSE_CACHE_TTL_SECONDS", "300"), 300);
+const anthropicPromptCachingEnabled = parseBoolean(readEnv("ANTHROPIC_PROMPT_CACHING_ENABLED", "true"), true);
 const subscriptionBypass = parseBoolean(readEnv("SUBSCRIPTION_BYPASS", "false"), false);
 const subscriptionDefaultStatus = parseSubscriptionStatus(readEnv("SUBSCRIPTION_DEFAULT_STATUS", "active"), "active");
 const subscriptionTrialDays = parseNonNegativeInt(readEnv("SUBSCRIPTION_TRIAL_DAYS", "14"), 14);
@@ -200,6 +211,14 @@ export const env = {
   ragTier2ChatPatternBudget,
   ragForbiddenCheckEnabled,
   ragForbiddenMaxRetries,
+  workingMemoryMaxTurns,
+  workingMemoryTokenBudget,
+  sessionSummaryTokenBudget,
+  sessionSummaryUpdateEveryTurns,
+  preferenceMemoryMaxItems,
+  llmResponseCacheEnabled,
+  llmResponseCacheTtlSeconds,
+  anthropicPromptCachingEnabled,
   subscriptionBypass,
   subscriptionDefaultStatus,
   subscriptionTrialDays

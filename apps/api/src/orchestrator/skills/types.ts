@@ -48,6 +48,9 @@ export type SkillDeps = {
   asString: (value: unknown, fallback?: string) => string;
   normalizeStep: (value: unknown) => OrchestratorStep;
   generateGeneralAssistantReply: (params: {
+    orgId: string;
+    sessionId: string;
+    userId?: string | null;
     activityFolder: string;
     currentStep: string;
     userMessage: string;

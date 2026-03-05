@@ -152,6 +152,7 @@ export const applyUserMessageStep = async (
   await deps.insertChatMessage({
     orgId: session.org_id,
     sessionId: session.id,
+    userId: session.created_by_user_id,
     role: "user",
     content: userMessage,
     ...(uiContextMetadata ? { metadata: { ui_context: uiContextMetadata } } : {})

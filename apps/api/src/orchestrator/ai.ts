@@ -1,4 +1,8 @@
-﻿import { env } from "../lib/env";
+import { truncateToTokenBudget } from "@repo/rag";
+import { env } from "../lib/env";
+import { getSessionRollingSummaryText, loadWorkingMemoryForSession, refreshSessionMemorySnapshot } from "./conversation-memory";
+import { buildLlmRequestHash, readLlmResponseCache, writeLlmResponseCache } from "./llm-cache";
+import { buildPreferenceContextText } from "./preference-memory";
 import { buildContentGenerationContext, buildEnrichedCampaignContext } from "./rag-context";
 import { assembleCampaignPlanDocument } from "./skills/campaign-plan/assembler";
 import {
@@ -40,6 +44,10 @@ type OpenAiChatCompletionResponse = {
       content?: string | null;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
   error?: {
     message?: string;
   };
@@ -139,9 +147,16 @@ const safeJson = (value: unknown): string => {
 };
 
 const callOpenAiGeneralChat = async (
-  messages: Array<{ role: "system" | "user"; content: string }>,
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   options?: {
     temperature?: number;
+    maxTokens?: number;
+    cache?: {
+      orgId: string;
+      scope: string;
+      payload: unknown;
+      ttlSeconds?: number;
+    };
   }
 ): Promise<string | null> => {
   if (!env.openAiApiKey) {
@@ -152,6 +167,35 @@ const callOpenAiGeneralChat = async (
     typeof options?.temperature === "number" && Number.isFinite(options.temperature)
       ? Math.max(0, Math.min(2, options.temperature))
       : 0.7;
+  const maxTokens =
+    typeof options?.maxTokens === "number" && Number.isFinite(options.maxTokens) && options.maxTokens > 0
+      ? Math.floor(options.maxTokens)
+      : null;
+
+  let cacheKey: string | null = null;
+  let requestHash: string | null = null;
+  if (options?.cache?.orgId && options.cache.scope) {
+    requestHash = buildLlmRequestHash({
+      provider: "openai",
+      model: OPENAI_GENERAL_CHAT_MODEL,
+      scope: options.cache.scope,
+      request: options.cache.payload
+    });
+    cacheKey = buildLlmRequestHash({
+      provider: "openai",
+      org_id: options.cache.orgId,
+      scope: options.cache.scope,
+      request_hash: requestHash
+    });
+
+    const cached = await readLlmResponseCache({
+      orgId: options.cache.orgId,
+      cacheKey
+    });
+    if (cached?.text) {
+      return cached.text;
+    }
+  }
 
   try {
     const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
@@ -163,6 +207,7 @@ const callOpenAiGeneralChat = async (
       body: JSON.stringify({
         model: OPENAI_GENERAL_CHAT_MODEL,
         temperature,
+        ...(maxTokens ? { max_tokens: maxTokens } : {}),
         messages
       })
     });
@@ -177,7 +222,29 @@ const callOpenAiGeneralChat = async (
     if (typeof content !== "string" || !content.trim()) {
       return null;
     }
-    return content.trim();
+    const text = content.trim();
+
+    if (options?.cache?.orgId && cacheKey && requestHash) {
+      await writeLlmResponseCache({
+        orgId: options.cache.orgId,
+        provider: "openai",
+        model: OPENAI_GENERAL_CHAT_MODEL,
+        cacheKey,
+        requestHash,
+        responseText: text,
+        promptTokens:
+          typeof body.usage?.prompt_tokens === "number" && Number.isFinite(body.usage.prompt_tokens)
+            ? body.usage.prompt_tokens
+            : null,
+        completionTokens:
+          typeof body.usage?.completion_tokens === "number" && Number.isFinite(body.usage.completion_tokens)
+            ? body.usage.completion_tokens
+            : null,
+        ttlSeconds: options.cache.ttlSeconds
+      });
+    }
+
+    return text;
   } catch (error) {
     console.error("[AI] OpenAI general chat request error:", error);
     return null;
@@ -284,7 +351,13 @@ export const classifyCampaignDraftReviewIntent = async (params: {
   };
 };
 
-const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promise<CampaignChainModelCallResult> => {
+const callAnthropicWithUsage = async (
+  prompt: string,
+  maxTokens: number,
+  options?: {
+    orgId?: string | null;
+  }
+): Promise<CampaignChainModelCallResult> => {
   if (!env.anthropicApiKey) {
     return {
       text: null,
@@ -295,22 +368,106 @@ const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promis
     };
   }
 
-  try {
-    const response = await fetch(ANTHROPIC_MESSAGES_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": env.anthropicApiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
+  const orgId = typeof options?.orgId === "string" && options.orgId.trim() ? options.orgId.trim() : null;
+  const requestHash = buildLlmRequestHash({
+    provider: "anthropic",
+    model: env.anthropicModel,
+    prompt,
+    max_tokens: maxTokens
+  });
+  const cacheKey =
+    orgId === null
+      ? null
+      : buildLlmRequestHash({
+          provider: "anthropic",
+          org_id: orgId,
+          request_hash: requestHash
+        });
+
+  if (orgId && cacheKey) {
+    const cached = await readLlmResponseCache({
+      orgId,
+      cacheKey
+    });
+    if (cached?.text) {
+      return {
+        text: cached.text,
+        promptTokens: cached.promptTokens,
+        completionTokens: cached.completionTokens,
+        errorCode: null,
+        errorMessage: null
+      };
+    }
+  }
+
+  const requestHeaders = {
+    "content-type": "application/json",
+    "x-api-key": env.anthropicApiKey,
+    "anthropic-version": "2023-06-01"
+  };
+
+  const buildRequestBody = (usePromptCaching: boolean) => {
+    if (!usePromptCaching) {
+      return {
         model: env.anthropicModel,
         max_tokens: maxTokens,
         messages: [{ role: "user", content: prompt }]
-      })
-    });
+      };
+    }
 
+    return {
+      model: env.anthropicModel,
+      max_tokens: maxTokens,
+      system: [
+        {
+          type: "text",
+          text: "Follow the user instruction exactly. Return only the requested output.",
+          cache_control: {
+            type: "ephemeral"
+          }
+        }
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: prompt,
+              cache_control: {
+                type: "ephemeral"
+              }
+            }
+          ]
+        }
+      ]
+    };
+  };
+
+  const callAnthropicApi = async (usePromptCaching: boolean) => {
+    const response = await fetch(ANTHROPIC_MESSAGES_URL, {
+      method: "POST",
+      headers: requestHeaders,
+      body: JSON.stringify(buildRequestBody(usePromptCaching))
+    });
     const payload = (await response.json().catch(() => ({}))) as AnthropicResponse;
+    return {
+      response,
+      payload
+    };
+  };
+
+  try {
+    let current = await callAnthropicApi(env.anthropicPromptCachingEnabled);
+    if (
+      !current.response.ok &&
+      env.anthropicPromptCachingEnabled &&
+      current.response.status === 400
+    ) {
+      current = await callAnthropicApi(false);
+    }
+
+    const payload = current.payload;
     const promptTokens =
       typeof payload.usage?.input_tokens === "number" && Number.isFinite(payload.usage.input_tokens)
         ? payload.usage.input_tokens
@@ -320,21 +477,35 @@ const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promis
         ? payload.usage.output_tokens
         : null;
 
-    if (!response.ok) {
+    if (!current.response.ok) {
       const errorMessage = payload.error?.message ?? "unknown";
-      console.error(`[AI] Anthropic request failed (${response.status}): ${errorMessage}`);
+      console.error(`[AI] Anthropic request failed (${current.response.status}): ${errorMessage}`);
       return {
         text: null,
         promptTokens,
         completionTokens,
-        errorCode: `http_${response.status}`,
+        errorCode: `http_${current.response.status}`,
         errorMessage
       };
     }
 
     const block = payload.content?.find((entry) => entry.type === "text" && !!entry.text?.trim());
+    const text = block?.text?.trim() ?? null;
+    if (text && orgId && cacheKey) {
+      await writeLlmResponseCache({
+        orgId,
+        provider: "anthropic",
+        model: env.anthropicModel,
+        cacheKey,
+        requestHash,
+        responseText: text,
+        promptTokens,
+        completionTokens
+      });
+    }
+
     return {
-      text: block?.text?.trim() ?? null,
+      text,
       promptTokens,
       completionTokens,
       errorCode: null,
@@ -353,8 +524,14 @@ const callAnthropicWithUsage = async (prompt: string, maxTokens: number): Promis
   }
 };
 
-const callAnthropic = async (prompt: string, maxTokens: number): Promise<string | null> => {
-  const result = await callAnthropicWithUsage(prompt, maxTokens);
+const callAnthropic = async (
+  prompt: string,
+  maxTokens: number,
+  options?: {
+    orgId?: string | null;
+  }
+): Promise<string | null> => {
+  const result = await callAnthropicWithUsage(prompt, maxTokens, options);
   return result.text;
 };
 
@@ -382,7 +559,10 @@ export const generateCampaignPlan = async (
       activityFolder,
       userMessage,
       context: ctx,
-      invokeModel: callAnthropicWithUsage,
+      invokeModel: (prompt, tokens) =>
+        callAnthropicWithUsage(prompt, tokens, {
+          orgId
+        }),
       revisionReason: options?.revisionReason ?? null,
       previousChainData: options?.previousChainData ?? null,
       rerunFromStep: options?.rerunFromStep
@@ -502,7 +682,9 @@ export const generateContentDraft = async (
   }
 
   const maxTokens = normalizedChannel === "naver_blog" ? 1000 : 400;
-  const response = await callAnthropic(promptParts.filter(Boolean).join("\n"), maxTokens);
+  const response = await callAnthropic(promptParts.filter(Boolean).join("\n"), maxTokens, {
+    orgId
+  });
 
   if (response) {
     return { draft: response, ragMeta: ctx.meta };
@@ -515,6 +697,9 @@ export const generateContentDraft = async (
 };
 
 export const generateGeneralAssistantReply = async (params: {
+  orgId: string;
+  sessionId: string;
+  userId?: string | null;
   activityFolder: string;
   currentStep: string;
   userMessage: string;
@@ -537,12 +722,61 @@ export const generateGeneralAssistantReply = async (params: {
     campaign_id: params.campaignId ?? null,
     content_id: params.contentId ?? null
   });
-  const userPrompt = [`[workspace_context]`, contextNote, `[user_message]`, params.userMessage].join("\n");
 
-  const response = await callOpenAiGeneralChat([
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt }
+  await refreshSessionMemorySnapshot({
+    orgId: params.orgId,
+    sessionId: params.sessionId
+  });
+
+  const [workingMemory, rollingSummary, preferenceContext] = await Promise.all([
+    loadWorkingMemoryForSession({
+      orgId: params.orgId,
+      sessionId: params.sessionId,
+      currentUserMessage: params.userMessage
+    }),
+    getSessionRollingSummaryText({
+      orgId: params.orgId,
+      sessionId: params.sessionId
+    }),
+    buildPreferenceContextText({
+      orgId: params.orgId,
+      userId: params.userId ?? null,
+      maxItems: env.preferenceMemoryMaxItems
+    })
   ]);
+
+  const contextSections = [`[workspace_context]\n${contextNote}`];
+  if (rollingSummary) {
+    contextSections.push(`[session_summary]\n${truncateToTokenBudget(rollingSummary, env.sessionSummaryTokenBudget)}`);
+  }
+  if (preferenceContext) {
+    contextSections.push(`[long_term_preferences]\n${truncateToTokenBudget(preferenceContext, 180)}`);
+  }
+
+  const promptMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "system", content: contextSections.join("\n\n") },
+    ...workingMemory.messages
+  ];
+  if (!workingMemory.includesCurrentUserMessage) {
+    promptMessages.push({
+      role: "user",
+      content: params.userMessage
+    });
+  }
+
+  const response = await callOpenAiGeneralChat(promptMessages, {
+    cache: {
+      orgId: params.orgId,
+      scope: "general_assistant_reply",
+      payload: {
+        session_id: params.sessionId,
+        step: params.currentStep,
+        prompt_messages: promptMessages
+      },
+      ttlSeconds: env.llmResponseCacheTtlSeconds
+    }
+  });
   if (response) {
     return response;
   }

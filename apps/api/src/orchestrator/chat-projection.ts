@@ -1,5 +1,7 @@
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { refreshSessionMemorySnapshot } from "./conversation-memory";
+import { upsertPreferencesFromUserMessage } from "./preference-memory";
 import {
   buildProjectionKey,
   patchActionCardMetadataStatus
@@ -26,6 +28,7 @@ type WorkflowSystemNotificationMetadata = {
 export type InsertChatMessageInput = {
   orgId: string;
   sessionId?: string | null;
+  userId?: string | null;
   role: "user" | "assistant";
   content: string;
   channel?: ChatChannel;
@@ -68,6 +71,60 @@ const asString = (value: unknown, fallback = ""): string => {
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const normalizeMessageType = (value: unknown): ChatMessageType => {
+  if (value === "action_card") {
+    return "action_card";
+  }
+  if (value === "system") {
+    return "system";
+  }
+  return "text";
+};
+
+const triggerConversationMemoryUpdates = (input: InsertChatMessageInput): void => {
+  const sessionId = asString(input.sessionId, "").trim();
+  if (!sessionId) {
+    return;
+  }
+
+  const messageType = normalizeMessageType(input.messageType);
+  if (messageType !== "text") {
+    return;
+  }
+
+  void refreshSessionMemorySnapshot({
+    orgId: input.orgId,
+    sessionId
+  }).catch((error) => {
+    console.warn(
+      `[CONVERSATION_MEMORY] Snapshot refresh failed for org ${input.orgId}, session ${sessionId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  });
+
+  if (input.role !== "user") {
+    return;
+  }
+
+  const content = asString(input.content, "").trim();
+  if (!content) {
+    return;
+  }
+
+  void upsertPreferencesFromUserMessage({
+    orgId: input.orgId,
+    userId: asString(input.userId, "").trim() || null,
+    message: content
+  }).catch((error) => {
+    console.warn(
+      `[PREFERENCE_MEMORY] Update failed for org ${input.orgId}, session ${sessionId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  });
+};
 
 const buildSystemWorkflowMetadata = (params: {
   workflowItem: WorkflowItemRow;
@@ -168,12 +225,14 @@ export const insertChatMessage = async (input: InsertChatMessageInput): Promise<
     if (data) {
       const insertedId = asString((data as Record<string, unknown>).id, "");
       if (insertedId) {
+        triggerConversationMemoryUpdates(input);
         return insertedId;
       }
     }
 
     const existingId = await readChatMessageIdByProjectionKey(input.orgId, input.projectionKey);
     if (existingId) {
+      triggerConversationMemoryUpdates(input);
       return existingId;
     }
     throw new HttpError(500, "db_error", "Failed to resolve chat projection message id after upsert.");
@@ -183,7 +242,9 @@ export const insertChatMessage = async (input: InsertChatMessageInput): Promise<
   if (error || !data) {
     throw new HttpError(500, "db_error", `Failed to insert chat message: ${error?.message ?? "unknown"}`);
   }
-  return asString((data as Record<string, unknown>).id, "");
+  const insertedId = asString((data as Record<string, unknown>).id, "");
+  triggerConversationMemoryUpdates(input);
+  return insertedId;
 };
 
 export const updateLatestWorkflowProjectionStatus = async (

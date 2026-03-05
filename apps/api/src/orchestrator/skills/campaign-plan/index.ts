@@ -199,11 +199,15 @@ const handleGeneralMessage = async (context: SkillExecutionContext): Promise<Ski
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     role: "user",
     content
   });
 
   const assistantReply = await context.deps.generateGeneralAssistantReply({
+    orgId: context.session.org_id,
+    sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     activityFolder: context.state.activity_folder,
     currentStep: context.state.campaign_survey?.phase ?? context.session.current_step,
     userMessage: content,

@@ -20,6 +20,37 @@
 - [ ] `git commit -m "<phase 요약 메시지>"`
 - [ ] `git push`
 
+## Decision Log Rule
+
+각 completion 문서의 **Follow-up 아래**에 `### Decisions` 블록을 추가한다.
+코드가 말할 수 없는 것만 적는다: 왜, 뭘 버렸는지, 어디서 막혔는지.
+
+```
+### Decisions
+
+**Why this approach:**
+(핵심 설계 선택 1-3문장. "왜 이 방법인지"만.)
+
+**Alternatives considered:**
+- [대안 A] — 탈락 이유
+(선택지가 하나뿐이었으면 생략)
+
+**Blockers hit:**
+- [증상] → 시도한 것 [X] → 실제 원인 [Y] → 해결 [Z]
+(막힌 게 없으면 생략)
+
+**Tech debt introduced:**
+- [무엇] — [왜 지금은 괜찮은지] → affects Phase X.Y
+(없으면 생략)
+```
+
+Rules:
+1. **섹션당 5줄 이내** — 넘으면 over-explaining
+2. **해당 없는 섹션은 생략** — "없음" 쓰지 말고 섹션 자체를 빼라
+3. **영향 전파 표시** — 결정이 다른 phase에 제약을 주면 `→ affects Phase X.Y`
+
+---
+
 ## Phase Session S5a Completion (2026-03-04)
 
 ### Summary
@@ -58,3 +89,18 @@
 ### Follow-up
 - S5b: backend projection/action_card 데이터 모델 고도화.
 - S5c: Canvas artifact preview/editor 도입.
+
+### Decisions
+
+**Why this approach:**
+Workspace 3보드(Inbox+Chat+Session Rail) 구조 채택 — 승인 대기 중에도 채팅을 막지 않으려면 승인 큐와 채팅 입력을 물리적으로 분리해야 했음. 단일 채팅 뷰에서 모달로 처리하는 것보다 UX 흐름이 자연스러움.
+
+**Alternatives considered:**
+- 단일 채팅 뷰 + 승인 모달 오버레이 — 채팅 컨텍스트가 가려지고, 모달 중첩 시 UX 복잡 → 탈락
+- 탭 기반 전환(채팅/승인) — 승인 알림을 놓치기 쉬움 → 탈락
+
+**Blockers hit:**
+- 승인 대기 중 user_message 409 에러 → 처음엔 클라이언트에서 메시지 큐잉 시도 → 실제로는 백엔드에서 승인 스텝 중에도 gpt-4o-mini 응답 경로를 열어주는 게 맞았음
+
+**Tech debt introduced:**
+- action_card 메시지 클라이언트 필터링(타임라인에서 숨김) — 백엔드 projection에서 처리해야 함 → affects S5b

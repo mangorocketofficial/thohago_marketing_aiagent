@@ -208,6 +208,7 @@ export const handleSurveyStart = async (context: SkillExecutionContext): Promise
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     role: "user",
     content
   });
@@ -319,6 +320,7 @@ export const handleSurveyAnswer = async (context: SkillExecutionContext): Promis
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     role: "user",
     content
   });
@@ -417,6 +419,7 @@ export const handleDraftReviewMessage = async (
   await context.deps.campaign.insertChatMessage({
     orgId: context.session.org_id,
     sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     role: "user",
     content
   });
@@ -511,6 +514,9 @@ export const handleDraftReviewMessage = async (
   }
 
   const assistantReply = await context.deps.generateGeneralAssistantReply({
+    orgId: context.session.org_id,
+    sessionId: context.session.id,
+    userId: context.session.created_by_user_id,
     activityFolder: context.state.activity_folder,
     currentStep: survey.phase,
     userMessage: content,
