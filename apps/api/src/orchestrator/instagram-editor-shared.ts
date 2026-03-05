@@ -1,4 +1,3 @@
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
@@ -40,25 +39,6 @@ const dedupeStrings = (values: string[]): string[] => {
     result.push(value);
   }
   return result;
-};
-
-const toRelativePath = (absoluteOrRelativePath: string, activityFolder: string, fileName: string): string => {
-  const normalized = absoluteOrRelativePath.replace(/\\/g, "/");
-  const normalizedFolder = activityFolder.replace(/\\/g, "/");
-  if (!normalizedFolder) {
-    return fileName;
-  }
-  const index = normalized.lastIndexOf(`/${normalizedFolder}/`);
-  if (index >= 0) {
-    return normalized.slice(index + 1).replace(/^\/+/, "");
-  }
-
-  if (normalized.includes(normalizedFolder)) {
-    const start = normalized.indexOf(normalizedFolder);
-    return normalized.slice(start);
-  }
-
-  return `${normalizedFolder}/${fileName}`.replace(/\/+/g, "/");
 };
 
 export const normalizeTemplateId = (candidate: unknown, fallback: TemplateId): TemplateId => {
@@ -162,10 +142,10 @@ const resolveImagePathsByFileIds = async (params: {
   }
 
   const { data, error } = await supabaseAdmin
-    .from("local_files")
-    .select("id,file_path,file_name,activity_folder,status")
+    .from("activity_image_indexes")
+    .select("id,source_id,status,is_latest")
     .eq("org_id", params.orgId)
-    .eq("file_type", "image")
+    .eq("is_latest", true)
     .in("id", normalizedIds);
 
   if (error) {
@@ -175,14 +155,12 @@ const resolveImagePathsByFileIds = async (params: {
   const byId = new Map<string, string>();
   for (const row of (Array.isArray(data) ? data : []) as Record<string, unknown>[]) {
     const id = asString(row.id, "").trim();
-    const filePath = asString(row.file_path, "").trim();
-    const fileName = asString(row.file_name, "").trim() || path.basename(filePath);
-    const activityFolder = asString(row.activity_folder, "").trim();
-    const status = asString(row.status, "active").trim().toLowerCase();
-    if (!id || !filePath || status === "deleted") {
+    const sourceId = asString(row.source_id, "").trim();
+    const status = asString(row.status, "").trim().toLowerCase();
+    if (!id || !sourceId || status === "deleted") {
       continue;
     }
-    byId.set(id, toRelativePath(filePath, activityFolder, fileName));
+    byId.set(id, sourceId);
   }
 
   const missing = normalizedIds.filter((id) => !byId.has(id));

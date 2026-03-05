@@ -109,3 +109,14 @@ Reason
 
 Affects  
 Phase 7-2c
+
+DEBT-011
+
+Description  
+Desktop watcher vision indexing calls GPT API in background but does not persist a durable retry queue/backoff state across runtime restarts.
+
+Reason  
+7-2d prioritized end-to-end ingestion cutover and fallback-safe generation continuity before adding queue durability and retry orchestration.
+
+Affects  
+Phase 7-3

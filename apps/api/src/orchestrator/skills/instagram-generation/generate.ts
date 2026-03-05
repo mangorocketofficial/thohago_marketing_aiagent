@@ -104,6 +104,8 @@ export const generateAndPersistInstagram = async (params: {
       templateId,
       selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
       selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      imageSelectionSource: selected.selectionSource,
+      imageSelectionReason: selected.telemetryReason,
       model: llm.model,
       promptTokens: llm.promptTokens,
       completionTokens: llm.completionTokens,
@@ -136,6 +138,8 @@ export const generateAndPersistInstagram = async (params: {
       overlayTexts,
       imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
       selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      imageSelectionSource: selected.selectionSource,
+      imageSelectionReason: selected.telemetryReason,
       requiresLocalCompose: true,
       localSaveSuggestion: inserted.localSaveSuggestion,
       reused: false

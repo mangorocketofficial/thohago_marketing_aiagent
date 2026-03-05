@@ -45,6 +45,8 @@ export type InstagramGenerationResult = {
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
   selectedImagePaths: string[];
+  imageSelectionSource: "manual_selection" | "index_activity_folder" | "index_org_fallback" | "recency_fallback" | "none";
+  imageSelectionReason: string | null;
   requiresLocalCompose: boolean;
   localSaveSuggestion: {
     relativePath: string;

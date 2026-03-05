@@ -101,6 +101,8 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
         overlay_texts: generated.overlayTexts,
         image_file_ids: generated.imageFileIds,
         selected_image_paths: generated.selectedImagePaths,
+        image_selection_source: generated.imageSelectionSource,
+        image_selection_reason: generated.imageSelectionReason,
         requires_local_compose: generated.requiresLocalCompose,
         local_save_suggestion: {
           relative_path: generated.localSaveSuggestion.relativePath,
@@ -202,6 +204,8 @@ const handleGeneration = async (context: SkillExecutionContext): Promise<SkillRe
       overlay_texts: generated.overlayTexts,
       image_file_ids: generated.imageFileIds,
       selected_image_paths: generated.selectedImagePaths,
+      image_selection_source: generated.imageSelectionSource,
+      image_selection_reason: generated.imageSelectionReason,
       requires_local_compose: generated.requiresLocalCompose,
       local_save_suggestion: {
         relative_path: generated.localSaveSuggestion.relativePath,

@@ -23,6 +23,7 @@ import {
   toRendererEntry,
   upsertFile
 } from "./file-index.mjs";
+import { deleteImageFromSelectionIndex, indexImageForSelection } from "./image-indexer.mjs";
 import { writePipelineTrigger } from "./pipeline-trigger-relay.mjs";
 import { deleteFileFromRag, indexFileForRag } from "./rag-indexer.mjs";
 import { clearAuthSession, loadAuthSession, saveAuthSession } from "./secure-auth-store.mjs";
@@ -47,7 +48,9 @@ const oauthCallbackHost = (process.env.DESKTOP_OAUTH_CALLBACK_HOST ?? "127.0.0.1
 const oauthCallbackTimeoutMs = Number.parseInt((process.env.DESKTOP_OAUTH_TIMEOUT_MS ?? "90000").trim(), 10);
 const billingCheckoutUrl = (process.env.BILLING_CHECKOUT_URL ?? "").trim();
 const INITIAL_SCAN_RAG_MAX_CONCURRENCY = 2;
+const INITIAL_SCAN_IMAGE_INDEX_MAX_CONCURRENCY = 1;
 const AUTH_REFRESH_TIMEOUT_MS = Number.parseInt((process.env.DESKTOP_AUTH_REFRESH_TIMEOUT_MS ?? "10000").trim(), 10);
+const IMAGE_FILE_NAME_RE = /\.(jpg|jpeg|png|webp|gif)$/i;
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -657,6 +660,8 @@ const parseIntegerString = (value) => {
   return parsed;
 };
 
+const isImageFileName = (fileName) => IMAGE_FILE_NAME_RE.test(String(fileName ?? "").trim());
+
 const resolveSupabaseAccessToken = () => {
   const runtimeToken = runtimeState.authSession?.accessToken ?? "";
   if (runtimeToken) {
@@ -1111,6 +1116,7 @@ const startWatcherRuntime = async (watchPath, orgId) => {
   // Non-blocking async scan to rebuild runtime cache.
   const initialEntries = await collectInitialFiles(resolvedPath);
   const enqueueInitialRagIndex = createTaskQueue(INITIAL_SCAN_RAG_MAX_CONCURRENCY);
+  const enqueueInitialImageIndex = createTaskQueue(INITIAL_SCAN_IMAGE_INDEX_MAX_CONCURRENCY);
   for (const entry of initialEntries) {
     upsertFile(entry);
     const dedupeKey = `${runtimeState.orgId}:${entry.relativePath}:${entry.fileSize}:${entry.modifiedAt}`;
@@ -1142,6 +1148,26 @@ const startWatcherRuntime = async (watchPath, orgId) => {
         }`
       );
     });
+
+    if (entry.fileType === "image") {
+      void enqueueInitialImageIndex(async () => {
+        await indexImageForSelection({
+          orgId: runtimeState.orgId,
+          filePath: entry.filePath,
+          relativePath: entry.relativePath,
+          fileName: entry.fileName,
+          activityFolder: entry.activityFolder,
+          fileSize: entry.fileSize,
+          modifiedAt: entry.modifiedAt
+        });
+      }).catch((error) => {
+        console.warn(
+          `[Image-Indexer] Initial scan index failed for ${entry.fileName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+    }
   }
   runtimeState.initialScanCount = initialEntries.length;
   mainWindow.webContents.send("file:scan-complete", { count: initialEntries.length });
@@ -1181,6 +1207,24 @@ const startWatcherRuntime = async (watchPath, orgId) => {
         );
       });
 
+      if (rendererEntry.fileType === "image") {
+        void indexImageForSelection({
+          orgId: runtimeState.orgId,
+          filePath: entry.filePath,
+          relativePath: rendererEntry.relativePath,
+          fileName: rendererEntry.fileName,
+          activityFolder: rendererEntry.activityFolder,
+          fileSize: entry.fileSize,
+          modifiedAt: entry.modifiedAt
+        }).catch((error) => {
+          console.warn(
+            `[Image-Indexer] Background index failed for ${rendererEntry.fileName}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        });
+      }
+
       emitWatcherStatus();
     },
     onDelete: async (deleted) => {
@@ -1200,6 +1244,19 @@ const startWatcherRuntime = async (watchPath, orgId) => {
           }`
         );
       });
+
+      if (isImageFileName(deleted.fileName)) {
+        void deleteImageFromSelectionIndex({
+          orgId: runtimeState.orgId,
+          relativePath: deleted.relativePath
+        }).catch((error) => {
+          console.warn(
+            `[Image-Indexer] Background delete failed for ${deleted.fileName}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        });
+      }
 
       emitWatcherStatus();
     }

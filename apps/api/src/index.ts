@@ -4,6 +4,7 @@ import { supabaseAdmin } from "./lib/supabase-admin";
 import { contentsRouter } from "./routes/contents";
 import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
+import { imageIndexRouter } from "./routes/image-index";
 import { memoryRouter } from "./routes/memory";
 import { onboardingRouter } from "./routes/onboarding";
 import { ragRouter } from "./routes/rag";
@@ -21,6 +22,7 @@ app.use(
 
 app.use(healthRouter);
 app.use(triggerRouter);
+app.use(imageIndexRouter);
 app.use(sessionsRouter);
 app.use(contentsRouter);
 app.use(onboardingRouter);
@@ -49,7 +51,8 @@ const requiredTables = [
   "workflow_events",
   "schedule_slots",
   "org_brand_settings",
-  "org_subscriptions"
+  "org_subscriptions",
+  "activity_image_indexes"
 ] as const;
 
 const verifyRequiredTables = async () => {
@@ -61,7 +64,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305183000_phase_6_2_scheduler_foundation.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305213000_phase_7_2d_activity_image_indexes.sql on the connected project.`
       );
       continue;
     }
@@ -82,7 +85,7 @@ const verifyPhase32ProjectionColumns = async () => {
 
   if (/column .+ does not exist/i.test(error.message) || /Could not find the column/i.test(error.message)) {
     console.warn(
-      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305183000_phase_6_2_scheduler_foundation.sql on the connected project.`
+      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305213000_phase_7_2d_activity_image_indexes.sql on the connected project.`
     );
     return;
   }

@@ -1,13 +1,13 @@
-import path from "node:path";
 import { HttpError } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { callWithFallback } from "../../llm-client";
 import { asRecord, asString, type InstagramImageMode } from "./types";
+import { rankAndSelectCandidates, type ImageSelectionCandidate } from "./image-selection-ranking";
+
+const IMAGE_INDEX_TABLE = "activity_image_indexes";
 
 export type ActivityImageEntry = {
   fileId: string;
   fileName: string;
-  filePath: string;
   relativePath: string;
   fileSize: number | null;
   detectedAt: string | null;
@@ -16,64 +16,172 @@ export type ActivityImageEntry = {
 export type ImageSelectionResult = {
   mode: InstagramImageMode;
   selectedImages: ActivityImageEntry[];
+  selectionSource: "manual_selection" | "index_activity_folder" | "index_org_fallback" | "recency_fallback" | "none";
+  telemetryReason: string | null;
 };
 
-/**
- * List recent image files from local_files for activity folder.
- */
-export const listActivityImages = async (params: {
+const isMissingTableError = (error: unknown, tableName: string): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const message = typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes(tableName.toLowerCase()) &&
+    (normalized.includes("could not find the table") || normalized.includes("does not exist"))
+  );
+};
+
+const parseDateMs = (value: unknown): number => {
+  const parsed = new Date(asString(value, "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseFileSize = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const parseStringArray = (value: unknown, maxItems = 32): string[] =>
+  Array.isArray(value)
+    ? value
+        .map((entry) => asString(entry, "").trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, maxItems)
+    : [];
+
+const parseSafety = (value: unknown): Record<string, string> => {
+  const row = asRecord(value);
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(row)) {
+    const normalizedKey = key.trim().toLowerCase();
+    const normalizedValue = asString(entry, "").trim().toLowerCase();
+    if (!normalizedKey || !normalizedValue) {
+      continue;
+    }
+    result[normalizedKey] = normalizedValue;
+    if (Object.keys(result).length >= 24) {
+      break;
+    }
+  }
+  return result;
+};
+
+const toActivityImageEntry = (row: Record<string, unknown>): ActivityImageEntry | null => {
+  const status = asString(row.status, "").trim().toLowerCase();
+  if (status === "deleted") {
+    return null;
+  }
+
+  const fileId = asString(row.id, "").trim();
+  const fileName = asString(row.file_name, "").trim();
+  const relativePath = asString(row.source_id, "").trim();
+  if (!fileId || !relativePath) {
+    return null;
+  }
+
+  return {
+    fileId,
+    fileName: fileName || relativePath.split("/").pop() || relativePath,
+    relativePath,
+    fileSize: parseFileSize(row.file_size_bytes),
+    detectedAt: asString(row.file_modified_at, "").trim() || asString(row.indexed_at, "").trim() || null
+  };
+};
+
+const toSelectionCandidate = (row: Record<string, unknown>): ImageSelectionCandidate | null => {
+  const base = toActivityImageEntry(row);
+  if (!base) {
+    return null;
+  }
+
+  return {
+    ...base,
+    modifiedAtMs: parseDateMs(row.file_modified_at) || parseDateMs(row.indexed_at),
+    searchText: asString(row.search_text, "").trim(),
+    sceneTags: parseStringArray(row.scene_tags),
+    safety: parseSafety(row.safety_json),
+    fileContentHash: asString(row.file_content_hash, "").trim() || null
+  };
+};
+
+const listCandidates = async (params: {
   orgId: string;
   activityFolder?: string | null;
-  limit?: number;
-}): Promise<ActivityImageEntry[]> => {
-  const activityFolder = typeof params.activityFolder === "string" ? params.activityFolder.trim() : "";
-
-  const limit = Math.max(1, Math.min(100, params.limit ?? 40));
+  statuses: string[];
+  limit: number;
+}): Promise<ImageSelectionCandidate[]> => {
   let query = supabaseAdmin
-    .from("local_files")
-    .select("id,file_name,file_path,file_size,indexed_at,status,activity_folder")
+    .from(IMAGE_INDEX_TABLE)
+    .select(
+      "id,source_id,file_name,file_size_bytes,file_modified_at,indexed_at,status,search_text,scene_tags,safety_json,file_content_hash"
+    )
     .eq("org_id", params.orgId)
-    .eq("file_type", "image")
-    .order("indexed_at", { ascending: false })
-    .limit(limit);
+    .eq("is_latest", true)
+    .in("status", params.statuses)
+    .order("file_modified_at", { ascending: false, nullsFirst: false })
+    .order("indexed_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(1, Math.min(200, params.limit)));
 
+  const activityFolder = typeof params.activityFolder === "string" ? params.activityFolder.trim() : "";
   if (activityFolder) {
     query = query.eq("activity_folder", activityFolder);
   }
 
   const { data, error } = await query;
-
   if (error) {
-    throw new HttpError(500, "db_error", `Failed to list activity images: ${error.message}`);
+    if (isMissingTableError(error, IMAGE_INDEX_TABLE)) {
+      console.warn(`[INSTAGRAM_SKILL] ${IMAGE_INDEX_TABLE} table is unavailable; continuing with fallback mode.`);
+      return [];
+    }
+    throw new HttpError(500, "db_error", `Failed to list image index candidates: ${error.message}`);
   }
 
   return (Array.isArray(data) ? data : [])
-    .map((row) => {
-      const record = asRecord(row);
-      const status = asString(record.status, "active").toLowerCase();
-      if (status === "deleted") {
-        return null;
-      }
-
-      const filePath = asString(record.file_path).trim();
-      const fileName = asString(record.file_name).trim() || path.basename(filePath);
-      const folder = asString(record.activity_folder, activityFolder).trim();
-
-      return {
-        fileId: asString(record.id).trim(),
-        fileName,
-        filePath,
-        relativePath: toRelativePath(filePath, folder, fileName),
-        fileSize: typeof record.file_size === "number" && Number.isFinite(record.file_size) ? record.file_size : null,
-        detectedAt: asString(record.indexed_at).trim() || null
-      } satisfies ActivityImageEntry;
-    })
-    .filter((entry): entry is ActivityImageEntry => !!entry && !!entry.fileId && !!entry.filePath);
+    .map((entry) => toSelectionCandidate(asRecord(entry)))
+    .filter((entry): entry is ImageSelectionCandidate => !!entry);
 };
 
-/**
- * Select relevant images based on selected mode.
- */
+export const listActivityImages = async (params: {
+  orgId: string;
+  activityFolder?: string | null;
+  limit?: number;
+}): Promise<ActivityImageEntry[]> => {
+  const candidates = await listCandidates({
+    orgId: params.orgId,
+    activityFolder: params.activityFolder,
+    statuses: ["ready", "failed"],
+    limit: params.limit ?? 40
+  });
+  return candidates.map((entry) => ({
+    fileId: entry.fileId,
+    fileName: entry.fileName,
+    relativePath: entry.relativePath,
+    fileSize: entry.fileSize,
+    detectedAt: entry.detectedAt
+  }));
+};
+
+const normalizeManualSelection = (values?: string[]): string[] =>
+  Array.isArray(values) ? values.map((entry) => entry.trim().toLowerCase()).filter(Boolean) : [];
+
+const asEntryList = (candidates: ImageSelectionCandidate[]): ActivityImageEntry[] =>
+  candidates.map((entry) => ({
+    fileId: entry.fileId,
+    fileName: entry.fileName,
+    relativePath: entry.relativePath,
+    fileSize: entry.fileSize,
+    detectedAt: entry.detectedAt
+  }));
+
 export const selectImagesForInstagram = async (params: {
   orgId: string;
   activityFolder: string;
@@ -85,145 +193,105 @@ export const selectImagesForInstagram = async (params: {
   if (params.mode === "text_only" || params.requiredCount <= 0) {
     return {
       mode: params.mode,
-      selectedImages: []
-    };
-  }
-
-  const images = await listActivityImages({
-    orgId: params.orgId,
-    activityFolder: params.activityFolder,
-    limit: 80
-  });
-  if (!images.length) {
-    return {
-      mode: params.mode,
-      selectedImages: []
+      selectedImages: [],
+      selectionSource: "none",
+      telemetryReason: null
     };
   }
 
   const requiredCount = Math.max(1, Math.min(4, params.requiredCount));
+  const activityImages = await listActivityImages({
+    orgId: params.orgId,
+    activityFolder: params.activityFolder,
+    limit: 120
+  });
+
   if (params.mode === "manual") {
     const manual = normalizeManualSelection(params.manualSelections);
     if (!manual.length) {
       return {
         mode: "manual",
-        selectedImages: images.slice(0, requiredCount)
+        selectedImages: activityImages.slice(0, requiredCount),
+        selectionSource: "manual_selection",
+        telemetryReason: null
       };
     }
 
-    const matched = images.filter((image) =>
-      manual.some(
-        (selected) =>
-          image.fileName.toLowerCase() === selected ||
-          image.relativePath.toLowerCase() === selected ||
-          image.filePath.toLowerCase() === selected
-      )
-    );
+    const matched = activityImages.filter((image) => {
+      const fileName = image.fileName.toLowerCase();
+      const relativePath = image.relativePath.toLowerCase();
+      return manual.includes(fileName) || manual.includes(relativePath);
+    });
 
     return {
       mode: "manual",
-      selectedImages: (matched.length ? matched : images).slice(0, requiredCount)
+      selectedImages: (matched.length ? matched : activityImages).slice(0, requiredCount),
+      selectionSource: "manual_selection",
+      telemetryReason: null
     };
   }
 
-  const llmSelected = await selectByLlm({
+  const queryText = `${params.topic}\nactivity_folder:${params.activityFolder}`;
+  const folderCandidates = await listCandidates({
     orgId: params.orgId,
-    topic: params.topic,
-    requiredCount,
-    images
+    activityFolder: params.activityFolder,
+    statuses: ["ready"],
+    limit: 200
+  });
+  if (folderCandidates.length > 0) {
+    const selected = rankAndSelectCandidates({
+      queryText,
+      requiredCount,
+      candidates: folderCandidates
+    });
+    if (selected.length > 0) {
+      return {
+        mode: "auto",
+        selectedImages: asEntryList(selected).slice(0, requiredCount),
+        selectionSource: "index_activity_folder",
+        telemetryReason: null
+      };
+    }
+  }
+
+  const orgCandidates = await listCandidates({
+    orgId: params.orgId,
+    statuses: ["ready"],
+    limit: 200
+  });
+  if (orgCandidates.length > 0) {
+    const selected = rankAndSelectCandidates({
+      queryText,
+      requiredCount,
+      candidates: orgCandidates
+    });
+    if (selected.length > 0) {
+      return {
+        mode: "auto",
+        selectedImages: asEntryList(selected).slice(0, requiredCount),
+        selectionSource: "index_org_fallback",
+        telemetryReason: "image_index_unavailable:activity_folder_scope_empty"
+      };
+    }
+  }
+
+  if (activityImages.length > 0) {
+    return {
+      mode: "auto",
+      selectedImages: activityImages.slice(0, requiredCount),
+      selectionSource: "recency_fallback",
+      telemetryReason: "image_index_unavailable:ready_index_missing"
+    };
+  }
+
+  const orgImages = await listActivityImages({
+    orgId: params.orgId,
+    limit: 120
   });
   return {
     mode: "auto",
-    selectedImages: llmSelected.slice(0, requiredCount)
+    selectedImages: orgImages.slice(0, requiredCount),
+    selectionSource: orgImages.length > 0 ? "recency_fallback" : "none",
+    telemetryReason: "image_index_unavailable"
   };
-};
-
-const selectByLlm = async (params: {
-  orgId: string;
-  topic: string;
-  requiredCount: number;
-  images: ActivityImageEntry[];
-}): Promise<ActivityImageEntry[]> => {
-  const imageList = params.images
-    .slice(0, 40)
-    .map((entry) => `- ${entry.fileName} | ${entry.relativePath} | size=${entry.fileSize ?? "n/a"} | detectedAt=${entry.detectedAt ?? "n/a"}`)
-    .join("\n");
-
-  const prompt = [
-    "[TASK]",
-    `Select up to ${params.requiredCount} most relevant images for Instagram topic: "${params.topic}"`,
-    "",
-    "[AVAILABLE_IMAGES]",
-    imageList,
-    "",
-    "[OUTPUT]",
-    "Return strict JSON:",
-    "{",
-    '  "selected_file_names": ["image1.jpg", "image2.jpg"]',
-    "}"
-  ].join("\n");
-
-  const result = await callWithFallback({
-    orgId: params.orgId,
-    prompt,
-    maxTokens: 512
-  });
-
-  if (!result.text) {
-    return params.images.slice(0, params.requiredCount);
-  }
-
-  const selectedNames = parseSelectedFileNames(result.text);
-  if (!selectedNames.length) {
-    return params.images.slice(0, params.requiredCount);
-  }
-
-  const selected = params.images.filter((entry) =>
-    selectedNames.some((name) => entry.fileName.toLowerCase() === name || entry.relativePath.toLowerCase() === name)
-  );
-
-  return selected.length ? selected : params.images.slice(0, params.requiredCount);
-};
-
-const parseSelectedFileNames = (text: string): string[] => {
-  const trimmed = text.trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
-    const values = Array.isArray(parsed.selected_file_names) ? parsed.selected_file_names : [];
-    return values
-      .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-};
-
-const normalizeManualSelection = (values?: string[]): string[] =>
-  Array.isArray(values)
-    ? values.map((entry) => entry.trim().toLowerCase()).filter(Boolean)
-    : [];
-
-const toRelativePath = (absoluteOrRelativePath: string, activityFolder: string, fileName: string): string => {
-  const normalized = absoluteOrRelativePath.replace(/\\/g, "/");
-  const normalizedFolder = activityFolder.replace(/\\/g, "/");
-  if (!normalizedFolder) {
-    return fileName;
-  }
-  const index = normalized.lastIndexOf(`/${normalizedFolder}/`);
-  if (index >= 0) {
-    return normalized.slice(index + 1).replace(/^\/+/, "");
-  }
-
-  if (normalized.includes(normalizedFolder)) {
-    const start = normalized.indexOf(normalizedFolder);
-    return normalized.slice(start);
-  }
-
-  return `${normalizedFolder}/${fileName}`.replace(/\/+/g, "/");
 };

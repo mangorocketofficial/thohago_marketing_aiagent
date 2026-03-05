@@ -142,3 +142,14 @@ Honor explicit `skill_trigger` as deterministic initial routing and move actiona
 
 Reason  
 Deferring explicit trigger through LLM gating caused false misses and generic fallback responses; deterministic routing plus skill-level clarification preserves user intent and runtime stability.
+
+## D-014
+
+Phase  
+7-2d
+
+Decision  
+Adopt vision-index-first image retrieval (`activity_image_indexes`) with deterministic tie-break and staged fallback, and set OpenAI GPT API as the phase vision provider.
+
+Reason  
+Filename semantics are unreliable on opaque assets; versioned vision metadata plus `is_latest` lookup and fixed ordering keeps selection quality stable and explainable without breaking generation continuity.

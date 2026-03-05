@@ -2,6 +2,8 @@ import { HttpError } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { asRecord, asString, type InstagramGenerationResult, type ScheduleSlotRow, type SlotSource } from "./types";
 
+type ImageSelectionSource = "manual_selection" | "index_activity_folder" | "index_org_fallback" | "recency_fallback" | "none";
+
 const sanitizePathSegment = (value: string, fallback: string): string => {
   const cleaned = value
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ")
@@ -11,6 +13,20 @@ const sanitizePathSegment = (value: string, fallback: string): string => {
     .slice(0, 72);
 
   return cleaned || fallback;
+};
+
+const normalizeImageSelectionSource = (value: unknown, fallback: ImageSelectionSource): ImageSelectionSource => {
+  const normalized = asString(value, "").trim();
+  if (
+    normalized === "manual_selection" ||
+    normalized === "index_activity_folder" ||
+    normalized === "index_org_fallback" ||
+    normalized === "recency_fallback" ||
+    normalized === "none"
+  ) {
+    return normalized;
+  }
+  return fallback;
 };
 
 const asStringMap = (value: unknown): Record<string, string> => {
@@ -121,6 +137,11 @@ export const loadExistingGeneratedResult = async (params: {
     selectedImagePaths: Array.isArray(metadata.image_paths)
       ? metadata.image_paths.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
       : [],
+    imageSelectionSource: normalizeImageSelectionSource(
+      metadata.image_selection_source,
+      imageFileIds.length > 0 ? "index_activity_folder" : "none"
+    ),
+    imageSelectionReason: asString(metadata.image_selection_reason, "").trim() || null,
     requiresLocalCompose: true,
     localSaveSuggestion: {
       relativePath: asString(localSave.relative_path, "contents/ondemand"),
@@ -145,6 +166,8 @@ export const insertDraftInstagramContent = async (params: {
   templateId: string;
   selectedImageFileIds: string[];
   selectedImagePaths: string[];
+  imageSelectionSource: ImageSelectionSource;
+  imageSelectionReason: string | null;
   model: "claude" | "gpt-4o-mini";
   promptTokens: number | null;
   completionTokens: number | null;
@@ -188,6 +211,8 @@ export const insertDraftInstagramContent = async (params: {
         overlay_texts: params.overlayTexts,
         image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,
+        image_selection_source: params.imageSelectionSource,
+        image_selection_reason: params.imageSelectionReason,
         output_format: params.outputFormat,
         composed_locally: true,
         local_save_suggestion: {
