@@ -68,6 +68,7 @@ export const CampaignPlanPage = ({ supabase, orgId, dataAccessMessage, formatDat
     () => campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? campaigns[0] ?? null,
     [campaigns, selectedCampaignId]
   );
+  const selectedCampaignPlanDocument = (selectedCampaign?.plan_document ?? "").trim();
 
   return (
     <div className="app-shell ui-page-shell">
@@ -83,47 +84,47 @@ export const CampaignPlanPage = ({ supabase, orgId, dataAccessMessage, formatDat
       </section>
 
       <section className="panel ui-page-panel ui-campaign-plan-board">
-        <article className="subpanel">
-          <h2>{t("ui.pages.campaignPlan.listTitle")}</h2>
-          <p className="sub-description">{t("ui.pages.campaignPlan.listDescription")}</p>
-          <div className="ui-campaign-plan-list">
-            {isLoading ? (
-              <p className="empty">{t("ui.pages.campaignPlan.loading")}</p>
-            ) : campaigns.length === 0 ? (
+        <div className="ui-campaign-plan-top-row">
+          <article className="subpanel ui-campaign-plan-list-panel">
+            <h2>{t("ui.pages.campaignPlan.listTitle")}</h2>
+            <p className="sub-description">{t("ui.pages.campaignPlan.listDescription")}</p>
+            <div className="ui-campaign-plan-list">
+              {isLoading ? (
+                <p className="empty">{t("ui.pages.campaignPlan.loading")}</p>
+              ) : campaigns.length === 0 ? (
+                <p className="empty">{t("ui.pages.campaignPlan.empty")}</p>
+              ) : (
+                campaigns.map((campaign) => {
+                  const isActive = selectedCampaign?.id === campaign.id;
+                  return (
+                    <button
+                      key={campaign.id}
+                      type="button"
+                      className={`ui-campaign-plan-item ${isActive ? "is-active" : ""}`}
+                      onClick={() => setSelectedCampaignId(campaign.id)}
+                    >
+                      <p>
+                        <strong>{campaign.title}</strong>
+                      </p>
+                      <p>{campaign.activity_folder || "-"}</p>
+                      <p>
+                        {campaign.plan.post_count} posts / {campaign.plan.duration_days} days
+                      </p>
+                      <p>{formatDateTime(campaign.created_at)}</p>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </article>
+
+          <article className="subpanel ui-campaign-plan-summary-panel">
+            <h2>{t("ui.pages.campaignPlan.detailTitle")}</h2>
+            <p className="sub-description">{t("ui.pages.campaignPlan.detailDescription")}</p>
+
+            {!selectedCampaign ? (
               <p className="empty">{t("ui.pages.campaignPlan.empty")}</p>
             ) : (
-              campaigns.map((campaign) => {
-                const isActive = selectedCampaign?.id === campaign.id;
-                return (
-                  <button
-                    key={campaign.id}
-                    type="button"
-                    className={`ui-campaign-plan-item ${isActive ? "is-active" : ""}`}
-                    onClick={() => setSelectedCampaignId(campaign.id)}
-                  >
-                    <p>
-                      <strong>{campaign.title}</strong>
-                    </p>
-                    <p>{campaign.activity_folder || "-"}</p>
-                    <p>
-                      {campaign.plan.post_count} posts / {campaign.plan.duration_days} days
-                    </p>
-                    <p>{formatDateTime(campaign.created_at)}</p>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </article>
-
-        <article className="subpanel">
-          <h2>{t("ui.pages.campaignPlan.detailTitle")}</h2>
-          <p className="sub-description">{t("ui.pages.campaignPlan.detailDescription")}</p>
-
-          {!selectedCampaign ? (
-            <p className="empty">{t("ui.pages.campaignPlan.empty")}</p>
-          ) : (
-            <>
               <div className="campaign-card">
                 <p>
                   <strong>{selectedCampaign.title}</strong>
@@ -154,17 +155,24 @@ export const CampaignPlanPage = ({ supabase, orgId, dataAccessMessage, formatDat
                   </button>
                 </div>
               </div>
+            )}
+          </article>
+        </div>
 
-              {(selectedCampaign.plan_document ?? "").trim() ? (
-                <article className="markdown-card ui-markdown-card">
-                  <div className="markdown-viewer ui-markdown-viewer">
-                    <ReactMarkdown>{selectedCampaign.plan_document}</ReactMarkdown>
-                  </div>
-                </article>
-              ) : (
-                <p className="empty">{t("ui.pages.campaignPlan.noDetail")}</p>
-              )}
-            </>
+        <article className="subpanel ui-campaign-plan-document-panel">
+          <h2>{t("ui.pages.campaignPlan.detailContentTitle")}</h2>
+          <p className="sub-description">{t("ui.pages.campaignPlan.detailContentDescription")}</p>
+
+          {!selectedCampaign ? (
+            <p className="empty">{t("ui.pages.campaignPlan.empty")}</p>
+          ) : selectedCampaignPlanDocument ? (
+            <article className="markdown-card ui-markdown-card">
+              <div className="markdown-viewer ui-markdown-viewer">
+                <ReactMarkdown>{selectedCampaignPlanDocument}</ReactMarkdown>
+              </div>
+            </article>
+          ) : (
+            <p className="empty">{t("ui.pages.campaignPlan.noDetail")}</p>
           )}
         </article>
       </section>

@@ -1,0 +1,19 @@
+{
+  "scenario": "error_invalid_request_idempotency_key",
+  "description": "Metrics batch rejects request-level idempotency key when it does not match the allowed regex.",
+  "input": {
+    "body": {
+      "request_idempotency_key": "bad key!"
+    }
+  },
+  "output_error": {
+    "status": 400,
+    "code": "invalid_payload",
+    "message": "request_idempotency_key must match /^[A-Za-z0-9:_-]{8,120}$/."
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-07",
+  "approved_by": "Codex",
+  "version": "1"
+}
+

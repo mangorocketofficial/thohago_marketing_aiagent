@@ -388,6 +388,39 @@ const parseOptionalSchedulerChannel = (value) => {
   return normalized;
 };
 
+const parseOptionalMetricsCursor = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim();
+  return normalized || null;
+};
+
+const parseOptionalMetricsChannel = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!CHANNEL_SET.has(normalized)) {
+    throw new Error("channel is invalid.");
+  }
+  return normalized;
+};
+
+const parseMetricsRequestIdempotencyKey = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9:_-]{8,120}$/.test(normalized)) {
+    throw new Error("requestIdempotencyKey format is invalid.");
+  }
+  return normalized;
+};
+
 const buildChatActionIdempotencyKey = (params) => {
   const expectedVersion = Math.max(1, Math.floor(params.expectedVersion));
   const base = `chat_action:${params.sessionId}:${params.workflowItemId}:${params.actionId}:v${expectedVersion}`;
@@ -2125,6 +2158,91 @@ const registerIpcHandlers = () => {
         code: runtimeError.code ?? "request_failed",
         status: runtimeError.status ?? 500,
         details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:list-published-with-metrics", async (_, payload) => {
+    const limitRaw = payload?.limit;
+    const limit = parsePositiveInteger(limitRaw);
+    if (limitRaw !== undefined && limit === null) {
+      return {
+        ok: false,
+        items: [],
+        next_cursor: null,
+        message: "limit must be a positive integer."
+      };
+    }
+
+    try {
+      const channel = parseOptionalMetricsChannel(payload?.channel);
+      const cursor = parseOptionalMetricsCursor(payload?.cursor);
+      const params = new URLSearchParams();
+      if (channel) {
+        params.set("channel", channel);
+      }
+      if (limit !== null) {
+        params.set("limit", String(Math.min(50, limit)));
+      }
+      if (cursor) {
+        params.set("cursor", cursor);
+      }
+
+      const suffix = params.toString();
+      const route = `/orgs/${encodeURIComponent(runtimeState.orgId)}/metrics/published-contents${suffix ? `?${suffix}` : ""}`;
+      const body = await callOrchestratorApi(route, { method: "GET" });
+      return {
+        ok: true,
+        items: Array.isArray(body?.items) ? body.items : [],
+        next_cursor: typeof body?.next_cursor === "string" ? body.next_cursor : null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load published metrics content.";
+      return {
+        ok: false,
+        items: [],
+        next_cursor: null,
+        message
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:submit-batch", async (_, payload) => {
+    const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+    if (!entries.length) {
+      return {
+        ok: false,
+        saved: 0,
+        failed: 0,
+        insights_refreshed: false,
+        message: "entries must be a non-empty array."
+      };
+    }
+
+    try {
+      const requestIdempotencyKey = parseMetricsRequestIdempotencyKey(payload?.requestIdempotencyKey);
+      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/metrics/batch`, {
+        method: "POST",
+        body: JSON.stringify({
+          entries,
+          ...(requestIdempotencyKey ? { request_idempotency_key: requestIdempotencyKey } : {})
+        })
+      });
+
+      return {
+        ok: true,
+        saved: typeof body?.saved === "number" && Number.isFinite(body.saved) ? body.saved : 0,
+        failed: typeof body?.failed === "number" && Number.isFinite(body.failed) ? body.failed : 0,
+        insights_refreshed: body?.insights_refreshed === true
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to submit metrics batch.";
+      return {
+        ok: false,
+        saved: 0,
+        failed: entries.length,
+        insights_refreshed: false,
+        message
       };
     }
   });

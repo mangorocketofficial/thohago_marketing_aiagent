@@ -245,7 +245,7 @@ export const applyContentRevisionStep = async (
 
   const channel = deps.normalizeChannel((contentRow as Record<string, unknown>).channel);
   const previousDraft = deps.asString((contentRow as Record<string, unknown>).body, state.content_draft ?? "");
-  const topicHint = deps.asString(state.campaign_plan?.suggested_schedule?.[0]?.type, "").trim();
+  const topicHint = deps.asString(state.campaign_plan?.objective, "").trim();
   const generated = await deps.generateContentDraftWithForbiddenCheck({
     orgId: session.org_id,
     activityFolder: state.activity_folder,

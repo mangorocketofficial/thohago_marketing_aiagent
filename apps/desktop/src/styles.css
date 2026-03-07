@@ -1977,6 +1977,77 @@ th {
   gap: 10px;
 }
 
+.ui-campaign-plan-board {
+  display: grid;
+  gap: var(--ui-space-md);
+}
+
+.ui-campaign-plan-top-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+  gap: var(--ui-space-md);
+  align-items: start;
+}
+
+.ui-campaign-plan-list-panel,
+.ui-campaign-plan-summary-panel,
+.ui-campaign-plan-document-panel {
+  min-height: 0;
+}
+
+.ui-campaign-plan-list-panel,
+.ui-campaign-plan-summary-panel {
+  min-height: 420px;
+}
+
+.ui-campaign-plan-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  align-content: start;
+  padding-right: 2px;
+}
+
+.ui-campaign-plan-item {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid #d8e0ea;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.ui-campaign-plan-item p {
+  color: #334155;
+  font-size: 13px;
+}
+
+.ui-campaign-plan-item strong {
+  color: #0f172a;
+}
+
+.ui-campaign-plan-item:hover:not(.is-active) {
+  border-color: #a9bfdc;
+  background: #f9fbff;
+}
+
+.ui-campaign-plan-item.is-active {
+  border-color: #7aa9ff;
+  background: #edf4ff;
+  box-shadow: 0 0 0 2px rgba(47, 94, 168, 0.16);
+}
+
+.ui-campaign-plan-document-panel .markdown-card {
+  margin-top: 0;
+}
+
+.ui-campaign-plan-document-panel .markdown-viewer {
+  max-height: 520px;
+}
+
 .ui-grid-2,
 .ui-grid-3 {
   display: grid;
@@ -2028,6 +2099,245 @@ th {
 
 .ui-placeholder-chart {
   min-height: 240px;
+}
+
+.ui-insight-card,
+.ui-insight-stat-card {
+  border: 1px solid var(--ui-card-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-bg-surface);
+  padding: var(--ui-space-md);
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.ui-insight-stat-card {
+  background: linear-gradient(160deg, #f8fbff 0%, #eef4ff 100%);
+  min-height: 132px;
+}
+
+.ui-insight-stat-label {
+  margin: 0;
+  font-size: 13px;
+  color: #475467;
+}
+
+.ui-insight-stat-value {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.ui-insight-table-wrap {
+  margin-top: 2px;
+}
+
+.ui-insight-table th,
+.ui-insight-table td {
+  font-size: 13px;
+}
+
+.ui-insight-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: #1f2937;
+}
+
+.ui-insight-summary {
+  margin: 0;
+  color: #1f2937;
+  line-height: 1.5;
+}
+
+.ui-insight-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ui-insight-chip {
+  border-radius: 999px;
+  border: 1px solid #c7d4ea;
+  background: #edf3ff;
+  color: #27446f;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.ui-insight-recommendation-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: var(--ui-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.ui-insight-recommendation-card p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.ui-insight-recommendation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-insight-recommendation-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.ui-insight-pill {
+  border-radius: 999px;
+  border: 1px solid #bfd1f1;
+  background: #edf4ff;
+  color: #173b74;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 9px;
+}
+
+.ui-analytics-tab-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ui-analytics-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid #c4cedc;
+  background: #fff;
+}
+
+.ui-analytics-tab.active {
+  background: #285ea8;
+  color: #fff;
+  border-color: #285ea8;
+}
+
+.ui-analytics-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.ui-analytics-filter-chip {
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  border: 1px solid #c7d4ea;
+  background: #f8fbff;
+}
+
+.ui-analytics-filter-chip.active {
+  border-color: #7aa9ff;
+  background: #edf4ff;
+  color: #173b74;
+}
+
+.ui-metrics-content-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ui-metrics-row {
+  border: 1px solid var(--ui-card-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-bg-surface);
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.ui-metrics-content-preview {
+  display: grid;
+  gap: 6px;
+}
+
+.ui-metrics-channel {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.ui-metrics-content-body {
+  font-size: 13px;
+  color: #334155;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ui-metrics-inputs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ui-metrics-field {
+  display: grid;
+  gap: 3px;
+  min-width: 76px;
+}
+
+.ui-metrics-field label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.ui-metrics-field input {
+  width: 90px;
+  border: 1px solid #c8d2e1;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.ui-metrics-field input:focus {
+  outline: none;
+  border-color: #5b8def;
+}
+
+.ui-metrics-score-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #bfd1f1;
+  background: #eef4ff;
+  color: #1e40af;
+}
+
+.ui-metrics-submit-bar {
+  position: sticky;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid #d6dce4;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px -18px -18px;
+  border-radius: 0 0 16px 16px;
 }
 
 .ui-markdown-card {
@@ -2591,8 +2901,29 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .ui-campaign-plan-top-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-campaign-plan-list-panel,
+  .ui-campaign-plan-summary-panel {
+    min-height: 0;
+  }
+
+  .ui-campaign-plan-list {
+    max-height: 300px;
+  }
+
   .ui-session-selector-actions {
     grid-template-columns: 1fr;
+  }
+
+  .ui-metrics-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-metrics-inputs {
+    justify-content: flex-start;
   }
 
   .agent-chat-hub-layout {

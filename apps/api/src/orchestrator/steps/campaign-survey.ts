@@ -1,6 +1,7 @@
 import { HttpError } from "../../lib/errors";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { classifyCampaignSurveyDirectInput, generateCampaignPlan } from "../ai";
+import { resolveChannelContentType } from "../content-type-policy";
 import { buildEnrichedCampaignContext } from "../rag-context";
 import { buildCampaignPlanSummary } from "../service-helpers";
 import type { CampaignPlanChainData, ChainStepName } from "../skills/campaign-plan/chain-types";
@@ -66,6 +67,80 @@ const resolveCampaignTitleFromSurvey = (answers: SurveyAnswer[], fallback: strin
   const campaignName = answers.find((answer) => answer.question_id === "campaign_name")?.answer ?? "";
   const compact = campaignName.replace(/\s+/g, " ").trim();
   return compact || fallback;
+};
+
+const resolveAnswerValue = (answers: SurveyAnswer[], questionId: SurveyQuestionId): string =>
+  answers.find((answer) => answer.question_id === questionId)?.answer?.trim() ?? "";
+
+const clampDurationDays = (value: number): number => Math.max(1, Math.min(90, Math.floor(value)));
+
+const resolvePreferredDurationDaysFromSurvey = (answers: SurveyAnswer[]): number | null => {
+  const raw = resolveAnswerValue(answers, "duration");
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw.toLowerCase().replace(/\s+/g, " ").trim();
+  const monthMatch = normalized.match(/(\d+)\s*(?:\uac1c\uc6d4|\ub2ec|month|months)/i);
+  if (monthMatch) {
+    return clampDurationDays(Number.parseInt(monthMatch[1] ?? "0", 10) * 30);
+  }
+
+  const weekMatch = normalized.match(/(\d+)\s*(?:\uc8fc|week|weeks)/i);
+  if (weekMatch) {
+    return clampDurationDays(Number.parseInt(weekMatch[1] ?? "0", 10) * 7);
+  }
+
+  const dayMatch = normalized.match(/(\d+)\s*(?:\uc77c|day|days)/i);
+  if (dayMatch) {
+    return clampDurationDays(Number.parseInt(dayMatch[1] ?? "0", 10));
+  }
+
+  return null;
+};
+
+const normalizeChannelToken = (value: string): string | null => {
+  const compact = value.trim().toLowerCase();
+  if (!compact) {
+    return null;
+  }
+
+  if (compact === "instagram" || compact === "insta") {
+    return "instagram";
+  }
+  if (compact === "naver_blog" || compact === "naver blog" || compact === "naverblog" || compact === "blog") {
+    return "naver_blog";
+  }
+  if (compact === "facebook") {
+    return "facebook";
+  }
+  if (compact === "threads") {
+    return "threads";
+  }
+  if (compact === "youtube" || compact === "youtube shorts" || compact === "youtube channel") {
+    return "youtube";
+  }
+
+  return null;
+};
+
+const resolvePreferredChannelsFromSurvey = (answers: SurveyAnswer[]): string[] | null => {
+  const raw = resolveAnswerValue(answers, "channels");
+  if (!raw) {
+    return null;
+  }
+
+  const tokens = raw
+    .split(/[,\n/|]+/)
+    .map((entry) => normalizeChannelToken(entry))
+    .filter((entry): entry is string => !!entry);
+
+  if (tokens.length === 0) {
+    const normalized = normalizeChannelToken(raw);
+    return normalized ? [normalized] : null;
+  }
+
+  return [...new Set(tokens)];
 };
 
 const buildConfirmationPrompt = (): string => "이 계획을 최종 확정하여 캠페인으로 진행하시겠습니까?";
@@ -139,6 +214,11 @@ const createScheduleSlotsForCampaign = async (params: {
     const slotDate = new Date(start);
     slotDate.setUTCDate(start.getUTCDate() + dayOffset - 1);
     const channel = typeof entry.channel === "string" && entry.channel.trim() ? entry.channel.trim().toLowerCase() : "instagram";
+    const contentType = resolveChannelContentType({
+      channel,
+      suggestedType: typeof entry.type === "string" ? entry.type : null,
+      sequenceIndex: index
+    });
     const title = typeof entry.type === "string" && entry.type.trim() ? entry.type.trim() : `Post ${index + 1}`;
 
     return {
@@ -146,7 +226,7 @@ const createScheduleSlotsForCampaign = async (params: {
       campaign_id: params.campaignId,
       session_id: params.sessionId,
       channel,
-      content_type: "text",
+      content_type: contentType,
       title,
       scheduled_date: slotDate.toISOString().slice(0, 10),
       slot_status: "scheduled",
@@ -277,6 +357,9 @@ const generateAndPresentDraft = async (params: {
 }): Promise<SkillResult> => {
   const chainInput = buildChainInputFromSurvey(params.answers);
   const previousChainData = parseCampaignChainData(params.context.state.campaign_chain_data);
+  const campaignTitle = resolveCampaignTitleFromSurvey(params.answers, params.context.state.activity_folder);
+  const preferredDurationDays = resolvePreferredDurationDaysFromSurvey(params.answers);
+  const preferredChannels = resolvePreferredChannelsFromSurvey(params.answers);
 
   const generated = await generateCampaignPlan(
     params.context.session.org_id,
@@ -287,7 +370,10 @@ const generateAndPresentDraft = async (params: {
       revisionReason: params.revisionReason ?? null,
       previousChainData: params.revisionReason ? previousChainData : null,
       rerunFromStep: params.rerunFromStep,
-      orgName: params.context.state.activity_folder
+      campaignName: campaignTitle,
+      orgName: campaignTitle,
+      preferredDurationDays,
+      preferredChannels
     }
   );
 

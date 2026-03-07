@@ -170,7 +170,7 @@ describe("Phase 5-3 campaign chain", () => {
     assert.equal(result.chainData.context_policy.step_b, "compact_fact_pack");
   });
 
-  it("marks downstream steps as blocked when Step A fails after repair retry", async () => {
+  it("marks downstream steps as blocked when Step A fails after repair retries", async () => {
     let callCount = 0;
     const result = await runCampaignPlanChain({
       activityFolder: "Project Beta",
@@ -188,9 +188,9 @@ describe("Phase 5-3 campaign chain", () => {
       }
     });
 
-    assert.equal(callCount, 2);
+    assert.equal(callCount, 3);
     assert.equal(result.chainData.step_meta.step_a.state, "failed");
-    assert.equal(result.chainData.step_meta.step_a.retry_count, 1);
+    assert.equal(result.chainData.step_meta.step_a.retry_count, 2);
     assert.equal(result.chainData.step_meta.step_b.state, "blocked_by_dependency");
     assert.equal(result.chainData.step_meta.step_c.state, "blocked_by_dependency");
     assert.equal(result.chainData.step_meta.step_d.state, "blocked_by_dependency");
@@ -203,7 +203,7 @@ describe("Phase 5-3 campaign chain", () => {
       calendar: null,
       execution: null
     };
-    const legacy = buildLegacyPlanFields("Project Gamma", chainData);
+    const legacy = buildLegacyPlanFields("Project Gamma", null, chainData);
     const markdown = assembleCampaignPlanDocument({
       plan: legacy,
       audience: null,

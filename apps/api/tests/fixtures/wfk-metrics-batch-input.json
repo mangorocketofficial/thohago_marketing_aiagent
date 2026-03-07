@@ -1,0 +1,177 @@
+{
+  "description": "WFK org batch metrics input — simulates manual entry for 20 published contents",
+  "request_idempotency_key": "wfk-test-batch-20260307-001",
+  "entries": [
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000001",
+      "_channel": "instagram",
+      "_note": "23기 모집 공고 — 고성과 (강한 CTA, 저녁시간 발행)",
+      "likes": 320,
+      "comments": 48,
+      "shares": 35,
+      "saves": 92,
+      "follower_delta": 28
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000002",
+      "_channel": "instagram",
+      "_note": "에티오피아 봉사 후기 — 중상 성과",
+      "likes": 210,
+      "comments": 32,
+      "shares": 18,
+      "saves": 55,
+      "follower_delta": 12
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000003",
+      "_channel": "instagram",
+      "_note": "SDGs 캠페인 — 보통 성과",
+      "likes": 140,
+      "comments": 15,
+      "shares": 8,
+      "saves": 22,
+      "follower_delta": 5
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000004",
+      "_channel": "instagram",
+      "_note": "체크리스트 — 저성과 (이른 아침 발행)",
+      "likes": 65,
+      "comments": 4,
+      "shares": 2,
+      "saves": 18,
+      "follower_delta": -2
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000005",
+      "_channel": "instagram",
+      "_note": "상반기 일정 공개 — 중간 성과",
+      "likes": 180,
+      "comments": 22,
+      "shares": 14,
+      "saves": 40,
+      "follower_delta": 10
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000011",
+      "_channel": "naver_blog",
+      "_note": "모집 안내 — 고성과 (오전 10시 발행, 강한 CTA)",
+      "views": 3200,
+      "comments": 45
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000012",
+      "_channel": "naver_blog",
+      "_note": "라오스 현장 리포트 — 중상 성과",
+      "views": 2100,
+      "comments": 28
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000013",
+      "_channel": "naver_blog",
+      "_note": "캄보디아 의료봉사 후기 — 보통 성과",
+      "views": 1400,
+      "comments": 18
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000014",
+      "_channel": "naver_blog",
+      "_note": "FAQ 총정리 — 중간 성과 (실용적 콘텐츠)",
+      "views": 1800,
+      "comments": 12
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000021",
+      "_channel": "youtube",
+      "_note": "밀착 다큐 VLOG — 고성과",
+      "views": 8500,
+      "likes": 420,
+      "comments": 65
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000022",
+      "_channel": "youtube",
+      "_note": "합격자 인터뷰 — 중상 성과",
+      "views": 5200,
+      "likes": 280,
+      "comments": 42
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000023",
+      "_channel": "youtube",
+      "_note": "문화 가이드 — 보통 성과",
+      "views": 3100,
+      "likes": 150,
+      "comments": 22
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000031",
+      "_channel": "facebook",
+      "_note": "모집 공고 — 고성과 (공유 많음)",
+      "likes": 180,
+      "comments": 25,
+      "shares": 62
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000032",
+      "_channel": "facebook",
+      "_note": "사진 모음 — 보통 성과",
+      "likes": 95,
+      "comments": 12,
+      "shares": 18
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000033",
+      "_channel": "facebook",
+      "_note": "동문 네트워크 — 중간 성과",
+      "likes": 120,
+      "comments": 15,
+      "shares": 28
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000041",
+      "_channel": "threads",
+      "_note": "마감 D-7 — 고성과 (긴급성 CTA)",
+      "likes": 95,
+      "comments": 18,
+      "shares": 22,
+      "follower_delta": 15
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000042",
+      "_channel": "threads",
+      "_note": "현장 스냅 — 보통 성과",
+      "likes": 52,
+      "comments": 8,
+      "shares": 5,
+      "follower_delta": 3
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000043",
+      "_channel": "threads",
+      "_note": "혜택 총정리 — 중상 성과",
+      "likes": 78,
+      "comments": 14,
+      "shares": 16,
+      "follower_delta": 10
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000044",
+      "_channel": "threads",
+      "_note": "합격 발표일 안내 — 중간 성과",
+      "likes": 60,
+      "comments": 10,
+      "shares": 8,
+      "follower_delta": 5
+    },
+    {
+      "content_id": "c0000001-0000-0000-0000-000000000045",
+      "_channel": "threads",
+      "_note": "AMA 세션 — 저성과 (타이밍 아쉬움)",
+      "likes": 35,
+      "comments": 6,
+      "shares": 3,
+      "follower_delta": 1
+    }
+  ]
+}

@@ -194,7 +194,7 @@ export const env = {
   supabaseUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseServiceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
   anthropicApiKey: readEnv("ANTHROPIC_API_KEY"),
-  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-opus-4-5"),
+  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250514"),
   openAiApiKey: readEnv("OPENAI_API_KEY"),
   openAiProfileModel: readEnv("OPENAI_PROFILE_MODEL", "gpt-4o-mini"),
   onboardingPinnedReviewPath: readEnv("ONBOARDING_PINNED_REVIEW_PATH"),

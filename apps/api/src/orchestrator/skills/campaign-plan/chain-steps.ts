@@ -24,15 +24,17 @@ const asLine = (value: string | null | undefined): string | null => {
 };
 
 export const CHAIN_STEP_MAX_TOKENS = {
-  step_a: 1200,
-  step_b: 900,
-  step_c: 1200,
-  step_d: 1200
+  step_a: 2000,
+  step_b: 1400,
+  step_c: 1800,
+  step_d: 1800
 } as const;
 
-export const CHAIN_STEP_TIMEOUT_MS = 12_000;
-export const CHAIN_TOTAL_HARD_TIMEOUT_MS = 45_000;
-export const CHAIN_TOTAL_TARGET_TIMEOUT_MS = 30_000;
+const FULL_RAG_CONTEXT_TOKEN_BUDGET = 1200;
+
+export const CHAIN_STEP_TIMEOUT_MS = 30_000;
+export const CHAIN_TOTAL_HARD_TIMEOUT_MS = 120_000;
+export const CHAIN_TOTAL_TARGET_TIMEOUT_MS = 60_000;
 
 export const buildFullRagContextText = (context: EnrichedCampaignContext): string => {
   const parts: string[] = [];
@@ -57,7 +59,7 @@ export const buildFullRagContextText = (context: EnrichedCampaignContext): strin
   if (context.documentExtracts) {
     parts.push("=== FOLDER DOC EXTRACTS ===", context.documentExtracts);
   }
-  return parts.join("\n\n").trim();
+  return truncateToTokenBudget(parts.join("\n\n").trim(), FULL_RAG_CONTEXT_TOKEN_BUDGET);
 };
 
 export const buildCompactFactPack = (context: EnrichedCampaignContext): string => {
@@ -113,6 +115,7 @@ export const buildMicroFactPack = (params: {
 
 export const buildStepAPrompt = (params: {
   activityFolder: string;
+  campaignName: string;
   userMessage: string;
   fullRagContext: string;
   revisionReason?: string | null;
@@ -132,6 +135,7 @@ export const buildStepAPrompt = (params: {
     "",
     "TASK: Step A - Target Audience and Messaging.",
     `Activity folder: ${params.activityFolder}`,
+    `Campaign name: ${params.campaignName}`,
     `User request: ${params.userMessage}`,
     revisionLines.length ? ["", "REVISION CONTEXT", revisionLines.join("\n")].join("\n") : "",
     "",
@@ -151,7 +155,11 @@ export const buildStepAPrompt = (params: {
     "REQUIREMENTS",
     "- Keep all fields grounded in provided context.",
     "- Include concrete pain points and evidence lines.",
-    "- Keep channel_tone_guide keys as channel names."
+    "- Keep channel_tone_guide keys as channel names.",
+    "- Keep text concise (about 1 sentence per field).",
+    "- support_messages should contain 2 to 3 items.",
+    "- Return compact JSON only (no markdown, no extra prose).",
+    "- All natural-language output values must be written in Korean."
   ]
     .filter(Boolean)
     .join("\n");
@@ -159,6 +167,7 @@ export const buildStepAPrompt = (params: {
 
 export const buildStepBPrompt = (params: {
   activityFolder: string;
+  campaignName: string;
   userMessage: string;
   compactFactPack: string;
   audience: AudienceMessagingData;
@@ -179,6 +188,7 @@ export const buildStepBPrompt = (params: {
     "",
     "TASK: Step B - Channel Strategy.",
     `Activity folder: ${params.activityFolder}`,
+    `Campaign name: ${params.campaignName}`,
     `User request: ${params.userMessage}`,
     revisionLines.length ? ["", "REVISION CONTEXT", revisionLines.join("\n")].join("\n") : "",
     "",
@@ -197,7 +207,12 @@ export const buildStepBPrompt = (params: {
     "",
     "REQUIREMENTS",
     "- Keep recommendations realistic for NGO team capacity.",
-    "- Do not invent unavailable channels."
+    "- Do not invent unavailable channels.",
+    "- owned_channels should contain 3 to 5 items.",
+    "- earned_channels should contain 1 to 3 items.",
+    "- Keep each text field concise (about 1 sentence).",
+    "- Return compact JSON only (no markdown, no extra prose).",
+    "- All natural-language output values must be written in Korean."
   ]
     .filter(Boolean)
     .join("\n");
@@ -205,6 +220,7 @@ export const buildStepBPrompt = (params: {
 
 export const buildStepCPrompt = (params: {
   activityFolder: string;
+  campaignName: string;
   userMessage: string;
   audience: AudienceMessagingData;
   channels: ChannelStrategyData;
@@ -226,6 +242,7 @@ export const buildStepCPrompt = (params: {
     "",
     "TASK: Step C - Content Calendar.",
     `Activity folder: ${params.activityFolder}`,
+    `Campaign name: ${params.campaignName}`,
     `User request: ${params.userMessage}`,
     revisionLines.length ? ["", "REVISION CONTEXT", revisionLines.join("\n")].join("\n") : "",
     "",
@@ -246,7 +263,11 @@ export const buildStepCPrompt = (params: {
     "",
     "REQUIREMENTS",
     "- Make calendar executable and sequence-aware.",
-    "- Ensure channels used are compatible with Step B."
+    "- Ensure channels used are compatible with Step B.",
+    "- Limit total calendar items to 8-12.",
+    "- Keep content_description short (one sentence).",
+    "- Return compact JSON only (no markdown, no extra prose).",
+    "- All natural-language output values must be written in Korean."
   ]
     .filter(Boolean)
     .join("\n");
@@ -254,6 +275,7 @@ export const buildStepCPrompt = (params: {
 
 export const buildStepDPrompt = (params: {
   activityFolder: string;
+  campaignName: string;
   userMessage: string;
   audience: AudienceMessagingData;
   channels: ChannelStrategyData;
@@ -276,6 +298,7 @@ export const buildStepDPrompt = (params: {
     "",
     "TASK: Step D - Assets, KPI, Risks, Next Steps.",
     `Activity folder: ${params.activityFolder}`,
+    `Campaign name: ${params.campaignName}`,
     `User request: ${params.userMessage}`,
     revisionLines.length ? ["", "REVISION CONTEXT", revisionLines.join("\n")].join("\n") : "",
     "",
@@ -306,7 +329,11 @@ export const buildStepDPrompt = (params: {
     "REQUIREMENTS",
     "- KPI must be measurable.",
     "- Risks must include mitigations.",
-    "- Next steps should be immediately actionable."
+    "- Next steps should be immediately actionable.",
+    "- required_assets: 3-5 items, kpi_primary: 1-2, kpi_secondary: 0-2, risks: 1-3, next_steps: 2-3.",
+    "- Keep each text field concise (about 1 sentence).",
+    "- Return compact JSON only (no markdown, no extra prose).",
+    "- All natural-language output values must be written in Korean."
   ]
     .filter(Boolean)
     .join("\n");
@@ -330,6 +357,8 @@ export const buildRepairPrompt = (params: {
   [
     "Your previous output did not match required JSON schema.",
     "Fix and return valid JSON only with no markdown and no comments.",
+    "Use compact JSON and keep all fields concise.",
+    "All natural-language output values must be written in Korean.",
     `Schema name: ${params.schemaName}`,
     "",
     "ORIGINAL TASK",

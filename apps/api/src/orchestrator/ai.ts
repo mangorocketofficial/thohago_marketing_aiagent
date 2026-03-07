@@ -5,6 +5,7 @@ import { buildLlmRequestHash, readLlmResponseCache, writeLlmResponseCache } from
 import { callOpenAi, callWithFallback, isAnthropicCreditExhaustedError } from "./llm-client";
 import { buildPreferenceContextText } from "./preference-memory";
 import { buildContentGenerationContext, buildEnrichedCampaignContext } from "./rag-context";
+import { buildContentTypesForChannels, resolveChannelContentType } from "./content-type-policy";
 import { assembleCampaignPlanDocument } from "./skills/campaign-plan/assembler";
 import {
   runCampaignPlanChain,
@@ -15,12 +16,21 @@ import {
   type CampaignPlanChainData,
   type ChainStepName
 } from "./skills/campaign-plan/chain-types";
+import {
+  applyCampaignPlanPreferences,
+  buildFallbackAudienceFromPlan,
+  buildFallbackCalendarFromPlan,
+  buildFallbackChannelStrategyFromPlan,
+  buildFallbackExecutionFromPlan,
+  normalizePreferredChannels,
+  resolveDurationDaysFromText
+} from "./skills/campaign-plan/fallback";
 import type { CampaignPlan, RagContextMeta, SurveyQuestionId } from "./types";
 
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_GENERAL_CHAT_MODEL = "gpt-4o-mini";
 const SUPPORTED_CONTENT_CHANNELS = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
-const CHAIN_TARGET_LATENCY_MS = 30_000;
+const CHAIN_TARGET_LATENCY_MS = 60_000;
 
 type OpenAiChatCompletionResponse = {
   choices?: Array<{
@@ -79,33 +89,46 @@ const normalizePlan = (value: unknown, activityFolder: string): CampaignPlan => 
 
   const suggestedSchedule = suggestedScheduleRaw.map((entry, index) => {
     const item = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    const channel = normalizeChannel(item.channel ?? channels[0]);
     return {
       day: parseIntSafe(item.day, index + 1),
-      channel: normalizeChannel(item.channel ?? channels[0]),
-      type: normalizeString(item.type, "text")
+      channel,
+      type: resolveChannelContentType({
+        channel,
+        suggestedType: normalizeString(item.type, ""),
+        sequenceIndex: index
+      })
     };
   });
+
+  const explicitTypes =
+    Array.isArray(row.content_types) && row.content_types.length > 0
+      ? row.content_types
+          .map((entry) => normalizeString(entry, "").toLowerCase())
+          .filter((entry) => entry === "text" || entry === "image" || entry === "video")
+      : [];
+  const scheduleTypes = [...new Set(suggestedSchedule.map((entry) => entry.type.toLowerCase()))];
+  const channelPolicyTypes = buildContentTypesForChannels(channels);
+  const mergedContentTypes = [...new Set([...explicitTypes, ...scheduleTypes, ...channelPolicyTypes])];
 
   return {
     objective: normalizeString(
       row.objective,
-      `Introduce outcomes from "${activityFolder}" and invite audience engagement.`
+      `"${activityFolder}"의 성과를 전달하고 참여를 유도합니다.`
     ),
     channels,
     duration_days: parseIntSafe(row.duration_days, 7),
     post_count: parseIntSafe(row.post_count, 3),
-    content_types:
-      Array.isArray(row.content_types) && row.content_types.length > 0
-        ? row.content_types.map((entry) => normalizeString(entry, "text"))
-        : ["text"],
+    content_types: mergedContentTypes.length > 0 ? mergedContentTypes : ["text"],
     suggested_schedule: suggestedSchedule
   };
 };
 
-const fallbackPlan = (activityFolder: string): CampaignPlan =>
-  normalizePlan(
+const fallbackPlan = (activityFolder: string, campaignName?: string | null): CampaignPlan => {
+  const planName = normalizeString(campaignName, activityFolder);
+  return normalizePlan(
     {
-      objective: `Share verified updates from "${activityFolder}" with clear storytelling.`,
+      objective: `"${planName}"의 검증된 소식을 명확한 스토리텔링으로 전달합니다.`,
       channels: ["instagram", "threads"],
       duration_days: 7,
       post_count: 3,
@@ -118,6 +141,7 @@ const fallbackPlan = (activityFolder: string): CampaignPlan =>
     },
     activityFolder
   );
+};
 
 const fallbackDraft = (activityFolder: string): string =>
   `We are sharing a field update from ${activityFolder}. Your support helps us continue this work. #ngo #fieldupdate #impact`;
@@ -574,6 +598,9 @@ export const generateCampaignPlan = async (
     previousChainData?: CampaignPlanChainData | null;
     rerunFromStep?: ChainStepName;
     orgName?: string | null;
+    campaignName?: string | null;
+    preferredDurationDays?: number | null;
+    preferredChannels?: string[] | null;
   }
 ): Promise<{
   plan: CampaignPlan;
@@ -583,6 +610,15 @@ export const generateCampaignPlan = async (
 }> => {
   const ctx = await buildEnrichedCampaignContext(orgId, { activityFolder });
   let shouldForceOpenAiFallback = false;
+  const preferredDurationDays =
+    typeof options?.preferredDurationDays === "number" && Number.isFinite(options.preferredDurationDays)
+      ? options.preferredDurationDays
+      : resolveDurationDaysFromText(userMessage);
+  const preferredChannels = normalizePreferredChannels(options?.preferredChannels);
+  const planTitle = normalizeString(
+    options?.campaignName,
+    normalizeString(options?.orgName, activityFolder || "Organization")
+  );
 
   const invokeCampaignChainModel = async (
     prompt: string,
@@ -592,6 +628,7 @@ export const generateCampaignPlan = async (
       return callOpenAi({
         prompt,
         maxTokens: tokens,
+        temperature: 0,
         orgId
       });
     }
@@ -599,6 +636,7 @@ export const generateCampaignPlan = async (
     const result = await callWithFallback({
       prompt,
       maxTokens: tokens,
+      temperature: 0,
       orgId,
       onFallback: (anthropicResult) => {
         if (isAnthropicCreditExhaustedError(anthropicResult)) {
@@ -620,6 +658,7 @@ export const generateCampaignPlan = async (
   try {
     const chain = await runCampaignPlanChain({
       activityFolder,
+      campaignName: options?.campaignName ?? null,
       userMessage,
       context: ctx,
       invokeModel: invokeCampaignChainModel,
@@ -640,19 +679,30 @@ export const generateCampaignPlan = async (
       !!chain.chainData.calendar ||
       !!chain.chainData.execution;
 
-    const fallback = options?.previousPlan ? normalizePlan(options.previousPlan, activityFolder) : fallbackPlan(activityFolder);
-    const derivedPlan = buildLegacyPlanFields(activityFolder, chain.chainData);
-    const plan = hasStructuredOutput ? normalizePlan(derivedPlan, activityFolder) : fallback;
+    const fallback = options?.previousPlan
+      ? normalizePlan(options.previousPlan, activityFolder)
+      : fallbackPlan(activityFolder, options?.campaignName);
+    const derivedPlan = buildLegacyPlanFields(activityFolder, options?.campaignName ?? null, chain.chainData);
+    const basePlan = hasStructuredOutput ? normalizePlan(derivedPlan, activityFolder) : fallback;
+    const calendarAvailable = !!chain.chainData.calendar && chain.chainData.step_meta.step_c.state === "ok";
+    const plan = applyCampaignPlanPreferences(basePlan, {
+      preferredDurationDays,
+      preferredChannels,
+      calendarAvailable
+    });
+    const audienceForDocument = chain.chainData.audience ?? buildFallbackAudienceFromPlan(plan);
+    const channelsForDocument = chain.chainData.channels ?? buildFallbackChannelStrategyFromPlan(plan);
+    const calendarForDocument = chain.chainData.calendar ?? buildFallbackCalendarFromPlan(plan);
+    const executionForDocument = chain.chainData.execution ?? buildFallbackExecutionFromPlan(plan);
 
     const planDocument = assembleCampaignPlanDocument({
       plan,
-      audience: chain.chainData.audience,
-      channels: chain.chainData.channels,
-      calendar: chain.chainData.calendar,
-      execution: chain.chainData.execution,
-      orgName: normalizeString(options?.orgName, activityFolder || "Organization"),
-      generatedAt: chain.chainData.generated_at,
-      chain: chain.chainData
+      audience: audienceForDocument,
+      channels: channelsForDocument,
+      calendar: calendarForDocument,
+      execution: executionForDocument,
+      orgName: planTitle,
+      generatedAt: chain.chainData.generated_at
     });
 
     return {
@@ -663,12 +713,31 @@ export const generateCampaignPlan = async (
     };
   } catch (error) {
     console.error("[CAMPAIGN_CHAIN] Failed to run campaign chain:", error);
+    const basePlan = options?.previousPlan
+      ? normalizePlan(options.previousPlan, activityFolder)
+      : fallbackPlan(activityFolder, options?.campaignName);
+    const plan = applyCampaignPlanPreferences(basePlan, {
+      preferredDurationDays,
+      preferredChannels,
+      calendarAvailable: false
+    });
+    const audienceForDocument = buildFallbackAudienceFromPlan(plan);
+    const channelsForDocument = buildFallbackChannelStrategyFromPlan(plan);
+    const planDocument = assembleCampaignPlanDocument({
+      plan,
+      audience: audienceForDocument,
+      channels: channelsForDocument,
+      calendar: buildFallbackCalendarFromPlan(plan),
+      execution: buildFallbackExecutionFromPlan(plan),
+      orgName: planTitle,
+      generatedAt: new Date().toISOString()
+    });
 
     return {
-      plan: options?.previousPlan ? normalizePlan(options.previousPlan, activityFolder) : fallbackPlan(activityFolder),
+      plan,
       ragMeta: ctx.meta,
       chainData: null,
-      planDocument: null
+      planDocument
     };
   }
 };

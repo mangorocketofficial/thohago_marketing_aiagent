@@ -67,3 +67,4 @@
 | 7-2.2 | Template Schema Redesign (Strict Render Contract) | Done | 2026-03-05 | [phase-7-2.2-completion.md](./phase-7-2.2-completion.md) |
 | 7-2.2 Patch | Instagram Skill Routing + Generation Stability Patch | Done | 2026-03-05 | [phase-7-2.2-patch-completion.md](./phase-7-2.2-patch-completion.md) |
 | 7-2d | Vision-Based Image Index System for Instagram Auto Selection | Done | 2026-03-05 | [phase-7-2d-completion.md](./phase-7-2d-completion.md) |
+| 8-1 | Performance Analytics Feedback Loop | Done | 2026-03-07 | [phase-8-1-completion.md](./phase-8-1-completion.md) |

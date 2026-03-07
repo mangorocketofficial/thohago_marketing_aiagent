@@ -13,6 +13,7 @@
   "dependencies": {
     "@repo/media-engine": "workspace:*",
     "@repo/rag": "workspace:*",
+    "@repo/types": "workspace:*",
     "@supabase/supabase-js": "^2.57.4",
     "express": "^4.21.2",
     "sharp": "^0.34.5"

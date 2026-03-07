@@ -1,0 +1,87 @@
+{
+  "scenario": "happy_performance_insight_helpers",
+  "description": "Best publish times, CTA extraction, and channel recommendations are generated from scored content rows.",
+  "input": {
+    "timezone": "Asia/Seoul",
+    "rows": [
+      {
+        "channel": "instagram",
+        "published_at": "2026-03-07T09:15:00.000Z",
+        "performance_score": 82
+      },
+      {
+        "channel": "instagram",
+        "published_at": "2026-03-08T09:45:00.000Z",
+        "performance_score": 78
+      },
+      {
+        "channel": "instagram",
+        "published_at": "2026-03-07T01:05:00.000Z",
+        "performance_score": 41
+      },
+      {
+        "channel": "instagram",
+        "published_at": "2026-03-08T01:30:00.000Z",
+        "performance_score": 44
+      },
+      {
+        "channel": "threads",
+        "published_at": "2026-03-07T12:00:00.000Z",
+        "performance_score": 75
+      },
+      {
+        "channel": "threads",
+        "published_at": "2026-03-08T12:30:00.000Z",
+        "performance_score": 73
+      }
+    ],
+    "cta_rows": [
+      {
+        "body": "Click now to sign up and learn more.",
+        "performance_score": 82
+      },
+      {
+        "body": "Please learn more and click now.",
+        "performance_score": 77
+      },
+      {
+        "body": "click now",
+        "performance_score": 40
+      }
+    ],
+    "channel_counts": {
+      "instagram": 12,
+      "threads": 4,
+      "facebook": 2
+    },
+    "avg_scores": {
+      "instagram": 74.5,
+      "threads": 49.2
+    },
+    "score_samples": {
+      "instagram": 12,
+      "threads": 4
+    }
+  },
+  "output": {
+    "best_publish_times": {
+      "instagram": "18:00-20:00 (Asia/Seoul)",
+      "threads": "20:00-22:00 (Asia/Seoul)"
+    },
+    "cta_phrases": [
+      "click now",
+      "learn more",
+      "sign up"
+    ],
+    "recommendations": {
+      "instagram": "Strong performance (74.5 avg, high-confidence, n=12). Scale this channel while preserving the current format and CTA style.",
+      "threads": "Moderate performance (49.2 avg, low-confidence, n=4). Run controlled experiments on publish time and CTA variants.",
+      "facebook": "2 published items. Increase publishing frequency to build reliable insights."
+    }
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-07",
+  "approved_by": "Codex",
+  "version": "1"
+}
+

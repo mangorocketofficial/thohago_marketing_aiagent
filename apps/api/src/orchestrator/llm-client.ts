@@ -77,6 +77,7 @@ export const shouldFallbackFromAnthropic = (result: LlmCallResult): boolean => {
 export const callWithFallback = async (params: {
   prompt: string;
   maxTokens: number;
+  temperature?: number;
   orgId?: string | null;
   shouldFallback?: (anthropicResult: LlmCallResult) => boolean;
   onFallback?: (anthropicResult: LlmCallResult) => void;
@@ -84,6 +85,7 @@ export const callWithFallback = async (params: {
   const anthropicResult = await callAnthropic({
     prompt: params.prompt,
     maxTokens: params.maxTokens,
+    temperature: params.temperature,
     orgId: params.orgId
   });
 
@@ -112,6 +114,7 @@ export const callWithFallback = async (params: {
   const openAiResult = await callOpenAi({
     prompt: params.prompt,
     maxTokens: params.maxTokens,
+    temperature: params.temperature,
     orgId: params.orgId
   });
 

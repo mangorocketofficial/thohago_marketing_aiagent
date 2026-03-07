@@ -1,0 +1,27 @@
+{
+  "best_publish_times": {
+    "naver_blog": "10:00",
+    "instagram": "18:30",
+    "youtube": "20:00",
+    "facebook": "12:00",
+    "threads": "19:00"
+  },
+  "top_cta_phrases": [
+    "지금 신청하세요",
+    "WFK와 함께 세계로",
+    "자세히 알아보기",
+    "봉사 후기 보러가기",
+    "참가 신청 바로가기"
+  ],
+  "content_pattern_summary": "총 87개 콘텐츠 (naver_blog: 32, instagram: 25, youtube: 12, facebook: 10, threads: 8)",
+  "channel_recommendations": {
+    "naver_blog": "32개 콘텐츠 축적. 기존 패턴 기반 생성 신뢰도가 높습니다.",
+    "instagram": "25개 콘텐츠 축적. 기존 패턴 기반 생성 신뢰도가 높습니다.",
+    "youtube": "12개 콘텐츠 축적. 기존 패턴 기반 생성 신뢰도가 높습니다.",
+    "facebook": "10개 콘텐츠 축적. 기존 패턴 기반 생성 신뢰도가 높습니다.",
+    "threads": "8개 콘텐츠 참고 가능. 톤/구성 참고는 가능하나 패턴 다양성은 제한적입니다."
+  },
+  "user_edit_preference_summary": "총 45회 수정. tone_softening: 18회, add_cta: 12회, shorten: 9회, add_hashtag: 6회.",
+  "generated_at": "2026-03-07T09:00:00.000Z",
+  "content_count_at_generation": 87
+}

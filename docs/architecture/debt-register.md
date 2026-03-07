@@ -120,3 +120,14 @@ Reason
 
 Affects  
 Phase 7-3
+
+DEBT-012
+
+Description  
+Phase 8-1 metrics route schedules large-batch score sync and insight refresh with process-local async follow-up.
+
+Reason  
+8-1 prioritized fast user-facing batch submission and deterministic small-batch sync behavior before introducing a durable job queue.
+
+Affects  
+Phase 8-2

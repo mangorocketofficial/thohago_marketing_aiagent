@@ -1,4 +1,6 @@
 import type { EnrichedCampaignContext } from "../../rag-context";
+import { resolveChannelContentType } from "../../content-type-policy";
+import type { CampaignPlan } from "../../types";
 import {
   CHAIN_STEP_MAX_TOKENS,
   CHAIN_STEP_TIMEOUT_MS,
@@ -23,11 +25,15 @@ import {
   type CampaignPlanChainData,
   type ChainStepMeta,
   type ChainStepName,
-  type ChainStepState,
   type ChannelStrategyData,
   type ContentCalendarData,
   type ExecutionData
 } from "./chain-types";
+import {
+  buildFallbackAudienceFromPlan,
+  buildFallbackCalendarFromPlan,
+  buildFallbackChannelStrategyFromPlan
+} from "./fallback";
 
 export type CampaignChainModelCallResult = {
   text: string | null;
@@ -44,6 +50,7 @@ export type CampaignChainModelInvoker = (
 
 type RunCampaignPlanChainParams = {
   activityFolder: string;
+  campaignName?: string | null;
   userMessage: string;
   context: EnrichedCampaignContext;
   invokeModel: CampaignChainModelInvoker;
@@ -69,7 +76,7 @@ type StepRunFailure = {
 };
 
 const CHAIN_VERSION = 1;
-const MAX_RETRY = 1;
+const MAX_RETRY = 2;
 const STEP_ORDER: ChainStepName[] = ["step_a", "step_b", "step_c", "step_d"];
 const STEP_INDEX: Record<ChainStepName, number> = {
   step_a: 0,
@@ -87,6 +94,56 @@ const SCHEMA_SHAPES: Record<ChainStepName, string> = {
     '{"weeks":[{"week_number":1,"theme":"string","phase":"awareness|engagement|conversion","items":[{"day":1,"day_label":"D1","content_title":"string","content_description":"string","channel":"string","format":"string","owner_hint":"string","status":"draft"}]}],"dependencies":[{"source_day":1,"target_day":2,"description":"string"}]}',
   step_d:
     '{"required_assets":[{"id":1,"name":"string","asset_type":"string","description":"string","priority":"must|recommended","deadline_hint":"string"}],"kpi_primary":[{"metric":"string","target":"string","measurement":"string","reporting_cadence":"string"}],"kpi_secondary":[{"metric":"string","target":"string","measurement":"string","reporting_cadence":"string"}],"reporting_plan":{"daily":"string","weekly":"string","post_campaign":"string"},"budget_breakdown":[{"item":"string","estimated_cost":"string","note":"string"}]|null,"risks":[{"risk":"string","likelihood":"high|medium|low","mitigation":"string"}],"next_steps":[{"action":"string","timing":"string"}],"approval_required":["string"]}'
+};
+
+const SUPPORTED_CHANNELS = ["instagram", "naver_blog", "facebook", "threads", "youtube"] as const;
+
+const detectSeedChannels = (value: string): string[] => {
+  const normalized = value.toLowerCase();
+  const channels: string[] = [];
+  if (/(instagram|insta)/.test(normalized)) channels.push("instagram");
+  if (/(naver[_\s-]?blog|blog)/.test(normalized)) channels.push("naver_blog");
+  if (/facebook/.test(normalized)) channels.push("facebook");
+  if (/threads/.test(normalized)) channels.push("threads");
+  if (/youtube|yt/.test(normalized)) channels.push("youtube");
+  return [...new Set(channels)].filter((entry): entry is string => SUPPORTED_CHANNELS.includes(entry as never));
+};
+
+const buildSeedPlanForFallback = (params: {
+  campaignName: string;
+  userMessage: string;
+  context: EnrichedCampaignContext;
+}): CampaignPlan => {
+  const fromInterview = detectSeedChannels(
+    `${params.context.interviewAnswers?.q2 ?? ""} ${params.context.interviewAnswers?.q1 ?? ""}`
+  );
+  const fromUserInput = detectSeedChannels(params.userMessage);
+  const channels = [...new Set([...fromUserInput, ...fromInterview])];
+  const safeChannels = channels.length > 0 ? channels : ["instagram", "naver_blog", "youtube"];
+  const durationDays = 30;
+  const postCount = 12;
+  const suggestedSchedule = Array.from({ length: postCount }, (_, index) => {
+    const ratio = index / Math.max(1, postCount - 1);
+    const day = Math.max(1, Math.min(durationDays, Math.round(ratio * (durationDays - 1)) + 1));
+    const channel = safeChannels[index % safeChannels.length] ?? "instagram";
+    return {
+      day,
+      channel,
+      type: resolveChannelContentType({
+        channel,
+        sequenceIndex: index
+      })
+    };
+  });
+
+  return {
+    objective: `"${params.campaignName}" 캠페인의 핵심 메시지를 명확하게 전달하고 참여를 유도합니다.`,
+    channels: safeChannels,
+    duration_days: durationDays,
+    post_count: postCount,
+    content_types: [...new Set(suggestedSchedule.map((entry) => entry.type))],
+    suggested_schedule: suggestedSchedule
+  };
 };
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
@@ -235,9 +292,15 @@ const shouldRerunStep = (
 
 export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): Promise<RunCampaignPlanChainResult> => {
   const startedMs = Date.now();
+  const campaignName = params.campaignName?.trim() || params.activityFolder;
   const rerunFromStep = params.rerunFromStep ?? "step_a";
   const fullRagContext = buildFullRagContextText(params.context);
   const compactFactPack = buildCompactFactPack(params.context);
+  const seedPlan = buildSeedPlanForFallback({
+    campaignName,
+    userMessage: params.userMessage,
+    context: params.context
+  });
 
   const previous = params.previousChainData ?? null;
   const previousStepMeta =
@@ -284,6 +347,7 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
         schemaName: "AudienceMessagingData",
         basePrompt: buildStepAPrompt({
           activityFolder: params.activityFolder,
+          campaignName,
           userMessage: params.userMessage,
           fullRagContext,
           revisionReason: params.revisionReason,
@@ -297,6 +361,9 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
       audience = stepA.data;
       stepMeta.step_a = stepA.meta;
     }
+  }
+  if (!audience) {
+    audience = buildFallbackAudienceFromPlan(seedPlan);
   }
 
   if (!carryStepB) {
@@ -314,6 +381,7 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
         schemaName: "ChannelStrategyData",
         basePrompt: buildStepBPrompt({
           activityFolder: params.activityFolder,
+          campaignName,
           userMessage: params.userMessage,
           compactFactPack,
           audience,
@@ -328,6 +396,9 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
       channels = stepB.data;
       stepMeta.step_b = stepB.meta;
     }
+  }
+  if (!channels) {
+    channels = buildFallbackChannelStrategyFromPlan(seedPlan);
   }
 
   if (!carryStepC) {
@@ -350,6 +421,7 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
         schemaName: "ContentCalendarData",
         basePrompt: buildStepCPrompt({
           activityFolder: params.activityFolder,
+          campaignName,
           userMessage: params.userMessage,
           audience,
           channels,
@@ -365,6 +437,9 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
       calendar = stepC.data;
       stepMeta.step_c = stepC.meta;
     }
+  }
+  if (!calendar) {
+    calendar = buildFallbackCalendarFromPlan(seedPlan);
   }
 
   if (!carryStepD) {
@@ -387,6 +462,7 @@ export const runCampaignPlanChain = async (params: RunCampaignPlanChainParams): 
         schemaName: "ExecutionData",
         basePrompt: buildStepDPrompt({
           activityFolder: params.activityFolder,
+          campaignName,
           userMessage: params.userMessage,
           audience,
           channels,

@@ -75,6 +75,47 @@ export type Content = {
   updated_at: string;
 };
 
+export type ContentMetricCollectionSource = "manual" | `api_${string}`;
+
+/** Raw engagement metrics submitted for a single content row. */
+export type ContentMetricsInput = {
+  content_id: string;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+  follower_delta?: number | null;
+  views?: number | null;
+};
+
+/** Persisted metrics snapshot row. */
+export type ContentMetricsRow = {
+  id: string;
+  org_id: string;
+  content_id: string;
+  channel: Channel;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  follower_delta: number | null;
+  performance_score: number | null;
+  collection_source: ContentMetricCollectionSource;
+  idempotency_key: string | null;
+  collected_at: string;
+  created_at: string;
+};
+
+/** Published content card with latest metrics snapshot for analytics input UI. */
+export type PublishedContentWithMetrics = {
+  id: string;
+  channel: Channel;
+  body: string | null;
+  published_at: string | null;
+  created_at: string;
+  latest_metrics: ContentMetricsRow | null;
+};
+
 export type FileType = "image" | "video" | "document";
 export type PipelineTriggerStatus = "pending" | "processing" | "done" | "failed";
 

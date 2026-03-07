@@ -45,6 +45,10 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     loadActivityThumbnails: (payload) => ipcRenderer.invoke("content:load-activity-thumbnails", payload),
     downloadImage: (payload) => ipcRenderer.invoke("content:download-image", payload)
   },
+  metrics: {
+    listPublishedWithMetrics: (payload) => ipcRenderer.invoke("metrics:list-published-with-metrics", payload),
+    submitBatch: (payload) => ipcRenderer.invoke("metrics:submit-batch", payload)
+  },
   onboarding: {
     onCrawlProgress: (cb) => subscribe("onboarding:crawl-progress", cb),
     onCrawlComplete: (cb) => subscribe("onboarding:crawl-complete", cb),

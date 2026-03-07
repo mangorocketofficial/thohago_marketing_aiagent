@@ -50,6 +50,7 @@ export const callOpenAi = async (
     model: OPENAI_FALLBACK_MODEL,
     prompt: params.prompt,
     maxTokens: params.maxTokens,
+    temperature: params.temperature,
     orgId
   });
 

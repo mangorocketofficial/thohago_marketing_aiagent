@@ -13,6 +13,7 @@ type ProviderName = "anthropic" | "openai";
 export type BaseCallParams = {
   prompt: string;
   maxTokens: number;
+  temperature?: number;
   orgId?: string | null;
 };
 
@@ -29,13 +30,18 @@ export const toCacheKeys = (params: {
   model: string;
   prompt: string;
   maxTokens: number;
+  temperature?: number;
   orgId: string | null;
 }): { requestHash: string; cacheKey: string | null } => {
   const requestHash = buildLlmRequestHash({
     provider: params.provider,
     model: params.model,
     prompt: params.prompt,
-    max_tokens: params.maxTokens
+    max_tokens: params.maxTokens,
+    temperature:
+      typeof params.temperature === "number" && Number.isFinite(params.temperature)
+        ? Math.max(0, Math.min(2, params.temperature))
+        : null
   });
 
   const cacheKey =

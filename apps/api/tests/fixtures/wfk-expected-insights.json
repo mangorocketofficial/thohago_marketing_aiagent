@@ -1,0 +1,74 @@
+{
+  "_description": "Expected AccumulatedInsights shape after processing wfk-metrics-batch-input against wfk-published-contents. Values are approximate — tests validate structure and reasonable ranges, not exact numbers.",
+
+  "best_publish_times": {
+    "_note": "Computed from published_at hour (Asia/Seoul = UTC+9) + performance_score. Format: HH:00-HH:00 (timezone)",
+    "instagram": "18:00-20:00 (Asia/Seoul)",
+    "naver_blog": "10:00-12:00 (Asia/Seoul)",
+    "youtube": "20:00-22:00 (Asia/Seoul)",
+    "facebook": "12:00-14:00 (Asia/Seoul)",
+    "threads": "18:00-20:00 (Asia/Seoul)"
+  },
+
+  "top_cta_phrases": {
+    "_note": "Extracted from body text of contents with performance_score >= 70. Patterns: 지금 (바로)? [클릭|신청|...], 프로필 링크, click now, learn more, etc.",
+    "expected_phrases": [
+      "지금 바로 신청",
+      "프로필 링크",
+      "지금 신청",
+      "링크 클릭",
+      "click now"
+    ],
+    "min_count": 2,
+    "max_count": 5
+  },
+
+  "content_pattern_summary": {
+    "_note": "Total 20 contents across 5 channels",
+    "expected_pattern": "Total 20 contents (instagram: 5, threads: 5, naver_blog: 4, facebook: 3, youtube: 3)"
+  },
+
+  "channel_recommendations": {
+    "_note": "Performance-aware recommendations. Instagram has highest avg score, threads lowest.",
+    "instagram": {
+      "expected_contains": "Strong performance",
+      "score_range": [60, 85]
+    },
+    "naver_blog": {
+      "expected_contains": "Moderate performance",
+      "score_range": [45, 70]
+    },
+    "youtube": {
+      "expected_contains": "Strong performance",
+      "score_range": [60, 85]
+    },
+    "facebook": {
+      "expected_contains": "Moderate performance",
+      "score_range": [45, 70]
+    },
+    "threads": {
+      "expected_contains": "Moderate performance",
+      "score_range": [40, 65]
+    }
+  },
+
+  "content_count_at_generation": 20,
+
+  "scoring_reference": {
+    "_description": "Expected approximate performance_score ranges per content using default references (sample_count < 3 fallback)",
+    "high_performers": [
+      { "id": "c0000001-0000-0000-0000-000000000001", "channel": "instagram", "note": "모집 공고 — saves:92, high engagement", "score_range": [75, 100] },
+      { "id": "c0000001-0000-0000-0000-000000000021", "channel": "youtube", "note": "밀착 다큐 — views:8500", "score_range": [80, 100] },
+      { "id": "c0000001-0000-0000-0000-000000000011", "channel": "naver_blog", "note": "모집 안내 — views:3200", "score_range": [75, 100] }
+    ],
+    "medium_performers": [
+      { "id": "c0000001-0000-0000-0000-000000000002", "channel": "instagram", "note": "봉사 후기", "score_range": [55, 80] },
+      { "id": "c0000001-0000-0000-0000-000000000031", "channel": "facebook", "note": "모집 공고 — shares:62", "score_range": [60, 85] },
+      { "id": "c0000001-0000-0000-0000-000000000041", "channel": "threads", "note": "마감 D-7", "score_range": [55, 80] }
+    ],
+    "low_performers": [
+      { "id": "c0000001-0000-0000-0000-000000000004", "channel": "instagram", "note": "체크리스트 — 이른 아침, 저조한 참여", "score_range": [15, 45] },
+      { "id": "c0000001-0000-0000-0000-000000000045", "channel": "threads", "note": "AMA 세션 — 낮은 참여", "score_range": [20, 50] }
+    ]
+  }
+}

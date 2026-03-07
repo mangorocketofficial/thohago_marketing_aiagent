@@ -1,4 +1,5 @@
 import type { CampaignPlan } from "../../types";
+import { buildContentTypesForChannels, resolveChannelContentType } from "../../content-type-policy";
 
 export type ChainStepName = "step_a" | "step_b" | "step_c" | "step_d";
 export type ChainStepState = "ok" | "failed" | "blocked_by_dependency";
@@ -621,9 +622,11 @@ const clampPostCount = (value: number): number => Math.max(1, Math.min(120, valu
 
 export const buildLegacyPlanFields = (
   activityFolder: string,
+  campaignName: string | null | undefined,
   chainData: Pick<CampaignPlanChainData, "audience" | "channels" | "calendar">
 ): CampaignPlan => {
-  const fallbackObjective = `Introduce outcomes from "${activityFolder}" and invite audience engagement.`;
+  const planName = asString(campaignName) || activityFolder;
+  const fallbackObjective = `"${planName}"의 성과를 전달하고 참여를 유도합니다.`;
   const objective = chainData.audience?.core_message || fallbackObjective;
 
   const channelCandidates = [
@@ -642,23 +645,47 @@ export const buildLegacyPlanFields = (
     .flatMap((week) => week.items)
     .sort((left, right) => left.day - right.day)
     .slice(0, 12)
-    .map((item, index) => ({
-      day: Math.max(1, item.day || index + 1),
-      channel: (item.channel || safeChannels[0]).toLowerCase(),
-      type: item.format || "text"
-    }));
+    .map((item, index) => {
+      const channel = (item.channel || safeChannels[0]).toLowerCase();
+      return {
+        day: Math.max(1, item.day || index + 1),
+        channel,
+        type: resolveChannelContentType({
+          channel,
+          suggestedType: item.format || null,
+          sequenceIndex: index
+        })
+      };
+    });
 
   const suggestedSchedule =
     scheduleItems.length > 0
       ? scheduleItems
       : [
-          { day: 1, channel: safeChannels[0], type: "text" },
-          { day: 4, channel: safeChannels[Math.min(1, safeChannels.length - 1)] ?? safeChannels[0], type: "text" }
+          {
+            day: 1,
+            channel: safeChannels[0],
+            type: resolveChannelContentType({
+              channel: safeChannels[0],
+              sequenceIndex: 0
+            })
+          },
+          {
+            day: 4,
+            channel: safeChannels[Math.min(1, safeChannels.length - 1)] ?? safeChannels[0],
+            type: resolveChannelContentType({
+              channel: safeChannels[Math.min(1, safeChannels.length - 1)] ?? safeChannels[0],
+              sequenceIndex: 1
+            })
+          }
         ];
 
   const durationDays = clampDurationDays((chainData.calendar?.weeks?.length ?? 1) * 7);
   const postCount = clampPostCount(suggestedSchedule.length);
-  const contentTypes = unique(suggestedSchedule.map((entry) => entry.type.toLowerCase()));
+  const contentTypes = unique([
+    ...suggestedSchedule.map((entry) => entry.type.toLowerCase()),
+    ...buildContentTypesForChannels(safeChannels)
+  ]);
 
   return {
     objective,

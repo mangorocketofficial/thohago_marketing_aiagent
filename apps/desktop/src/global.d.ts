@@ -5,12 +5,14 @@ import type {
   ChatActionCardAction,
   ChatActionCardEventType,
   Content,
+  ContentMetricsInput,
   InterviewAnswers,
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
   OnboardingResultDocument,
   OrgEntitlement,
   OrchestratorSession,
+  PublishedContentWithMetrics,
   WorkflowStatus
 } from "@repo/types";
 
@@ -238,6 +240,32 @@ type ContentDownloadImageResult =
       status?: number;
       details?: Record<string, unknown>;
     };
+
+type MetricsListPublishedWithMetricsPayload = {
+  channel?: "instagram" | "threads" | "naver_blog" | "facebook" | "youtube";
+  limit?: number;
+  cursor?: string | null;
+};
+
+type MetricsListPublishedWithMetricsResult = {
+  ok: boolean;
+  items: PublishedContentWithMetrics[];
+  next_cursor: string | null;
+  message?: string;
+};
+
+type MetricsSubmitBatchPayload = {
+  entries: ContentMetricsInput[];
+  requestIdempotencyKey?: string;
+};
+
+type MetricsSubmitBatchResult = {
+  ok: boolean;
+  saved: number;
+  failed: number;
+  insights_refreshed: boolean;
+  message?: string;
+};
 
 type ChatAction =
   | "get-active-session"
@@ -603,6 +631,12 @@ declare global {
           payload?: ContentLoadActivityThumbnailsPayload
         ) => Promise<ContentLoadActivityThumbnailsResult>;
         downloadImage: (payload: ContentDownloadImagePayload) => Promise<ContentDownloadImageResult>;
+      };
+      metrics: {
+        listPublishedWithMetrics: (
+          payload?: MetricsListPublishedWithMetricsPayload
+        ) => Promise<MetricsListPublishedWithMetricsResult>;
+        submitBatch: (payload: MetricsSubmitBatchPayload) => Promise<MetricsSubmitBatchResult>;
       };
       onboarding: {
         onCrawlProgress: (cb: (payload: {

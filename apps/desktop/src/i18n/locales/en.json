@@ -146,6 +146,8 @@
         "listDescription": "Sorted by newest campaign first.",
         "detailTitle": "Campaign Detail",
         "detailDescription": "Click a campaign to view the full plan details.",
+        "detailContentTitle": "Campaign Detail Content",
+        "detailContentDescription": "Review the selected campaign plan document.",
         "openInScheduler": "Open in Scheduler",
         "loading": "Loading campaign list...",
         "empty": "No campaigns to display.",
@@ -177,14 +179,55 @@
         "loadFailed": "Failed to load brand review."
       },
       "analytics": {
-        "eyebrow": "Analytics",
-        "title": "Analytics",
-        "description": "Placeholder-only analytics surfaces until chart dependency phase is approved.",
-        "cardReach": "Reach Overview",
-        "cardEngagement": "Engagement Overview",
-        "cardConversion": "Conversion Overview",
-        "chartPlaceholderTitle": "Performance Trend Placeholder",
-        "chartPlaceholderDescription": "Charts are intentionally disabled in this phase."
+        "eyebrow": "Performance",
+        "title": "Performance",
+        "description": "Enter performance metrics and use them to improve future AI output.",
+        "tabs": {
+          "insights": "Insights",
+          "input": "Performance Input"
+        },
+        "generatedAtLabel": "Generated at",
+        "metricTotalContents": "Total contents",
+        "metricTrackedChannels": "Tracked channels",
+        "metricTopCtaCount": "Top CTA phrases",
+        "bestPublishTimesTitle": "Best publish times by channel",
+        "topCtaTitle": "Top CTA phrases",
+        "contentPatternTitle": "Content pattern summary",
+        "userPreferenceTitle": "User edit preference summary",
+        "channelRecommendationEmpty": "No insights data available.",
+        "table": {
+          "channel": "Channel",
+          "bestTime": "Best time",
+          "contentCount": "Contents"
+        },
+        "input": {
+          "eyebrow": "Performance Data",
+          "title": "Enter Content Performance",
+          "description": "Submit engagement metrics to improve future AI content planning.",
+          "channelFilterAll": "All",
+          "fields": {
+            "likes": "Likes",
+            "comments": "Comments",
+            "shares": "Shares",
+            "saves": "Saves",
+            "follower_delta": "Follower Change",
+            "views": "Views"
+          },
+          "submitButton": "Save & Update AI",
+          "resetButton": "Reset",
+          "dirtyCount": "{{count}} items entered",
+          "submitting": "Saving...",
+          "successMessage": "{{saved}} saved. AI insights updated.",
+          "partialFailure": "{{saved}} saved, {{failed}} failed.",
+          "empty": "No published content to display.",
+          "loading": "Loading content...",
+          "loadMore": "Load more",
+          "noMetrics": "No performance data yet"
+        },
+        "score": {
+          "label": "Score",
+          "notAvailable": "-"
+        }
       },
       "emailAutomation": {
         "eyebrow": "Email Automation",

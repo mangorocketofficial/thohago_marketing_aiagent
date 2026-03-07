@@ -36,6 +36,9 @@ importers:
       '@repo/rag':
         specifier: workspace:*
         version: link:../../packages/rag
+      '@repo/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@supabase/supabase-js':
         specifier: ^2.57.4
         version: 2.98.0

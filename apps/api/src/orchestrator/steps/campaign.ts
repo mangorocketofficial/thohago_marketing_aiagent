@@ -8,6 +8,7 @@ import type {
   InsertChatMessageInput,
   UpdateLatestWorkflowProjectionStatusInput
 } from "../chat-projection";
+import { resolveChannelContentType } from "../content-type-policy";
 import { buildCampaignPlanSummary } from "../service-helpers";
 import { generateCampaignPlan } from "../ai";
 import type { CampaignPlanChainData } from "../skills/campaign-plan/chain-types";
@@ -278,14 +279,19 @@ export const applyCampaignApprovedStep = async (
 
   const firstSchedule = state.campaign_plan?.suggested_schedule?.[0];
   const firstChannel = deps.normalizeChannel(firstSchedule?.channel);
+  const firstContentType = resolveChannelContentType({
+    channel: firstChannel,
+    suggestedType: firstSchedule?.type ?? null,
+    sequenceIndex: 0
+  });
   const payloadTopic = deps.asString(payload?.topic, "").trim();
-  const topic = payloadTopic || deps.asString(firstSchedule?.type, "").trim() || state.activity_folder;
+  const topic = payloadTopic || deps.asString(state.campaign_plan?.objective, "").trim() || state.activity_folder;
   const reservedSlotId = await reserveNextSlotForGeneration({
     orgId: session.org_id,
     campaignId,
     sessionId: session.id,
     channel: firstChannel,
-    contentType: "text"
+    contentType: firstContentType
   });
 
   const generated = await deps.generateContentDraftWithForbiddenCheck({
@@ -302,7 +308,7 @@ export const applyCampaignApprovedStep = async (
       org_id: session.org_id,
       campaign_id: campaignId,
       channel: firstChannel,
-      content_type: "text",
+      content_type: firstContentType,
       status: "pending_approval",
       body: draft,
       metadata: {

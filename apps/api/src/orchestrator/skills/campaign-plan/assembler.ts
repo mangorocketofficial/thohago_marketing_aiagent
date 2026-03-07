@@ -1,13 +1,12 @@
 import type { CampaignPlan } from "../../types";
 import type {
   AudienceMessagingData,
-  CampaignPlanChainData,
   ChannelStrategyData,
   ContentCalendarData,
   ExecutionData
 } from "./chain-types";
 
-const MISSING_SECTION_TEXT = "This section is unavailable due to step failure or dependency block.";
+const MISSING_SECTION_TEXT = "이 섹션은 단계 실패 또는 의존성 문제로 생성되지 않았습니다.";
 
 const renderList = (items: string[]): string => {
   if (!items.length) {
@@ -28,6 +27,45 @@ const renderTable = (headers: string[], rows: string[][]): string => {
 
 const escapeCell = (value: string): string => value.replace(/\|/g, "\\|").trim();
 
+const translatePhase = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "awareness") return "인지도";
+  if (normalized === "engagement") return "참여";
+  if (normalized === "conversion") return "전환";
+  return value;
+};
+
+const translateEffort = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "high") return "높음";
+  if (normalized === "medium") return "보통";
+  if (normalized === "low") return "낮음";
+  return value;
+};
+
+const translatePriority = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "must") return "필수";
+  if (normalized === "recommended") return "권장";
+  return value;
+};
+
+const translateLikelihood = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "high") return "높음";
+  if (normalized === "medium") return "보통";
+  if (normalized === "low") return "낮음";
+  return value;
+};
+
+const translateFormat = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "text") return "텍스트";
+  if (normalized === "image") return "이미지";
+  if (normalized === "video") return "영상";
+  return value;
+};
+
 const formatAudienceSection = (audience: AudienceMessagingData | null): string => {
   if (!audience) {
     return MISSING_SECTION_TEXT;
@@ -35,24 +73,24 @@ const formatAudienceSection = (audience: AudienceMessagingData | null): string =
 
   const secondary = audience.secondary_audience
     ? [
-        `Secondary: ${audience.secondary_audience.label}`,
+        `보조 타깃: ${audience.secondary_audience.label}`,
         audience.secondary_audience.description,
-        `Pain points: ${audience.secondary_audience.pain_points.join(", ") || "n/a"}`
+        `페인포인트: ${audience.secondary_audience.pain_points.join(", ") || "해당 없음"}`
       ].join("\n")
-    : "Secondary: none";
+    : "보조 타깃: 없음";
 
   return [
-    `Primary: ${audience.primary_audience.label}`,
-    audience.primary_audience.description || "n/a",
-    `Pain points: ${audience.primary_audience.pain_points.join(", ") || "n/a"}`,
-    `Active platforms: ${audience.primary_audience.active_platforms.join(", ") || "n/a"}`,
+    `주요 타깃: ${audience.primary_audience.label}`,
+    audience.primary_audience.description || "해당 없음",
+    `페인포인트: ${audience.primary_audience.pain_points.join(", ") || "해당 없음"}`,
+    `주요 활동 채널: ${audience.primary_audience.active_platforms.join(", ") || "해당 없음"}`,
     "",
     secondary,
     "",
-    "Funnel alignment",
-    `- Awareness: ${audience.funnel_alignment.awareness || "n/a"}`,
-    `- Consideration: ${audience.funnel_alignment.consideration || "n/a"}`,
-    `- Decision: ${audience.funnel_alignment.decision || "n/a"}`
+    "퍼널 정렬",
+    `- 인지도: ${audience.funnel_alignment.awareness || "해당 없음"}`,
+    `- 고려: ${audience.funnel_alignment.consideration || "해당 없음"}`,
+    `- 전환: ${audience.funnel_alignment.decision || "해당 없음"}`
   ].join("\n");
 };
 
@@ -62,9 +100,9 @@ const formatMessagingSection = (audience: AudienceMessagingData | null): string 
   }
 
   const supportRows = audience.support_messages.map((row) => [
-    escapeCell(row.message || "n/a"),
-    escapeCell(row.target_pain_point || "n/a"),
-    escapeCell(row.evidence || "n/a")
+    escapeCell(row.message || "해당 없음"),
+    escapeCell(row.target_pain_point || "해당 없음"),
+    escapeCell(row.evidence || "해당 없음")
   ]);
   const toneRows = Object.entries(audience.channel_tone_guide).map(([channel, tone]) => [
     escapeCell(channel),
@@ -72,13 +110,13 @@ const formatMessagingSection = (audience: AudienceMessagingData | null): string 
   ]);
 
   return [
-    `Core message: ${audience.core_message || "n/a"}`,
+    `핵심 메시지: ${audience.core_message || "해당 없음"}`,
     "",
-    "Support messages",
-    renderTable(["Message", "Target pain point", "Evidence"], supportRows),
+    "보조 메시지",
+    renderTable(["메시지", "대상 페인포인트", "근거"], supportRows),
     "",
-    "Tone guide by channel",
-    renderTable(["Channel", "Tone"], toneRows)
+    "채널별 톤 가이드",
+    renderTable(["채널", "톤"], toneRows)
   ].join("\n");
 };
 
@@ -89,34 +127,34 @@ const formatChannelSection = (channels: ChannelStrategyData | null): string => {
 
   const ownedRows = channels.owned_channels.map((row) => [
     escapeCell(row.channel),
-    escapeCell(row.content_format || "n/a"),
-    escapeCell(row.effort_level),
-    escapeCell(row.key_strategy || "n/a"),
-    escapeCell(row.rationale || "n/a")
+    escapeCell(translateFormat(row.content_format || "해당 없음")),
+    escapeCell(translateEffort(row.effort_level)),
+    escapeCell(row.key_strategy || "해당 없음"),
+    escapeCell(row.rationale || "해당 없음")
   ]);
   const earnedRows = channels.earned_channels.map((row) => [
     escapeCell(row.channel),
-    escapeCell(row.effort_level),
-    escapeCell(row.execution || "n/a"),
-    escapeCell(row.rationale || "n/a")
+    escapeCell(translateEffort(row.effort_level)),
+    escapeCell(row.execution || "해당 없음"),
+    escapeCell(row.rationale || "해당 없음")
   ]);
   const paidRows = (channels.paid_reference ?? []).map((row) => [
     escapeCell(row.channel),
-    escapeCell(row.estimated_budget || "n/a"),
-    escapeCell(row.description || "n/a")
+    escapeCell(row.estimated_budget || "해당 없음"),
+    escapeCell(row.description || "해당 없음")
   ]);
 
   return [
-    "Owned channels",
-    renderTable(["Channel", "Format", "Effort", "Key strategy", "Rationale"], ownedRows),
+    "자사 채널",
+    renderTable(["채널", "형식", "난이도", "핵심 전략", "근거"], ownedRows),
     "",
-    "Earned channels",
-    renderTable(["Channel", "Effort", "Execution", "Rationale"], earnedRows),
+    "획득 채널",
+    renderTable(["채널", "난이도", "실행 방식", "근거"], earnedRows),
     "",
-    "Paid reference",
+    "유료 채널 참고",
     paidRows.length
-      ? renderTable(["Channel", "Estimated budget", "Description"], paidRows)
-      : "No paid reference provided."
+      ? renderTable(["채널", "예상 예산", "설명"], paidRows)
+      : "유료 채널 참고 정보가 없습니다."
   ].join("\n");
 };
 
@@ -130,13 +168,13 @@ const formatCalendarSection = (calendar: ContentCalendarData | null): string => 
       String(item.day),
       escapeCell(item.day_label || `D${item.day}`),
       escapeCell(item.channel),
-      escapeCell(item.format),
-      escapeCell(item.content_title || "n/a"),
-      escapeCell(item.owner_hint || "n/a")
+      escapeCell(translateFormat(item.format)),
+      escapeCell(item.content_title || "해당 없음"),
+      escapeCell(item.owner_hint || "해당 없음")
     ]);
     return [
-      `### Week ${week.week_number}: ${week.theme} (${week.phase})`,
-      renderTable(["Day", "Label", "Channel", "Format", "Title", "Owner"], rows)
+      `### ${week.week_number}주차: ${week.theme} (${translatePhase(week.phase)})`,
+      renderTable(["일차", "라벨", "채널", "형식", "제목", "담당"], rows)
     ].join("\n");
   });
 
@@ -149,10 +187,10 @@ const formatCalendarSection = (calendar: ContentCalendarData | null): string => 
   return [
     ...weekBlocks,
     "",
-    "Dependencies",
+    "의존 관계",
     dependencyRows.length
-      ? renderTable(["Source day", "Target day", "Description"], dependencyRows)
-      : "No dependencies declared."
+      ? renderTable(["선행 일차", "후속 일차", "설명"], dependencyRows)
+      : "의존 관계가 없습니다."
   ].join("\n\n");
 };
 
@@ -163,12 +201,12 @@ const formatAssetsSection = (execution: ExecutionData | null): string => {
   const rows = execution.required_assets.map((asset) => [
     String(asset.id),
     escapeCell(asset.name),
-    escapeCell(asset.asset_type || "n/a"),
-    escapeCell(asset.priority),
-    escapeCell(asset.deadline_hint || "n/a"),
-    escapeCell(asset.description || "n/a")
+    escapeCell(asset.asset_type || "해당 없음"),
+    escapeCell(translatePriority(asset.priority)),
+    escapeCell(asset.deadline_hint || "해당 없음"),
+    escapeCell(asset.description || "해당 없음")
   ]);
-  return renderTable(["ID", "Asset", "Type", "Priority", "Deadline", "Description"], rows);
+  return renderTable(["ID", "에셋", "유형", "우선순위", "마감", "설명"], rows);
 };
 
 const formatKpiSection = (execution: ExecutionData | null): string => {
@@ -178,30 +216,30 @@ const formatKpiSection = (execution: ExecutionData | null): string => {
 
   const primaryRows = execution.kpi_primary.map((row) => [
     escapeCell(row.metric),
-    escapeCell(row.target || "n/a"),
-    escapeCell(row.measurement || "n/a"),
-    escapeCell(row.reporting_cadence || "n/a")
+    escapeCell(row.target || "해당 없음"),
+    escapeCell(row.measurement || "해당 없음"),
+    escapeCell(row.reporting_cadence || "해당 없음")
   ]);
   const secondaryRows = execution.kpi_secondary.map((row) => [
     escapeCell(row.metric),
-    escapeCell(row.target || "n/a"),
-    escapeCell(row.measurement || "n/a"),
-    escapeCell(row.reporting_cadence || "n/a")
+    escapeCell(row.target || "해당 없음"),
+    escapeCell(row.measurement || "해당 없음"),
+    escapeCell(row.reporting_cadence || "해당 없음")
   ]);
 
   return [
-    "Primary KPI",
-    renderTable(["Metric", "Target", "Measurement", "Cadence"], primaryRows),
+    "핵심 KPI",
+    renderTable(["지표", "목표", "측정 방식", "리포트 주기"], primaryRows),
     "",
-    "Secondary KPI",
+    "보조 KPI",
     secondaryRows.length
-      ? renderTable(["Metric", "Target", "Measurement", "Cadence"], secondaryRows)
-      : "No secondary KPI provided.",
+      ? renderTable(["지표", "목표", "측정 방식", "리포트 주기"], secondaryRows)
+      : "보조 KPI가 없습니다.",
     "",
-    "Reporting plan",
-    `- Daily: ${execution.reporting_plan.daily || "n/a"}`,
-    `- Weekly: ${execution.reporting_plan.weekly || "n/a"}`,
-    `- Post-campaign: ${execution.reporting_plan.post_campaign || "n/a"}`
+    "리포팅 계획",
+    `- 일간: ${execution.reporting_plan.daily || "해당 없음"}`,
+    `- 주간: ${execution.reporting_plan.weekly || "해당 없음"}`,
+    `- 캠페인 종료 후: ${execution.reporting_plan.post_campaign || "해당 없음"}`
   ].join("\n");
 };
 
@@ -210,14 +248,14 @@ const formatBudgetSection = (execution: ExecutionData | null): string => {
     return MISSING_SECTION_TEXT;
   }
   if (!execution.budget_breakdown || !execution.budget_breakdown.length) {
-    return "Budget is not allocated in this draft.";
+    return "이 초안에는 예산 배분이 아직 포함되지 않았습니다.";
   }
   return renderTable(
-    ["Item", "Estimated cost", "Note"],
+    ["항목", "예상 비용", "비고"],
     execution.budget_breakdown.map((entry) => [
       escapeCell(entry.item),
-      escapeCell(entry.estimated_cost || "n/a"),
-      escapeCell(entry.note || "n/a")
+      escapeCell(entry.estimated_cost || "해당 없음"),
+      escapeCell(entry.note || "해당 없음")
     ])
   );
 };
@@ -227,11 +265,11 @@ const formatRiskSection = (execution: ExecutionData | null): string => {
     return MISSING_SECTION_TEXT;
   }
   return renderTable(
-    ["Risk", "Likelihood", "Mitigation"],
+    ["리스크", "발생 가능성", "대응 방안"],
     execution.risks.map((entry) => [
       escapeCell(entry.risk),
-      escapeCell(entry.likelihood),
-      escapeCell(entry.mitigation || "n/a")
+      escapeCell(translateLikelihood(entry.likelihood)),
+      escapeCell(entry.mitigation || "해당 없음")
     ])
   );
 };
@@ -240,21 +278,11 @@ const formatNextStepsSection = (execution: ExecutionData | null): string => {
   if (!execution) {
     return MISSING_SECTION_TEXT;
   }
-  const nextStepLines = execution.next_steps.map((entry) => `${entry.action} (${entry.timing || "timing n/a"})`);
+  const nextStepLines = execution.next_steps.map((entry) => `${entry.action} (${entry.timing || "시점 미정"})`);
   const approvals = execution.approval_required.length
     ? execution.approval_required.map((entry) => `- ${entry}`).join("\n")
-    : "- None";
-  return [`Next steps`, renderList(nextStepLines), "", "Approvals required", approvals].join("\n");
-};
-
-const summarizeContextLevel = (chain: CampaignPlanChainData): string => {
-  const stateLine = [
-    `Step A=${chain.step_meta.step_a.state}`,
-    `Step B=${chain.step_meta.step_b.state}`,
-    `Step C=${chain.step_meta.step_c.state}`,
-    `Step D=${chain.step_meta.step_d.state}`
-  ].join(", ");
-  return `Chain status: ${stateLine}`;
+    : "- 없음";
+  return ["다음 단계", renderList(nextStepLines), "", "승인 필요 항목", approvals].join("\n");
 };
 
 export const assembleCampaignPlanDocument = (params: {
@@ -265,52 +293,50 @@ export const assembleCampaignPlanDocument = (params: {
   execution: ExecutionData | null;
   orgName: string;
   generatedAt: string;
-  chain?: CampaignPlanChainData | null;
 }): string => {
-  const title = `${params.orgName} Campaign Plan`;
+  const title = `${params.orgName} 캠페인 계획서`;
   const section1 = [
-    `Campaign objective: ${params.plan.objective || "n/a"}`,
-    `Channels: ${params.plan.channels.join(", ") || "n/a"}`,
-    `Duration: ${params.plan.duration_days} days`,
-    `Post count: ${params.plan.post_count}`,
-    params.audience?.core_message ? `Core message: ${params.audience.core_message}` : null,
-    params.chain ? summarizeContextLevel(params.chain) : null
+    `캠페인 목표: ${params.plan.objective || "해당 없음"}`,
+    `운영 채널: ${params.plan.channels.join(", ") || "해당 없음"}`,
+    `운영 기간: ${params.plan.duration_days}일`,
+    `콘텐츠 수: ${params.plan.post_count}`,
+    params.audience?.core_message ? `핵심 메시지: ${params.audience.core_message}` : null
   ]
     .filter(Boolean)
     .join("\n");
 
   const sections = [
     `# ${title}`,
-    `Generated at: ${params.generatedAt}`,
+    `생성 시각: ${params.generatedAt}`,
     "",
-    "## 1. Campaign Overview",
+    "## 1. 캠페인 개요",
     section1 || MISSING_SECTION_TEXT,
     "",
-    "## 2. Target Audiences",
+    "## 2. 타깃 오디언스",
     formatAudienceSection(params.audience),
     "",
-    "## 3. Core and Support Messaging",
+    "## 3. 핵심/보조 메시지",
     formatMessagingSection(params.audience),
     "",
-    "## 4. Channel Strategy",
+    "## 4. 채널 전략",
     formatChannelSection(params.channels),
     "",
-    "## 5. Content Calendar",
+    "## 5. 콘텐츠 캘린더",
     formatCalendarSection(params.calendar),
     "",
-    "## 6. Required Assets",
+    "## 6. 필요 에셋",
     formatAssetsSection(params.execution),
     "",
-    "## 7. KPI and Reporting",
+    "## 7. KPI 및 리포팅",
     formatKpiSection(params.execution),
     "",
-    "## 8. Budget Breakdown",
+    "## 8. 예산 구성",
     formatBudgetSection(params.execution),
     "",
-    "## 9. Risks and Mitigation",
+    "## 9. 리스크 및 대응",
     formatRiskSection(params.execution),
     "",
-    "## 10. Next Steps and Approvals",
+    "## 10. 다음 단계 및 승인",
     formatNextStepsSection(params.execution)
   ];
 

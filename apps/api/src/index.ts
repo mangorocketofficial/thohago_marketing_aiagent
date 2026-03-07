@@ -6,6 +6,7 @@ import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
 import { imageIndexRouter } from "./routes/image-index";
 import { memoryRouter } from "./routes/memory";
+import { metricsRouter } from "./routes/metrics";
 import { onboardingRouter } from "./routes/onboarding";
 import { ragRouter } from "./routes/rag";
 import { sessionsRouter } from "./routes/sessions";
@@ -25,6 +26,7 @@ app.use(triggerRouter);
 app.use(imageIndexRouter);
 app.use(sessionsRouter);
 app.use(contentsRouter);
+app.use(metricsRouter);
 app.use(onboardingRouter);
 app.use(memoryRouter);
 app.use(ragRouter);
@@ -52,7 +54,8 @@ const requiredTables = [
   "schedule_slots",
   "org_brand_settings",
   "org_subscriptions",
-  "activity_image_indexes"
+  "activity_image_indexes",
+  "content_metrics"
 ] as const;
 
 const verifyRequiredTables = async () => {
@@ -64,7 +67,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305213000_phase_7_2d_activity_image_indexes.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260307120000_phase_8_1_performance_metrics.sql on the connected project.`
       );
       continue;
     }
@@ -85,7 +88,7 @@ const verifyPhase32ProjectionColumns = async () => {
 
   if (/column .+ does not exist/i.test(error.message) || /Could not find the column/i.test(error.message)) {
     console.warn(
-      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260305213000_phase_7_2d_activity_image_indexes.sql on the connected project.`
+      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260307120000_phase_8_1_performance_metrics.sql on the connected project.`
     );
     return;
   }

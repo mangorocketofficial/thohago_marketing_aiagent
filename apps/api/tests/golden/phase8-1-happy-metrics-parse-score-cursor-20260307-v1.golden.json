@@ -1,0 +1,89 @@
+{
+  "scenario": "happy_metrics_parse_score_cursor_roundtrip",
+  "description": "Batch metric entries are parsed with dedupe, canonicalized for instagram scoring, and cursor encoding/decoding stays stable.",
+  "input": {
+    "channel": "instagram",
+    "org_stats": {
+      "channel": "instagram",
+      "sample_count": 20,
+      "references": {
+        "likes": 100,
+        "comments": 20,
+        "shares": 10,
+        "saves": 30,
+        "follower_delta": 10
+      }
+    },
+    "entries": [
+      {
+        "content_id": "content-a",
+        "likes": 100,
+        "comments": 20,
+        "shares": 10,
+        "saves": 25,
+        "follower_delta": 4
+      },
+      {
+        "content_id": "content-b",
+        "likes": "80",
+        "comments": "10",
+        "shares": "6",
+        "saves": "12",
+        "follower_delta": "2"
+      },
+      {
+        "content_id": "content-a",
+        "likes": 130,
+        "comments": 30,
+        "shares": 12,
+        "saves": 40,
+        "follower_delta": 9,
+        "views": 500
+      }
+    ],
+    "cursor": {
+      "created_at": "2026-03-07T09:10:00.000Z",
+      "id": "content-a"
+    }
+  },
+  "output": {
+    "parsed_entries": [
+      {
+        "content_id": "content-a",
+        "likes": 130,
+        "comments": 30,
+        "shares": 12,
+        "saves": 40,
+        "follower_delta": 9,
+        "views": 500
+      },
+      {
+        "content_id": "content-b",
+        "likes": 80,
+        "comments": 10,
+        "shares": 6,
+        "saves": 12,
+        "follower_delta": 2,
+        "views": null
+      }
+    ],
+    "canonical_metrics": {
+      "likes": 130,
+      "comments": 30,
+      "shares": 12,
+      "saves": 40,
+      "follower_delta": 9
+    },
+    "performance_score": 59.18,
+    "encoded_cursor": "eyJjcmVhdGVkX2F0IjoiMjAyNi0wMy0wN1QwOToxMDowMC4wMDBaIiwiaWQiOiJjb250ZW50LWEifQ",
+    "decoded_cursor": {
+      "created_at": "2026-03-07T09:10:00.000Z",
+      "id": "content-a"
+    }
+  },
+  "is_deterministic": "yes",
+  "created_at": "2026-03-07",
+  "approved_by": "Codex",
+  "version": "1"
+}
+

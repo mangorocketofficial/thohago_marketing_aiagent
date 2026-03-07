@@ -503,7 +503,12 @@ const App = () => {
                 formatDateTime={formatDateTime}
               />
             }
-            analyticsPage={<AnalyticsPage />}
+            analyticsPage={
+              <AnalyticsPage
+                supabase={supabase}
+                orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
+              />
+            }
             emailAutomationPage={<EmailAutomationPage />}
             settingsPage={
               <SettingsPage

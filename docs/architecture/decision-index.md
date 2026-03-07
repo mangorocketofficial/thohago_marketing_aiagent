@@ -164,3 +164,14 @@ Unify campaign planning interaction around explicit campaign naming + staged mul
 
 Reason  
 This combination reduced campaign title ambiguity and removed dense card label overflow in the scheduler while preserving quick scanability for channel/status/campaign state.
+
+## D-016
+
+Phase  
+8-1
+
+Decision  
+Use append-only `content_metrics` snapshots with latest-score reads, and run large-batch RAG/insight follow-up asynchronously.
+
+Reason  
+Snapshot history preserves performance trend context while keeping scoring/retrieval contracts stable; async follow-up prevents large metric uploads from blocking request latency.
