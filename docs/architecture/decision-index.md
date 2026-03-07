@@ -153,3 +153,14 @@ Adopt vision-index-first image retrieval (`activity_image_indexes`) with determi
 
 Reason  
 Filename semantics are unreliable on opaque assets; versioned vision metadata plus `is_latest` lookup and fixed ordering keeps selection quality stable and explainable without breaking generation continuity.
+
+## D-015
+
+Phase  
+6-4b
+
+Decision  
+Unify campaign planning interaction around explicit campaign naming + staged multi-select survey actions, and compact scheduler channel identity to logo icons.
+
+Reason  
+This combination reduced campaign title ambiguity and removed dense card label overflow in the scheduler while preserving quick scanability for channel/status/campaign state.

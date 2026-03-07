@@ -1,6 +1,7 @@
 export type PageId =
   | "scheduler"
   | "dashboard"
+  | "campaign-plan"
   | "brand-review"
   | "analytics"
   | "email-automation"
@@ -43,8 +44,9 @@ export const defaultContextPanelModeForPage = (pageId: PageId): ContextPanelMode
   isFullWidthPage(pageId) ? "hidden" : "page-context";
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { id: "scheduler", label: "Scheduler", icon: "SC", section: "primary" },
   { id: "dashboard", label: "Dashboard", icon: "DB", section: "primary" },
+  { id: "scheduler", label: "Scheduler", icon: "SC", section: "primary" },
+  { id: "campaign-plan", label: "Campaign Plan", icon: "CP", section: "primary" },
   { id: "brand-review", label: "Brand Review", icon: "BR", section: "primary" },
   { id: "analytics", label: "Analytics", icon: "AN", section: "primary" },
   { id: "settings", label: "Settings", icon: "ST", section: "secondary" }

@@ -62,6 +62,12 @@ const mergeAnswers = (base: SurveyAnswer[], updates: SurveyAnswer[]): SurveyAnsw
   return [...map.values()];
 };
 
+const resolveCampaignTitleFromSurvey = (answers: SurveyAnswer[], fallback: string): string => {
+  const campaignName = answers.find((answer) => answer.question_id === "campaign_name")?.answer ?? "";
+  const compact = campaignName.replace(/\s+/g, " ").trim();
+  return compact || fallback;
+};
+
 const buildConfirmationPrompt = (): string => "이 계획을 최종 확정하여 캠페인으로 진행하시겠습니까?";
 
 const isMissingRelationError = (error: unknown): boolean =>
@@ -190,12 +196,13 @@ const finalizeCampaignPlan = async (params: {
   if (!context.state.campaign_plan) {
     throw new HttpError(409, "invalid_state", "campaign_plan is required before finalization.");
   }
+  const campaignTitle = resolveCampaignTitleFromSurvey(surveyState.answers, `${context.state.activity_folder} Campaign`);
 
   const { data: campaign, error: campaignError } = await supabaseAdmin
     .from("campaigns")
     .insert({
       org_id: context.session.org_id,
-      title: `${context.state.activity_folder} Campaign`,
+      title: campaignTitle,
       activity_folder: context.state.activity_folder,
       status: "approved",
       channels: context.state.campaign_plan.channels,

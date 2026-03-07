@@ -71,6 +71,18 @@ export const SchedulerPage = () => {
     }
     return remote.scheduleNotice;
   }, [remote.isOffline, remote.scheduleNotice]);
+  const campaignTitleById = useMemo(() => {
+    const mapped: Record<string, string> = {};
+    for (const campaign of remote.campaignSummaries) {
+      const id = campaign.id?.trim();
+      const title = campaign.title?.trim();
+      if (!id || !title) {
+        continue;
+      }
+      mapped[id] = title;
+    }
+    return mapped;
+  }, [remote.campaignSummaries]);
 
   const closeDayDetail = useCallback(() => {
     setDayDetailDate(null);
@@ -197,11 +209,6 @@ export const SchedulerPage = () => {
     [dayDetailDate, remote]
   );
 
-  const handleCreateContent = () => {
-    setChatInput("Create content for today.");
-    window.dispatchEvent(new CustomEvent("ui:open-global-chat"));
-  };
-
   const handleRegenerateFromEditor = useCallback(
     (_contentId: string) => {
       setChatInput("이 블로그 글을 다시 생성해주세요");
@@ -217,7 +224,7 @@ export const SchedulerPage = () => {
           <>
             <div className="ui-scheduler-head">
               <div>
-                <p className="eyebrow">컨텐츠 캔바스</p>
+                <p className="eyebrow">스케줄러</p>
               </div>
 
               <SchedulerFilters
@@ -246,6 +253,7 @@ export const SchedulerPage = () => {
               viewMode={remote.viewMode}
               windowStartDate={remote.activeWindow.startDate}
               isRescheduling={remote.isRescheduling}
+              campaignTitleById={campaignTitleById}
               onSelectContent={(contentId) => {
                 viewModel.setSelectedContentId(contentId);
                 closeDayDetail();
@@ -254,7 +262,6 @@ export const SchedulerPage = () => {
                 void openDayDetail(dateKey);
               }}
               onRescheduleSlot={handleRescheduleSlot}
-              onCreateContent={handleCreateContent}
             />
             {remote.viewMode === "list" && remote.hasMore ? (
               <div className="button-row">
@@ -271,6 +278,7 @@ export const SchedulerPage = () => {
               isLoading={dayDetailLoading}
               hasMore={dayDetailHasMore}
               isOffline={remote.isOffline}
+              campaignTitleById={campaignTitleById}
               onClose={closeDayDetail}
               onLoadMore={() => {
                 void loadMoreDayDetail();

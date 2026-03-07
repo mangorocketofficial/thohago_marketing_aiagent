@@ -161,6 +161,7 @@ const mergeUniqueSessions = (base: OrchestratorSession[], appended: Orchestrator
 const resolveWorkspaceContext = (pageId: PageId, selectedSession: OrchestratorSession | null): WorkspaceContext => {
   if (
     pageId === "dashboard" ||
+    pageId === "campaign-plan" ||
     pageId === "brand-review" ||
     pageId === "analytics" ||
     pageId === "email-automation" ||

@@ -93,6 +93,7 @@
       "scheduler": "Scheduler",
       "workspace": "Workspace",
       "dashboard": "Dashboard",
+      "campaign-plan": "Campaign Plan",
       "brand-review": "Brand Review",
       "analytics": "Performance",
       "email-automation": "Email Automation",
@@ -103,6 +104,7 @@
         "scheduler": "Scheduler Context",
         "workspace": "Workspace Context",
         "dashboard": "Dashboard Context",
+        "campaign-plan": "Campaign Plan Context",
         "brand-review": "Brand Review Context",
         "analytics": "Analytics Context",
         "email-automation": "Email Context",
@@ -135,6 +137,28 @@
         "eyebrow": "Runtime",
         "title": "Dashboard",
         "description": "Live runtime status, pending visibility, and indexed files."
+      },
+      "campaignPlan": {
+        "eyebrow": "Campaign Plan",
+        "title": "Campaign Plan Board",
+        "description": "Select a saved campaign from the list and review its detailed plan document.",
+        "listTitle": "Campaign List",
+        "listDescription": "Sorted by newest campaign first.",
+        "detailTitle": "Campaign Detail",
+        "detailDescription": "Click a campaign to view the full plan details.",
+        "openInScheduler": "Open in Scheduler",
+        "loading": "Loading campaign list...",
+        "empty": "No campaigns to display.",
+        "noDetail": "No campaign detail document is available.",
+        "dataAccessUnavailable": "Campaign data is unavailable in the current runtime session.",
+        "loadFailed": "Failed to load campaign list.",
+        "fields": {
+          "activityFolder": "Activity Folder",
+          "channels": "Channels",
+          "schedule": "Publishing Plan",
+          "createdAt": "Created At",
+          "updatedAt": "Updated At"
+        }
       },
       "settings": {
         "eyebrow": "Settings",

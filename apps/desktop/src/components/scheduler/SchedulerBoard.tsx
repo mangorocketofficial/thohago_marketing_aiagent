@@ -1,5 +1,7 @@
-﻿import type { DragEvent } from "react";
-import { SLOT_STATUS_LABEL, type SlotStatus } from "./status-model";
+import type { DragEvent } from "react";
+import { formatContentTypeLabel, resolveCampaignPresentation, resolveChannelPresentation, resolveSlotBadgePresentation } from "./card-presentation";
+import { ChannelLogoIcon } from "./ChannelLogoIcon";
+import type { SlotStatus } from "./status-model";
 
 type SchedulerBoardItem = {
   slotId: string | null;
@@ -9,6 +11,7 @@ type SchedulerBoardItem = {
   dateKey: string;
   scheduledTime: string | null;
   channel: string;
+  campaignId: string | null;
   contentType: string;
   title: string;
   charCount: number | null;
@@ -20,33 +23,13 @@ type SchedulerBoardProps = {
   viewMode: "week" | "month" | "list";
   windowStartDate: string;
   isRescheduling: boolean;
+  campaignTitleById: Record<string, string>;
   onSelectContent: (contentId: string) => void;
   onOpenDayDetail: (dateKey: string) => void;
   onRescheduleSlot: (params: { slotId: string; targetDate: string }) => void;
-  onCreateContent: () => void;
 };
 
 const MONTH_VISIBLE_LIMIT = 3;
-
-const toChannelLabel = (channel: string): string => {
-  const normalized = channel.trim().toLowerCase();
-  if (normalized === "naver_blog") {
-    return "네이버 블로그";
-  }
-  if (normalized === "instagram") {
-    return "Instagram";
-  }
-  if (normalized === "threads") {
-    return "Threads";
-  }
-  if (normalized === "youtube") {
-    return "YouTube";
-  }
-  if (normalized === "facebook") {
-    return "Facebook";
-  }
-  return normalized || "Unknown";
-};
 
 const formatDateLabel = (dateKey: string): string => {
   const parsed = new Date(`${dateKey}T00:00:00`);
@@ -135,24 +118,25 @@ const renderCard = (params: {
   item: SchedulerBoardItem;
   isSelected: boolean;
   isRescheduling: boolean;
+  campaignTitleById: Record<string, string>;
   onSelectContent: (contentId: string) => void;
 }) => {
-  const { item, isSelected, isRescheduling, onSelectContent } = params;
+  const { item, isSelected, isRescheduling, campaignTitleById, onSelectContent } = params;
   const canOpen = item.hasContent && !!item.contentId;
   const key = item.contentId ?? `slot:${item.slotId ?? `${item.dateKey}:${item.title}`}`;
-  const isNaverDraft = item.channel === "naver_blog" && item.slotStatus === "pending_approval";
-  const badgeClassName = isNaverDraft ? "is-draft" : `is-${item.slotStatus}`;
-  const badgeLabel = isNaverDraft ? "Draft" : SLOT_STATUS_LABEL[item.slotStatus];
-  const metaParts = [item.contentType];
-  if (item.charCount !== null && item.charCount >= 0) {
-    metaParts.unshift(`${item.charCount.toLocaleString()}자`);
-  }
+  const channel = resolveChannelPresentation(item.channel);
+  const campaign = resolveCampaignPresentation(item.campaignId, campaignTitleById);
+  const statusBadge = resolveSlotBadgePresentation({
+    channel: item.channel,
+    slotStatus: item.slotStatus
+  });
+  const contentTypeLabel = formatContentTypeLabel(item.contentType);
 
   return (
     <button
       key={key}
       type="button"
-      className={`ui-scheduler-card ${isSelected ? "is-selected" : ""}`}
+      className={`ui-scheduler-card is-channel-${channel.tone} ${isSelected ? "is-selected" : ""}`}
       draggable={!!item.slotId && !isRescheduling}
       disabled={!canOpen}
       onDragStart={(event) => {
@@ -175,21 +159,26 @@ const renderCard = (params: {
       }}
     >
       <span className="ui-scheduler-card-head">
-        <strong>{toChannelLabel(item.channel)}</strong>
-        <span className={`ui-slot-badge ${badgeClassName}`}>{badgeLabel}</span>
+        <span className={`ui-channel-pill is-${channel.tone}`} aria-label={channel.label} title={channel.label}>
+          <ChannelLogoIcon channel={item.channel} />
+        </span>
+        <span className={`ui-slot-badge ${statusBadge.className}`}>{statusBadge.label}</span>
       </span>
       <span className="ui-scheduler-card-body">{item.title}</span>
-      <span className="ui-scheduler-card-meta">{metaParts.join(" | ")}</span>
+      <span className="ui-scheduler-card-meta">
+        <span className={`ui-scheduler-meta-pill is-${campaign.tone}`}>{campaign.label}</span>
+        <span className="ui-scheduler-meta-pill">{contentTypeLabel}</span>
+        {item.charCount !== null && item.charCount >= 0 ? (
+          <span className="ui-scheduler-meta-pill is-count">{item.charCount.toLocaleString()} chars</span>
+        ) : null}
+      </span>
     </button>
   );
 };
 
-const renderToolbar = (onCreateContent: () => void) => (
+const renderToolbar = () => (
   <div className="ui-scheduler-toolbar">
     <h2>Scheduler Board</h2>
-    <button type="button" className="primary" onClick={onCreateContent}>
-      + Content
-    </button>
   </div>
 );
 
@@ -199,15 +188,15 @@ export const SchedulerBoard = ({
   viewMode,
   windowStartDate,
   isRescheduling,
+  campaignTitleById,
   onSelectContent,
   onOpenDayDetail,
-  onRescheduleSlot,
-  onCreateContent
+  onRescheduleSlot
 }: SchedulerBoardProps) => {
   if (viewMode === "list") {
     return (
       <section className="ui-scheduler-board">
-        {renderToolbar(onCreateContent)}
+        {renderToolbar()}
         <div className="ui-scheduler-list">
           {items.length === 0 ? <p className="empty">No scheduled content yet.</p> : null}
           {items.map((item) =>
@@ -215,6 +204,7 @@ export const SchedulerBoard = ({
               item,
               isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
               isRescheduling,
+              campaignTitleById,
               onSelectContent
             })
           )}
@@ -227,8 +217,7 @@ export const SchedulerBoard = ({
     const cells = monthCells(windowStartDate);
     return (
       <section className="ui-scheduler-board">
-        {renderToolbar(onCreateContent)}
-
+        {renderToolbar()}
         <div className="ui-scheduler-month-grid">
           {cells.map((cell) => {
             const dayItems = items
@@ -252,6 +241,7 @@ export const SchedulerBoard = ({
                       item,
                       isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
                       isRescheduling,
+                      campaignTitleById,
                       onSelectContent
                     })
                   )}
@@ -270,11 +260,9 @@ export const SchedulerBoard = ({
   }
 
   const columns = weekdayColumns(windowStartDate);
-
   return (
     <section className="ui-scheduler-board">
-      {renderToolbar(onCreateContent)}
-
+      {renderToolbar()}
       <div className="ui-scheduler-week-grid">
         {columns.map((dateKey) => {
           const dayItems = items
@@ -296,6 +284,7 @@ export const SchedulerBoard = ({
                     item,
                     isSelected: item.hasContent && !!item.contentId && selectedContentId === item.contentId,
                     isRescheduling,
+                    campaignTitleById,
                     onSelectContent
                   })
                 )}

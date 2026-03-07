@@ -18,6 +18,7 @@ type SurveyPromptMeta = {
   questionId: string;
   choices: string[];
   directInputHint: string | null;
+  selectionMode: "single" | "single_or_multi";
 };
 
 const DEFAULT_CHAT_SKILL_OPTIONS: ChatSkillOption[] = [
@@ -31,6 +32,8 @@ const DEFAULT_CHAT_SKILL_OPTIONS: ChatSkillOption[] = [
 const DIRECT_INPUT_CHOICE = "직접 입력";
 
 const isDirectInputChoice = (value: string): boolean => value.trim() === DIRECT_INPUT_CHOICE;
+const MULTI_SELECTION_MODE = "single_or_multi";
+const buildSurveySelectionKey = (messageId: string, questionId: string): string => `${messageId}:${questionId}`;
 
 export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: WorkspaceChatPanelProps) => {
   const { t } = useTranslation();
@@ -49,6 +52,7 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
   const [isSkillMenuOpen, setIsSkillMenuOpen] = useState(false);
   const [selectedSkillTrigger, setSelectedSkillTrigger] = useState<string | null>(null);
   const [chatSkillOptions, setChatSkillOptions] = useState<ChatSkillOption[]>(DEFAULT_CHAT_SKILL_OPTIONS);
+  const [selectedSurveyChoices, setSelectedSurveyChoices] = useState<Record<string, string[]>>({});
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
 
   const timelineMessages = useMemo(
@@ -115,6 +119,41 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
     };
   }, []);
 
+  useEffect(() => {
+    setSelectedSurveyChoices({});
+  }, [selectedSessionId]);
+
+  const toggleSurveyChoice = (selectionKey: string, choice: string) => {
+    setSelectedSurveyChoices((prev) => {
+      const current = prev[selectionKey] ?? [];
+      if (current.includes(choice)) {
+        const next = current.filter((entry) => entry !== choice);
+        if (next.length === 0) {
+          const { [selectionKey]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return {
+          ...prev,
+          [selectionKey]: next
+        };
+      }
+      return {
+        ...prev,
+        [selectionKey]: [...current, choice]
+      };
+    });
+  };
+
+  const clearSurveyChoices = (selectionKey: string) => {
+    setSelectedSurveyChoices((prev) => {
+      if (!prev[selectionKey]) {
+        return prev;
+      }
+      const { [selectionKey]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
+
   const readWorkflowNotification = (
     message: ChatMessage
   ): { workflowItemId: string; sessionId: string | null } | null => {
@@ -173,11 +212,13 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
       typeof surveyPrompt.direct_input_hint === "string" && surveyPrompt.direct_input_hint.trim()
         ? surveyPrompt.direct_input_hint.trim()
         : null;
+    const selectionMode = surveyPrompt.selection_mode === MULTI_SELECTION_MODE ? MULTI_SELECTION_MODE : "single";
 
     return {
       questionId,
       choices,
-      directInputHint
+      directInputHint,
+      selectionMode
     };
   };
 
@@ -196,6 +237,11 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
           timelineMessages.map((message) => {
             const workflowNotice = readWorkflowNotification(message);
             const surveyPromptMeta = readSurveyPromptMeta(message);
+            const surveySelectionKey = surveyPromptMeta
+              ? buildSurveySelectionKey(message.id, surveyPromptMeta.questionId)
+              : null;
+            const selectedChoices = surveySelectionKey ? selectedSurveyChoices[surveySelectionKey] ?? [] : [];
+            const isMultiSelect = surveyPromptMeta?.selectionMode === MULTI_SELECTION_MODE;
             return (
               <div key={message.id} className={`chat-item chat-${message.role}`}>
                 <p>{message.content || "-"}</p>
@@ -219,13 +265,19 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
                   <div className="chat-survey-options">
                     {surveyPromptMeta.choices.map((choice) => (
                       <button
-                        key={`${message.id}:${choice}`}
+                        key={`${message.id}:${surveyPromptMeta.questionId}:${choice}`}
                         type="button"
-                        className={`chat-survey-option ${isDirectInputChoice(choice) ? "is-direct-input" : ""}`}
+                        className={`chat-survey-option ${isDirectInputChoice(choice) ? "is-direct-input" : ""} ${
+                          selectedChoices.includes(choice) ? "is-selected" : ""
+                        }`}
                         disabled={isSessionMutating || !selectedSessionId}
                         onClick={() => {
                           if (isDirectInputChoice(choice)) {
                             setChatInput("직접입력: ");
+                            return;
+                          }
+                          if (isMultiSelect && surveySelectionKey) {
+                            toggleSurveyChoice(surveySelectionKey, choice);
                             return;
                           }
                           void sendMessage({
@@ -240,6 +292,33 @@ export const WorkspaceChatPanel = ({ formatDateTime: _formatDateTime }: Workspac
                         {choice}
                       </button>
                     ))}
+                    {isMultiSelect && surveySelectionKey ? (
+                      <div className="chat-survey-multi-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={isSessionMutating || !selectedSessionId || selectedChoices.length === 0}
+                          onClick={() => {
+                            if (selectedChoices.length === 0) {
+                              return;
+                            }
+                            clearSurveyChoices(surveySelectionKey);
+                            void sendMessage({
+                              content: selectedChoices.join(", "),
+                              uiContext: {
+                                source: "workspace-chat",
+                                pageId: "scheduler"
+                              }
+                            });
+                          }}
+                        >
+                          다중 선택 전송
+                        </button>
+                        <small className="chat-survey-multi-count">
+                          선택 {selectedChoices.length}개
+                        </small>
+                      </div>
+                    ) : null}
                     {surveyPromptMeta.directInputHint ? (
                       <small className="chat-survey-direct-hint">{surveyPromptMeta.directInputHint}</small>
                     ) : null}

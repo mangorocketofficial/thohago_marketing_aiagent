@@ -34,6 +34,7 @@ type SchedulerItem = {
   dateKey: string;
   scheduledTime: string | null;
   channel: string;
+  campaignId: string | null;
   contentType: string;
   title: string;
   charCount: number | null;
@@ -129,8 +130,9 @@ export const useSchedulerViewModel = ({
         continue;
       }
       const channel = (content?.channel ?? raw.channel ?? "instagram").toLowerCase();
+      const campaignId = raw.campaign_id ?? content?.campaign_id ?? null;
       const contentType = content?.content_type ?? raw.content_type ?? "text";
-      if (!matchesStatus(slotStatus) || !matchesChannel(channel) || !matchesCampaign(raw.campaign_id ?? content?.campaign_id ?? null)) {
+      if (!matchesStatus(slotStatus) || !matchesChannel(channel) || !matchesCampaign(campaignId)) {
         continue;
       }
       const title = summarizeTitle(
@@ -150,6 +152,7 @@ export const useSchedulerViewModel = ({
         dateKey,
         scheduledTime: raw.scheduled_time || content?.scheduled_at || null,
         channel,
+        campaignId,
         contentType,
         title,
         charCount
@@ -183,6 +186,7 @@ export const useSchedulerViewModel = ({
         dateKey,
         scheduledTime: content.scheduled_at || null,
         channel: content.channel,
+        campaignId: content.campaign_id,
         contentType: content.content_type,
         title,
         charCount: typeof content.body === "string" ? content.body.length : null

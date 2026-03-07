@@ -15,8 +15,8 @@ const DIRECT_INPUT_HINT = '직접 입력이 필요하면 "직접입력: 내용" 
 const DIRECT_INPUT_PREFIXES = ["직접입력", "직접 입력", "direct input", "custom", "other"];
 const DIRECT_INPUT_CHOICE = "직접 입력";
 
-const REQUIRED_QUESTION_IDS: SurveyQuestionId[] = ["campaign_goal", "channels"];
-const QUESTION_ORDER: SurveyQuestionId[] = ["campaign_goal", "channels", "duration", "content_source"];
+const REQUIRED_QUESTION_IDS: SurveyQuestionId[] = ["campaign_name", "campaign_goal", "channels"];
+const QUESTION_ORDER: SurveyQuestionId[] = ["campaign_name", "campaign_goal", "channels", "duration", "content_source"];
 
 const normalizeText = (value: string): string =>
   value
@@ -40,10 +40,10 @@ const detectGoal = (text: string): string | null => {
     return null;
   }
   if (/(awareness|인지|브랜딩|노출|알리)/.test(text)) {
-    return "Awareness";
+    return "인지도";
   }
   if (/(engagement|참여|반응|댓글|공유)/.test(text)) {
-    return "Engagement";
+    return "참여";
   }
   if (/(conversion|전환|후원|모금|가입|신청|donation|signup)/.test(text)) {
     return "Conversion";
@@ -274,12 +274,25 @@ const parseContentSourceByChoice = (question: SurveyQuestion, normalizedMessage:
   return detectContentSource(normalizedMessage);
 };
 
+const parseCampaignName = (rawMessage: string): string | null => {
+  const compact = rawMessage.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return null;
+  }
+  return compact.length > 120 ? compact.slice(0, 120).trim() : compact;
+};
+
 export const SURVEY_QUESTIONS: SurveyQuestion[] = [
+  {
+    id: "campaign_name",
+    priority: "required",
+    label: "캠페인 이름은 무엇으로 할까요?"
+  },
   {
     id: "campaign_goal",
     priority: "required",
     label: "이번 캠페인의 핵심 목표는 무엇인가요?",
-    choices: ["Awareness", "Engagement", "Conversion", DIRECT_INPUT_CHOICE]
+    choices: ["인지도", "참여", "Conversion", DIRECT_INPUT_CHOICE]
   },
   {
     id: "channels",
@@ -304,14 +317,16 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
 ];
 
 const QUESTION_MAP: Record<SurveyQuestionId, SurveyQuestion> = {
-  campaign_goal: SURVEY_QUESTIONS[0],
-  channels: SURVEY_QUESTIONS[1],
-  duration: SURVEY_QUESTIONS[2],
-  content_source: SURVEY_QUESTIONS[3]
+  campaign_name: SURVEY_QUESTIONS[0],
+  campaign_goal: SURVEY_QUESTIONS[1],
+  channels: SURVEY_QUESTIONS[2],
+  duration: SURVEY_QUESTIONS[3],
+  content_source: SURVEY_QUESTIONS[4]
 };
 
 const parseAnswerByQuestion = (
   questionId: SurveyQuestionId,
+  rawMessage: string,
   normalizedMessage: string
 ): string | null => {
   const question = QUESTION_MAP[questionId];
@@ -319,6 +334,8 @@ const parseAnswerByQuestion = (
     return null;
   }
   switch (questionId) {
+    case "campaign_name":
+      return parseCampaignName(rawMessage);
     case "campaign_goal":
       return parseGoalByChoice(question, normalizedMessage);
     case "channels":
@@ -410,7 +427,10 @@ const formatQuestionChoices = (question: SurveyQuestion): string => {
   if (!Array.isArray(question.choices) || question.choices.length === 0) {
     return "자유롭게 답변해 주세요.";
   }
-  return question.choices.map((choice, index) => `${index + 1}. ${choice}`).join("\n");
+  const circledNumbers = ["➀", "➁", "➂", "➃", "➄", "➅", "➆", "➇", "➈", "➉"];
+  return question.choices
+    .map((choice, index) => `${circledNumbers[index] ?? `[${index + 1}]`} ${choice}`)
+    .join("\n");
 };
 
 const buildAnsweredSummaryLines = (answers: SurveyAnswer[]): string[] => {
@@ -438,17 +458,29 @@ export const buildSurveyPrompt = (params: {
 
   const suggestion = params.autoFillData[nextQuestionId];
   const summaryLines = buildAnsweredSummaryLines(params.answeredSoFar);
-  const summaryBlock = summaryLines.length > 0 ? `현재까지 정리:\n${summaryLines.join("\n")}\n\n` : "";
-  const recommendationBlock = suggestion ? `기존 설정 기준 추천값: ${suggestion}\n` : "";
+  const summaryBlock = summaryLines.length > 0 ? summaryLines.join("\n") : "- 아직 답변 없음";
+  const hasChoices = Array.isArray(question.choices) && question.choices.length > 0;
 
   return [
-    `${summaryBlock}${question.label}`,
-    recommendationBlock,
-    "아래 선택지에서 번호나 값을 그대로 답변해 주세요.",
-    formatQuestionChoices(question),
-    DIRECT_INPUT_HINT
+    "[캠페인 계획 설문]",
+    "",
+    "진행 현황",
+    summaryBlock,
+    "",
+    "질문",
+    question.label,
+    suggestion ? "" : null,
+    suggestion ? "추천값" : null,
+    suggestion ? `- ${suggestion}` : null,
+    "",
+    hasChoices ? "선택지" : "답변 형식",
+    hasChoices ? formatQuestionChoices(question) : "- 텍스트로 캠페인 이름을 입력해 주세요.",
+    "",
+    "안내",
+    hasChoices ? "- 버튼으로 선택하거나 번호/값 입력으로 답변할 수 있습니다." : "- 채팅창에 이름을 입력하면 다음 질문으로 진행됩니다.",
+    hasChoices ? `- ${DIRECT_INPUT_HINT}` : null
   ]
-    .filter((line) => !!line)
+    .filter((line): line is string => !!line)
     .join("\n");
 };
 
@@ -511,7 +543,8 @@ export const parseSurveyAnswer = async (params: {
   const directInput = extractDirectInput(params.userMessage);
   const normalizedDirect = normalizeText(directInput.value);
   const normalizedRaw = normalizeText(params.userMessage);
-  const parsedValue = parseAnswerByQuestion(nextQuestionId, normalizedDirect || normalizedRaw);
+  const rawCandidate = directInput.isDirectInput ? directInput.value : params.userMessage;
+  const parsedValue = parseAnswerByQuestion(nextQuestionId, rawCandidate, normalizedDirect || normalizedRaw);
 
   if (parsedValue) {
     return [
@@ -622,6 +655,7 @@ export const isSurveyComplete = (params: {
 
 export const buildChainInputFromSurvey = (answers: SurveyAnswer[]): string => {
   const answerMap = toAnswerMap(answers);
+  const campaignName = answerMap.campaign_name?.answer ?? "미정";
   const goal = answerMap.campaign_goal?.answer ?? "미정";
   const channels = answerMap.channels?.answer ?? "미정";
   const duration = answerMap.duration?.answer ?? "미정";
@@ -629,6 +663,7 @@ export const buildChainInputFromSurvey = (answers: SurveyAnswer[]): string => {
 
   return [
     "사용자 캠페인 브리프",
+    `- 캠페인 이름: ${campaignName}`,
     `- 목표: ${goal}`,
     `- 채널: ${channels}`,
     `- 기간: ${duration}`,

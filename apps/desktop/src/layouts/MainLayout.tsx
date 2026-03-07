@@ -7,6 +7,7 @@ import type { PageId } from "../types/navigation";
 type MainLayoutProps = {
   schedulerPage: ReactNode;
   dashboardPage: ReactNode;
+  campaignPlanPage: ReactNode;
   brandReviewPage: ReactNode;
   analyticsPage: ReactNode;
   emailAutomationPage: ReactNode;
@@ -19,6 +20,8 @@ const resolvePageNode = (props: MainLayoutProps, pageId: PageId): ReactNode => {
       return props.schedulerPage;
     case "dashboard":
       return props.dashboardPage;
+    case "campaign-plan":
+      return props.campaignPlanPage;
     case "brand-review":
       return props.brandReviewPage;
     case "analytics":

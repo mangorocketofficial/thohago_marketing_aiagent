@@ -23,6 +23,7 @@ type SurveyPromptMeta = {
   questionId: string;
   choices: string[];
   directInputHint: string | null;
+  selectionMode: "single" | "single_or_multi";
 };
 
 const DEFAULT_CHAT_SKILL_OPTIONS: ChatSkillOption[] = [
@@ -48,6 +49,8 @@ const clampWidth = (value: number): number =>
   Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, Math.round(value)));
 
 const isDirectInputChoice = (value: string): boolean => value.trim() === DIRECT_INPUT_CHOICE;
+const MULTI_SELECTION_MODE = "single_or_multi";
+const buildSurveySelectionKey = (messageId: string, questionId: string): string => `${messageId}:${questionId}`;
 
 const readSurveyPromptMeta = (message: ChatMessage): SurveyPromptMeta | null => {
   if (message.role !== "assistant") {
@@ -86,11 +89,13 @@ const readSurveyPromptMeta = (message: ChatMessage): SurveyPromptMeta | null => 
     typeof surveyPrompt.direct_input_hint === "string" && surveyPrompt.direct_input_hint.trim()
       ? surveyPrompt.direct_input_hint.trim()
       : null;
+  const selectionMode = surveyPrompt.selection_mode === MULTI_SELECTION_MODE ? MULTI_SELECTION_MODE : "single";
 
   return {
     questionId,
     choices,
-    directInputHint
+    directInputHint,
+    selectionMode
   };
 };
 
@@ -128,6 +133,7 @@ export const GlobalChatPanel = () => {
   const [isSkillMenuOpen, setIsSkillMenuOpen] = useState(false);
   const [selectedSkillTrigger, setSelectedSkillTrigger] = useState<string | null>(null);
   const [chatSkillOptions, setChatSkillOptions] = useState<ChatSkillOption[]>(DEFAULT_CHAT_SKILL_OPTIONS);
+  const [selectedSurveyChoices, setSelectedSurveyChoices] = useState<Record<string, string[]>>({});
   const [pendingBlogTopic, setPendingBlogTopic] = useState("");
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -264,6 +270,41 @@ export const GlobalChatPanel = () => {
     setPendingBlogTopic("");
   }, [latestBlogGeneration]);
 
+  useEffect(() => {
+    setSelectedSurveyChoices({});
+  }, [selectedSessionId]);
+
+  const toggleSurveyChoice = (selectionKey: string, choice: string) => {
+    setSelectedSurveyChoices((prev) => {
+      const current = prev[selectionKey] ?? [];
+      if (current.includes(choice)) {
+        const next = current.filter((entry) => entry !== choice);
+        if (next.length === 0) {
+          const { [selectionKey]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return {
+          ...prev,
+          [selectionKey]: next
+        };
+      }
+      return {
+        ...prev,
+        [selectionKey]: [...current, choice]
+      };
+    });
+  };
+
+  const clearSurveyChoices = (selectionKey: string) => {
+    setSelectedSurveyChoices((prev) => {
+      if (!prev[selectionKey]) {
+        return prev;
+      }
+      const { [selectionKey]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
+
   if (isCollapsed) {
     return (
       <aside className="ui-global-chat-collapsed">
@@ -381,6 +422,11 @@ export const GlobalChatPanel = () => {
             const surveyPromptMeta = readSurveyPromptMeta(message);
             const blogGenerationMeta = readBlogGenerationCardMeta(message);
             const instagramGenerationMeta = readInstagramGenerationCardMeta(message);
+            const surveySelectionKey = surveyPromptMeta
+              ? buildSurveySelectionKey(message.id, surveyPromptMeta.questionId)
+              : null;
+            const selectedChoices = surveySelectionKey ? selectedSurveyChoices[surveySelectionKey] ?? [] : [];
+            const isMultiSelect = surveyPromptMeta?.selectionMode === MULTI_SELECTION_MODE;
             return (
               <div key={message.id} className={`chat-item chat-${message.role}`}>
                 {blogGenerationMeta ? (
@@ -414,11 +460,17 @@ export const GlobalChatPanel = () => {
                       <button
                         key={`${message.id}:${surveyPromptMeta.questionId}:${choice}`}
                         type="button"
-                        className={`chat-survey-option ${isDirectInputChoice(choice) ? "is-direct-input" : ""}`}
+                        className={`chat-survey-option ${isDirectInputChoice(choice) ? "is-direct-input" : ""} ${
+                          selectedChoices.includes(choice) ? "is-selected" : ""
+                        }`}
                         disabled={isUiBusy || !selectedSessionId}
                         onClick={() => {
                           if (isDirectInputChoice(choice)) {
                             setChatInput("직접입력: ");
+                            return;
+                          }
+                          if (isMultiSelect && surveySelectionKey) {
+                            toggleSurveyChoice(surveySelectionKey, choice);
                             return;
                           }
                           void sendMessage({
@@ -433,6 +485,33 @@ export const GlobalChatPanel = () => {
                         {choice}
                       </button>
                     ))}
+                    {isMultiSelect && surveySelectionKey ? (
+                      <div className="chat-survey-multi-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={isUiBusy || !selectedSessionId || selectedChoices.length === 0}
+                          onClick={() => {
+                            if (selectedChoices.length === 0) {
+                              return;
+                            }
+                            clearSurveyChoices(surveySelectionKey);
+                            void sendMessage({
+                              content: selectedChoices.join(", "),
+                              uiContext: {
+                                source: "global-chat-panel",
+                                pageId: activePage
+                              }
+                            });
+                          }}
+                        >
+                          다중 선택 전송
+                        </button>
+                        <small className="chat-survey-multi-count">
+                          선택 {selectedChoices.length}개
+                        </small>
+                      </div>
+                    ) : null}
                     {surveyPromptMeta.directInputHint ? (
                       <small className="chat-survey-direct-hint">{surveyPromptMeta.directInputHint}</small>
                     ) : null}

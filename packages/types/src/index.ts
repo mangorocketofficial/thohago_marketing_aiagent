@@ -428,7 +428,7 @@ export type OrchestratorStep =
   | "publish"
   | "done";
 
-export type SurveyQuestionId = "campaign_goal" | "channels" | "duration" | "content_source";
+export type SurveyQuestionId = "campaign_name" | "campaign_goal" | "channels" | "duration" | "content_source";
 
 export type SurveyAnswer = {
   question_id: SurveyQuestionId;

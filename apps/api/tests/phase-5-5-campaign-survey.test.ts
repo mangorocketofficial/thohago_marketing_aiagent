@@ -12,8 +12,17 @@ import {
 import type { SurveyAnswer } from "../src/orchestrator/types";
 
 describe("Phase 5-5 campaign survey", () => {
-  it("includes direct input choice in every survey question", () => {
+  it("starts survey with campaign_name question", () => {
+    assert.equal(SURVEY_QUESTIONS[0]?.id, "campaign_name");
+    assert.equal(SURVEY_QUESTIONS[0]?.priority, "required");
+  });
+
+  it("keeps campaign_name as free-text and direct-input option for choice questions", () => {
     for (const question of SURVEY_QUESTIONS) {
+      if (question.id === "campaign_name") {
+        assert.ok(!question.choices || question.choices.length === 0);
+        continue;
+      }
       assert.ok(Array.isArray(question.choices) && question.choices.includes("직접 입력"));
     }
   });
@@ -23,15 +32,21 @@ describe("Phase 5-5 campaign survey", () => {
     const goal = answers.find((entry) => entry.question_id === "campaign_goal");
     const channels = answers.find((entry) => entry.question_id === "channels");
 
-    assert.equal(goal?.answer, "Awareness");
+    assert.equal(goal?.answer, "인지도");
     assert.match(channels?.answer ?? "", /Instagram/i);
   });
 
   it("allows early exit when required answers are filled and only optional remain", async () => {
     const answers: SurveyAnswer[] = [
       {
+        question_id: "campaign_name",
+        answer: "봄맞이 후원 캠페인",
+        source: "user",
+        answered_at: "2026-03-04T10:00:00.000Z"
+      },
+      {
         question_id: "campaign_goal",
-        answer: "Awareness",
+        answer: "인지도",
         source: "user",
         answered_at: "2026-03-04T10:00:00.000Z"
       },
@@ -53,6 +68,18 @@ describe("Phase 5-5 campaign survey", () => {
       }),
       true
     );
+  });
+
+  it("parses campaign_name as free text", async () => {
+    const parsed = await parseSurveyAnswer({
+      userMessage: "2026 봄맞이 따뜻한 동행 캠페인",
+      pendingQuestions: ["campaign_name"],
+      autoFillData: {}
+    });
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.question_id, "campaign_name");
+    assert.equal(parsed[0]?.answer, "2026 봄맞이 따뜻한 동행 캠페인");
   });
 
   it("accepts auto-fill suggestion on affirmative answer", async () => {
@@ -79,7 +106,7 @@ describe("Phase 5-5 campaign survey", () => {
 
     assert.equal(parsed.length, 1);
     assert.equal(parsed[0]?.question_id, "campaign_goal");
-    assert.equal(parsed[0]?.answer, "Engagement");
+    assert.equal(parsed[0]?.answer, "참여");
   });
 
   it("keeps pending when direct-input option is selected without payload", async () => {
@@ -98,7 +125,7 @@ describe("Phase 5-5 campaign survey", () => {
       pendingQuestions: ["campaign_goal"],
       autoFillData: {},
       classifyDirectInput: async () => ({
-        answer: "Awareness",
+        answer: "인지도",
         confidence: 0.91,
         reason: "mapped_to_goal"
       })
@@ -106,7 +133,7 @@ describe("Phase 5-5 campaign survey", () => {
 
     assert.equal(parsed.length, 1);
     assert.equal(parsed[0]?.question_id, "campaign_goal");
-    assert.equal(parsed[0]?.answer, "Awareness");
+    assert.equal(parsed[0]?.answer, "인지도");
   });
 
   it("accepts explicit content source yes answer", async () => {
@@ -127,6 +154,12 @@ describe("Phase 5-5 campaign survey", () => {
   it("builds chain input from survey answers", () => {
     const chainInput = buildChainInputFromSurvey([
       {
+        question_id: "campaign_name",
+        answer: "봄맞이 신규 후원 캠페인",
+        source: "user",
+        answered_at: "2026-03-04T10:00:00.000Z"
+      },
+      {
         question_id: "campaign_goal",
         answer: "Conversion",
         source: "user",
@@ -140,6 +173,7 @@ describe("Phase 5-5 campaign survey", () => {
       }
     ]);
 
+    assert.match(chainInput, /캠페인 이름: 봄맞이 신규 후원 캠페인/);
     assert.match(chainInput, /목표: Conversion/);
     assert.match(chainInput, /채널: Instagram, Naver Blog/);
   });

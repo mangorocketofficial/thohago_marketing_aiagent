@@ -9,6 +9,7 @@ import { useRuntime } from "./hooks/useRuntime";
 import { MainLayout } from "./layouts/MainLayout";
 import { AnalyticsPage } from "./pages/Analytics";
 import { BrandReviewPage } from "./pages/BrandReview";
+import { CampaignPlanPage } from "./pages/CampaignPlan";
 import { DashboardPage } from "./pages/Dashboard";
 import { EmailAutomationPage } from "./pages/EmailAutomation";
 import { SettingsPage } from "./pages/Settings";
@@ -484,6 +485,14 @@ const App = () => {
                 onOpenWatchFolder={() => void openWatchFolder()}
                 onRefreshActiveSession={() => void refreshActiveSession()}
                 onSignOut={() => void signOutAuth()}
+              />
+            }
+            campaignPlanPage={
+              <CampaignPlanPage
+                supabase={supabase}
+                orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
+                dataAccessMessage={chatConfig?.message ?? ""}
+                formatDateTime={formatDateTime}
               />
             }
             brandReviewPage={

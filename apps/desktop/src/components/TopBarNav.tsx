@@ -2,7 +2,14 @@ import { useTranslation } from "react-i18next";
 import { useNavigation } from "../context/NavigationContext";
 import type { PageId } from "../types/navigation";
 
-const TOP_BAR_ITEMS: readonly PageId[] = ["scheduler", "dashboard", "brand-review", "analytics", "settings"] as const;
+const TOP_BAR_ITEMS: readonly PageId[] = [
+  "dashboard",
+  "scheduler",
+  "campaign-plan",
+  "analytics",
+  "brand-review",
+  "settings"
+] as const;
 
 export const TopBarNav = () => {
   const { t } = useTranslation();

@@ -555,31 +555,65 @@ button.primary {
 .chat-survey-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .chat-survey-option {
   margin: 0;
-  border: 1px solid #bfd2f2;
-  border-radius: 999px;
-  background: #f1f6ff;
-  color: #1f3d72;
+  border: 1px solid #9db8e4;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #eaf2ff 100%);
+  color: #18345f;
   font-size: 12px;
-  line-height: 1;
-  padding: 7px 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 8px 12px;
+  min-height: 34px;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.chat-survey-option:hover:not(:disabled) {
+  border-color: #5f86c8;
+  box-shadow: 0 2px 10px rgba(47, 94, 168, 0.18);
+  transform: translateY(-1px);
+}
+
+.chat-survey-option.is-selected {
+  border-color: #2f5ea8;
+  background: linear-gradient(180deg, #dceafe 0%, #cfe0fb 100%);
+  color: #12376b;
+  box-shadow: 0 0 0 2px rgba(47, 94, 168, 0.18);
 }
 
 .chat-survey-option.is-direct-input {
-  border-color: #d1d5db;
-  background: #f8fafc;
+  border-color: #c7d1e1;
+  background: linear-gradient(180deg, #ffffff 0%, #f2f5fa 100%);
   color: #374151;
 }
 
 .chat-survey-direct-hint {
   width: 100%;
   font-size: 11px;
-  color: #64748b;
+  color: #52627a;
+}
+
+.chat-survey-multi-actions {
+  width: 100%;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-survey-multi-actions .primary {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.chat-survey-multi-count {
+  font-size: 11px;
+  color: #46556c;
 }
 
 .queue-item {
@@ -1190,6 +1224,7 @@ th {
   display: grid;
   gap: 8px;
   min-height: 280px;
+  min-width: 0;
 }
 
 .ui-scheduler-day-column-month {
@@ -1211,6 +1246,7 @@ th {
   display: grid;
   gap: 8px;
   align-content: start;
+  min-width: 0;
 }
 
 .ui-scheduler-more-link {
@@ -1224,14 +1260,48 @@ th {
 }
 
 .ui-scheduler-card {
+  --ui-channel-accent: #8b9cb8;
+  --ui-channel-soft: #f7fafc;
   width: 100%;
+  max-width: 100%;
   text-align: left;
   border: 1px solid #d6e1ef;
+  border-left: 4px solid var(--ui-channel-accent);
   border-radius: 10px;
-  background: #fff;
-  padding: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--ui-channel-soft) 100%);
+  padding: 8px 8px 8px 10px;
   display: grid;
-  gap: 5px;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.ui-scheduler-card:disabled {
+  cursor: default;
+}
+
+.ui-scheduler-card.is-channel-instagram {
+  --ui-channel-accent: #e11d48;
+  --ui-channel-soft: #fff3f6;
+}
+
+.ui-scheduler-card.is-channel-threads {
+  --ui-channel-accent: #5b6475;
+  --ui-channel-soft: #f5f7fa;
+}
+
+.ui-scheduler-card.is-channel-naver-blog {
+  --ui-channel-accent: #16a34a;
+  --ui-channel-soft: #f3fcf5;
+}
+
+.ui-scheduler-card.is-channel-youtube {
+  --ui-channel-accent: #dc2626;
+  --ui-channel-soft: #fff4f4;
+}
+
+.ui-scheduler-card.is-channel-facebook {
+  --ui-channel-accent: #2563eb;
+  --ui-channel-soft: #f3f7ff;
 }
 
 .ui-scheduler-card.is-selected {
@@ -1244,21 +1314,117 @@ th {
   justify-content: space-between;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
-.ui-scheduler-card-head strong {
-  font-size: 12px;
-  text-transform: capitalize;
+.ui-channel-pill {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #d0d8e6;
+  background: #f6f8fc;
+  color: #1e293b;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.ui-channel-pill svg {
+  display: block;
+}
+
+.ui-channel-logo-fallback {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.ui-channel-pill.is-instagram {
+  border-color: #f5bdd0;
+  background: #ffeef4;
+  color: #9f1239;
+}
+
+.ui-channel-pill.is-threads {
+  border-color: #d8dbe2;
+  background: #f4f5f8;
+  color: #374151;
+}
+
+.ui-channel-pill.is-naver-blog {
+  border-color: #b4e5c5;
+  background: #ebfbf0;
+  color: #166534;
+}
+
+.ui-channel-pill.is-youtube {
+  border-color: #f4c2c2;
+  background: #fff0f0;
+  color: #b91c1c;
+}
+
+.ui-channel-pill.is-facebook {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ui-channel-pill.is-generic {
+  border-color: #d6deea;
+  background: #f8fafc;
+  color: #334155;
 }
 
 .ui-scheduler-card-body {
   font-size: 13px;
   color: #0f172a;
   line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ui-scheduler-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-scheduler-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #d6deea;
+  background: #f8fafc;
+  color: #475569;
   font-size: 11px;
+  padding: 2px 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ui-scheduler-meta-pill.is-campaign {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 100%;
+}
+
+.ui-scheduler-meta-pill.is-adhoc {
+  border-color: #dce2ea;
+  background: #f7f9fc;
+  color: #475569;
+}
+
+.ui-scheduler-meta-pill.is-count {
+  border-color: #d6deea;
+  background: #ffffff;
   color: #64748b;
 }
 

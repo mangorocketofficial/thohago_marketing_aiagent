@@ -92,8 +92,9 @@
     "nav": {
       "scheduler": "스케줄러",
       "workspace": "워크스페이스",
-      "dashboard": "대시보드",
-      "brand-review": "브랜드 리뷰",
+      "dashboard": "대쉬보드",
+      "campaign-plan": "캠페인계획",
+      "brand-review": "브랜드리뷰",
       "analytics": "성과분석",
       "email-automation": "이메일 자동화",
       "settings": "설정"
@@ -103,6 +104,7 @@
         "scheduler": "스케줄러 컨텍스트",
         "workspace": "워크스페이스 컨텍스트",
         "dashboard": "대시보드 컨텍스트",
+        "campaign-plan": "캠페인계획 컨텍스트",
         "brand-review": "브랜드 리뷰 컨텍스트",
         "analytics": "분석 컨텍스트",
         "email-automation": "이메일 컨텍스트",
@@ -135,6 +137,28 @@
         "eyebrow": "런타임",
         "title": "대시보드",
         "description": "실시간 런타임 상태, 승인 대기 현황, 인덱싱 파일을 확인합니다."
+      },
+      "campaignPlan": {
+        "eyebrow": "캠페인계획",
+        "title": "캠페인계획 보드",
+        "description": "작성된 캠페인을 목록에서 선택하고 상세 계획 문서를 확인합니다.",
+        "listTitle": "캠페인 목록",
+        "listDescription": "최근 생성된 캠페인부터 정렬됩니다.",
+        "detailTitle": "캠페인 상세",
+        "detailDescription": "캠페인을 클릭하면 상세 계획 문서를 확인할 수 있습니다.",
+        "openInScheduler": "스케줄러에서 열기",
+        "loading": "캠페인 목록을 불러오는 중입니다...",
+        "empty": "표시할 캠페인이 없습니다.",
+        "noDetail": "캠페인 상세 문서가 없습니다.",
+        "dataAccessUnavailable": "현재 런타임 세션에서 캠페인 데이터에 접근할 수 없습니다.",
+        "loadFailed": "캠페인 목록을 불러오지 못했습니다.",
+        "fields": {
+          "activityFolder": "활동 폴더",
+          "channels": "채널",
+          "schedule": "게시 계획",
+          "createdAt": "생성 시각",
+          "updatedAt": "수정 시각"
+        }
       },
       "settings": {
         "eyebrow": "설정",

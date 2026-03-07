@@ -79,7 +79,7 @@ export type ForbiddenCheckMeta = {
   regenerated: boolean;
 };
 
-export type SurveyQuestionId = "campaign_goal" | "channels" | "duration" | "content_source";
+export type SurveyQuestionId = "campaign_name" | "campaign_goal" | "channels" | "duration" | "content_source";
 export type SurveyQuestionPriority = "required" | "optional";
 
 export type SurveyQuestion = {
