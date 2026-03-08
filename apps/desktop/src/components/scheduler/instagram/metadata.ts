@@ -42,6 +42,19 @@ export const fileNameFromPath = (value: string): string => {
   return parts[parts.length - 1] ?? normalized;
 };
 
+const asStringMap = (value: unknown): Record<string, string> => {
+  const row = asRecord(value);
+  const next: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(row)) {
+    const normalizedKey = key.trim();
+    if (!normalizedKey || typeof entry !== "string") {
+      continue;
+    }
+    next[normalizedKey] = entry;
+  }
+  return next;
+};
+
 const splitCaptionAndHashtagsFromBody = (body: string): { caption: string; hashtags: string[] } => {
   const trimmed = body.trim();
   if (!trimmed) {
@@ -101,16 +114,63 @@ export const composeCaptionBody = (caption: string, hashtags: string[]): string 
   return `${cleanCaption}\n\n${hashtagLine}`;
 };
 
-export type InstagramEditorSeed = {
-  templateId: string;
+export type InstagramEditorSlide = {
+  slideIndex: number;
+  role: string;
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
   imagePaths: string[];
   imageNames: string[];
+};
+
+export type InstagramEditorSeed = {
+  templateId: string;
+  slides: InstagramEditorSlide[];
   activityFolder: string;
   caption: string;
   hashtags: string[];
   localSaveSuggestion: LocalSaveSuggestion;
+  isCarousel: boolean;
+};
+
+const buildEditorSlides = (metadata: Record<string, unknown>): InstagramEditorSlide[] => {
+  const rawSlides = Array.isArray(metadata.slides) ? metadata.slides : [];
+  const slides = rawSlides
+    .map((entry, index) => {
+      const row = asRecord(entry);
+      const imageFileIds = asStringArray(row.image_file_ids ?? row.imageFileIds);
+      const imagePaths = asStringArray(row.image_paths ?? row.imagePaths);
+      return {
+        slideIndex: typeof row.slide_index === "number" && Number.isFinite(row.slide_index) ? Math.max(0, Math.floor(row.slide_index)) : index,
+        role: asString(row.role, "custom").trim() || "custom",
+        overlayTexts: asStringMap(row.overlay_texts ?? row.overlayTexts),
+        imageFileIds,
+        imagePaths,
+        imageNames: imagePaths.length > 0 ? imagePaths.map((entry) => fileNameFromPath(entry)).filter(Boolean) : imageFileIds.map((entry) => entry.slice(0, 8))
+      } satisfies InstagramEditorSlide;
+    })
+    .sort((left, right) => left.slideIndex - right.slideIndex)
+    .map((slide, index) => ({
+      ...slide,
+      slideIndex: index
+    }));
+
+  if (slides.length > 0) {
+    return slides;
+  }
+
+  const imageFileIds = asStringArray(metadata.image_file_ids);
+  const imagePaths = asStringArray(metadata.image_paths);
+  return [
+    {
+      slideIndex: 0,
+      role: "custom",
+      overlayTexts: asStringMap(metadata.overlay_texts),
+      imageFileIds,
+      imagePaths,
+      imageNames: imagePaths.length > 0 ? imagePaths.map((entry) => fileNameFromPath(entry)).filter(Boolean) : imageFileIds.map((entry) => entry.slice(0, 8))
+    }
+  ];
 };
 
 /**
@@ -119,21 +179,7 @@ export type InstagramEditorSeed = {
 export const buildInstagramEditorSeed = (content: Content): InstagramEditorSeed => {
   const metadata = asRecord(content.metadata);
   const templateId = asString(metadata.template_id, "koica_cover_01").trim() || "koica_cover_01";
-  const overlayTextsRaw = asRecord(metadata.overlay_texts);
-  const overlayTexts: Record<string, string> = {};
-  for (const [key, value] of Object.entries(overlayTextsRaw)) {
-    const id = key.trim();
-    if (!id || typeof value !== "string") {
-      continue;
-    }
-    overlayTexts[id] = value;
-  }
-  const imageFileIds = asStringArray(metadata.image_file_ids);
-  const imagePaths = asStringArray(metadata.image_paths);
-  const imageNames =
-    imagePaths.length > 0
-      ? imagePaths.map((entry) => fileNameFromPath(entry)).filter((entry) => !!entry)
-      : imageFileIds.map((entry) => entry.slice(0, 8));
+  const slides = buildEditorSlides(metadata);
   const activityFolder = asString(metadata.activity_folder, "").trim();
 
   const bodyText = typeof content.body === "string" ? content.body : "";
@@ -154,13 +200,11 @@ export const buildInstagramEditorSeed = (content: Content): InstagramEditorSeed 
 
   return {
     templateId,
-    overlayTexts,
-    imageFileIds,
-    imagePaths,
-    imageNames,
+    slides,
     activityFolder,
     caption,
     hashtags,
-    localSaveSuggestion
+    localSaveSuggestion,
+    isCarousel: slides.length > 1
   };
 };

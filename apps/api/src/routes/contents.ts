@@ -5,23 +5,40 @@ import { HttpError, toHttpError } from "../lib/errors";
 import { asRecord, asString, parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import {
+  deriveLegacyInstagramFields,
+  normalizeInstagramSlideRole,
+  normalizeInstagramSlides,
+  serializeInstagramSlides
+} from "../orchestrator/instagram-slides-shared";
+import {
   DEFAULT_TEMPLATE_ID,
   loadInstagramContentRow,
+  MAX_INSTAGRAM_IMAGE_FILE_IDS,
   normalizeOverlayTextMap,
   normalizeTemplateId,
   resolveEffectiveImageSelection,
+  resolveImagePathsByFileIds,
   validateImageSlotCount
 } from "../orchestrator/instagram-editor-shared";
+import type { InstagramSlide } from "../orchestrator/skills/instagram-generation/types";
 
 export type ContentBodyPatchInput = {
   body: string;
   expectedUpdatedAt: string | null;
 };
 
+type ContentInstagramSlidePatchInput = {
+  slideIndex: number;
+  role: string;
+  overlayTexts: Record<string, string>;
+  imageFileIds: string[] | undefined;
+};
+
 export type ContentInstagramMetadataPatchInput = {
   templateId: string | null;
   overlayTexts: Record<string, string> | undefined;
   imageFileIds: string[] | undefined;
+  slides: ContentInstagramSlidePatchInput[] | undefined;
   expectedUpdatedAt: string | null;
 };
 
@@ -55,7 +72,11 @@ const parseOptionalIsoDateTime = (value: unknown, field: string): string | null 
   return normalized;
 };
 
-const parseOptionalStringArray = (value: unknown, field: string, maxItems = 8): string[] | undefined => {
+const parseOptionalStringArray = (
+  value: unknown,
+  field: string,
+  maxItems = MAX_INSTAGRAM_IMAGE_FILE_IDS
+): string[] | undefined => {
   if (value === undefined) {
     return undefined;
   }
@@ -99,6 +120,44 @@ const parseOptionalStringMap = (value: unknown, field: string): Record<string, s
   return map;
 };
 
+const parseOptionalInstagramSlides = (value: unknown, field: string): ContentInstagramSlidePatchInput[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "invalid_payload", `${field} must be an array.`);
+  }
+  if (value.length === 0) {
+    throw new HttpError(400, "invalid_payload", `${field} must contain at least one slide.`);
+  }
+  if (value.length > 10) {
+    throw new HttpError(400, "invalid_payload", `${field} must contain at most 10 slides.`);
+  }
+
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new HttpError(400, "invalid_payload", `${field}[${index}] must be an object.`);
+    }
+    const row = entry as Record<string, unknown>;
+    const slideIndexRaw = row.slide_index ?? row.slideIndex ?? index;
+    const slideIndex =
+      typeof slideIndexRaw === "number" && Number.isFinite(slideIndexRaw) && slideIndexRaw >= 0
+        ? Math.floor(slideIndexRaw)
+        : index;
+
+    return {
+      slideIndex,
+      role: typeof row.role === "string" ? row.role.trim() : "",
+      overlayTexts: parseOptionalStringMap(row.overlay_texts ?? row.overlayTexts, `${field}[${index}].overlay_texts`) ?? {},
+      imageFileIds: parseOptionalStringArray(
+        row.image_file_ids ?? row.imageFileIds,
+        `${field}[${index}].image_file_ids`,
+        MAX_INSTAGRAM_IMAGE_FILE_IDS
+      )
+    };
+  });
+};
+
 export const parseContentBodyPatchInput = (body: unknown): ContentBodyPatchInput => {
   if (!body || typeof body !== "object") {
     throw new HttpError(400, "invalid_payload", "Request body is required.");
@@ -129,6 +188,7 @@ export const parseInstagramMetadataPatchInput = (body: unknown): ContentInstagra
     templateId: parseOptionalString(row.template_id),
     overlayTexts: parseOptionalStringMap(row.overlay_texts, "overlay_texts"),
     imageFileIds: parseOptionalStringArray(row.image_file_ids, "image_file_ids"),
+    slides: parseOptionalInstagramSlides(row.slides, "slides"),
     expectedUpdatedAt: parseOptionalIsoDateTime(row.expected_updated_at, "expected_updated_at")
   };
 };
@@ -234,6 +294,79 @@ const updateContentBody = async (params: {
   throw new HttpError(409, "version_conflict", "Failed to update content body due to concurrent update.");
 };
 
+const buildNextInstagramSlides = async (params: {
+  orgId: string;
+  metadata: Record<string, unknown>;
+  input: ContentInstagramMetadataPatchInput;
+  templateId: string;
+}): Promise<InstagramSlide[]> => {
+  const template = getTemplate(params.templateId);
+  if (!template) {
+    throw new HttpError(400, "invalid_payload", `Unsupported template_id: ${params.templateId}`);
+  }
+
+  const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
+  const currentSlides = normalizeInstagramSlides(params.metadata);
+
+  if (Array.isArray(params.input.slides) && params.input.slides.length > 0) {
+    const currentByIndex = new Map(currentSlides.map((slide) => [slide.slideIndex, slide]));
+    const orderedSlides = [...params.input.slides].sort((left, right) => left.slideIndex - right.slideIndex);
+    const nextSlides: InstagramSlide[] = [];
+
+    for (const [index, slideInput] of orderedSlides.entries()) {
+      const currentSlide = currentByIndex.get(slideInput.slideIndex) ?? currentSlides[index];
+      const imageSelection = Array.isArray(slideInput.imageFileIds)
+        ? await resolveImagePathsByFileIds({
+            orgId: params.orgId,
+            imageFileIds: slideInput.imageFileIds
+          })
+        : {
+            fileIds: currentSlide?.imageFileIds ?? [],
+            paths: currentSlide?.imagePaths ?? []
+          };
+
+      validateImageSlotCount({
+        requiredImageCount,
+        providedImageCount: imageSelection.paths.length,
+        maxImageCount: template.photos.length
+      });
+
+      nextSlides.push({
+        slideIndex: index,
+        role: normalizeInstagramSlideRole(slideInput.role, currentSlide?.role ?? "custom"),
+        overlayTexts: normalizeOverlayTextMap(slideInput.overlayTexts, currentSlide?.overlayTexts ?? {}),
+        imageFileIds: imageSelection.fileIds,
+        imagePaths: imageSelection.paths
+      });
+    }
+
+    return nextSlides;
+  }
+
+  const selection = await resolveEffectiveImageSelection({
+    orgId: params.orgId,
+    requestImageFileIds: params.input.imageFileIds,
+    metadata: params.metadata
+  });
+  validateImageSlotCount({
+    requiredImageCount,
+    providedImageCount: selection.paths.length,
+    maxImageCount: template.photos.length
+  });
+
+  const currentOverlayTexts = normalizeOverlayTextMap(params.metadata.overlay_texts, currentSlides[0]?.overlayTexts ?? {});
+  const overlayTexts = normalizeOverlayTextMap(params.input.overlayTexts, currentOverlayTexts);
+  return [
+    {
+      slideIndex: 0,
+      role: currentSlides[0]?.role ?? "custom",
+      overlayTexts,
+      imageFileIds: selection.fileIds,
+      imagePaths: selection.paths
+    }
+  ];
+};
+
 const updateInstagramMetadata = async (params: {
   orgId: string;
   contentId: string;
@@ -254,27 +387,22 @@ const updateInstagramMetadata = async (params: {
     throw new HttpError(400, "invalid_payload", `Unsupported template_id: ${templateId}`);
   }
 
-  const selection = await resolveEffectiveImageSelection({
+  const nextSlides = await buildNextInstagramSlides({
     orgId: params.orgId,
-    requestImageFileIds: params.input.imageFileIds,
-    metadata: content.metadata
+    metadata: content.metadata,
+    input: params.input,
+    templateId
   });
-  const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
-  validateImageSlotCount({
-    requiredImageCount,
-    providedImageCount: selection.paths.length,
-    maxImageCount: template.photos.length
-  });
-
-  const currentOverlayTexts = normalizeOverlayTextMap(content.metadata.overlay_texts, {});
-  const overlayTexts = normalizeOverlayTextMap(params.input.overlayTexts, currentOverlayTexts);
+  const legacy = deriveLegacyInstagramFields(nextSlides);
 
   const nextMetadata: Record<string, unknown> = {
     ...content.metadata,
     template_id: templateId,
-    overlay_texts: overlayTexts,
-    image_file_ids: selection.fileIds,
-    image_paths: selection.paths,
+    overlay_texts: legacy.overlayTexts,
+    image_file_ids: legacy.imageFileIds,
+    image_paths: legacy.imagePaths,
+    is_carousel: legacy.isCarousel,
+    slides: serializeInstagramSlides(nextSlides),
     composed_locally: true,
     local_cache_path: `.instagram-cache/${params.contentId}/composed.png`
   };

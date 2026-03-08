@@ -4,6 +4,7 @@ import { asRecord, asString, type InstagramImageMode } from "./types";
 import { rankAndSelectCandidates, type ImageSelectionCandidate } from "./image-selection-ranking";
 
 const IMAGE_INDEX_TABLE = "activity_image_indexes";
+const MAX_REQUIRED_IMAGE_COUNT = 40;
 
 export type ActivityImageEntry = {
   fileId: string;
@@ -199,7 +200,7 @@ export const selectImagesForInstagram = async (params: {
     };
   }
 
-  const requiredCount = Math.max(1, Math.min(4, params.requiredCount));
+  const requiredCount = Math.max(1, Math.min(MAX_REQUIRED_IMAGE_COUNT, params.requiredCount));
   const activityImages = await listActivityImages({
     orgId: params.orgId,
     activityFolder: params.activityFolder,

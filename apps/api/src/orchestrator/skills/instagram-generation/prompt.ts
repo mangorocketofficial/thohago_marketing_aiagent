@@ -1,5 +1,6 @@
-﻿import { truncateToTokenBudget } from "@repo/rag";
-import type { InstagramDraft } from "./types";
+import { truncateToTokenBudget } from "@repo/rag";
+import { INSTAGRAM_SLIDE_ROLES, normalizeInstagramSlideRole } from "../../instagram-slides-shared";
+import type { InstagramDraft, InstagramSlideDraft } from "./types";
 
 export type InstagramCaptionContext = {
   brandProfile: string;
@@ -13,6 +14,7 @@ export type InstagramCaptionContext = {
 };
 
 const REFERENCE_BUDGET = 2200;
+const MAX_CAROUSEL_SLIDES = 10;
 
 /**
  * Build generation prompt for instagram caption + overlay text JSON.
@@ -32,6 +34,7 @@ export const buildInstagramPrompt = (context: InstagramCaptionContext): string =
 
   const overlayGuide = buildOverlayGuide(context.textSlotIds);
   const overlayExample = buildOverlayExample(context.textSlotIds);
+  const slideRoleGuide = INSTAGRAM_SLIDE_ROLES.join(", ");
 
   return [
     "[ROLE]",
@@ -61,11 +64,31 @@ export const buildInstagramPrompt = (context: InstagramCaptionContext): string =
     "- Keys must exactly match the slot IDs below.",
     overlayGuide,
     "",
+    "[CAROUSEL_PLANNING]",
+    "- If the topic benefits from a carousel, return a slides array with 2-10 slides.",
+    "- Use carousel for educational, step-by-step, before/after, storytelling, or list-style topics.",
+    `- Each slide must include role and overlay_texts. Allowed roles: ${slideRoleGuide}.`,
+    "- If a single image is sufficient, omit the slides key.",
+    "",
     "[REFERENCE_MATERIALS]",
     references || "(No additional references)",
     "",
     "[OUTPUT_FORMAT]",
-    "Return strict JSON only:",
+    "Return strict JSON only.",
+    "Carousel example:",
+    "{",
+    '  "caption": "...",',
+    '  "hashtags": ["#tag1", "#tag2"],',
+    '  "slides": [',
+    "    {",
+    '      "role": "cover",',
+    `      "overlay_texts": ${overlayExample}`,
+    "    }",
+    "  ],",
+    '  "suggested_image_keywords": ["keyword1", "keyword2"]',
+    "}",
+    "",
+    "Single-image example:",
     "{",
     '  "caption": "...",',
     '  "hashtags": ["#tag1", "#tag2"],',
@@ -83,14 +106,15 @@ export const parseInstagramDraft = (text: string): InstagramDraft => {
   const caption = readString(parsed?.caption).trim();
   const hashtags = normalizeHashtags(parsed?.hashtags, caption);
   const suggestedImageKeywords = normalizeStringArray(parsed?.suggested_image_keywords).slice(0, 6);
-
-  const overlayTexts = normalizeOverlayTexts(parsed);
+  const slides = normalizeSlides(parsed);
+  const overlayTexts = slides?.[0]?.overlayTexts ?? normalizeOverlayTexts(parsed);
 
   return {
     caption: caption || text.trim(),
     hashtags,
     overlayTexts,
-    suggestedImageKeywords
+    suggestedImageKeywords,
+    ...(slides ? { slides } : {})
   };
 };
 
@@ -108,6 +132,38 @@ const buildOverlayExample = (slotIds: string[]): string => {
 
   const entries = slotIds.map((slotId) => `"${escapeJson(slotId)}": "..."`);
   return `{ ${entries.join(", ")} }`;
+};
+
+const normalizeSlides = (parsed: Record<string, unknown> | null): InstagramSlideDraft[] | undefined => {
+  if (!Array.isArray(parsed?.slides)) {
+    return undefined;
+  }
+
+  const slides = parsed.slides
+    .map((entry) => normalizeSlideDraft(entry))
+    .filter((entry): entry is InstagramSlideDraft => !!entry)
+    .slice(0, MAX_CAROUSEL_SLIDES);
+
+  return slides.length > 0 ? slides : undefined;
+};
+
+const normalizeSlideDraft = (value: unknown): InstagramSlideDraft | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  const overlayTexts = normalizeStringMap(row.overlay_texts);
+  if (Object.keys(overlayTexts).length === 0) {
+    return null;
+  }
+
+  const suggestedImageKeywords = normalizeStringArray(row.suggested_image_keywords).slice(0, 6);
+  return {
+    role: normalizeInstagramSlideRole(row.role),
+    overlayTexts,
+    ...(suggestedImageKeywords.length > 0 ? { suggestedImageKeywords } : {})
+  };
 };
 
 const normalizeOverlayTexts = (parsed: Record<string, unknown> | null): Record<string, string> => {
@@ -195,4 +251,4 @@ const clampText = (value: string, maxLength: number): string => {
   return value.length <= maxLength ? value : value.slice(0, maxLength).trimEnd();
 };
 
-const escapeJson = (value: string): string => value.replace(/\\/g, "\\\\").replace(/\"/g, '\\\"');
+const escapeJson = (value: string): string => value.replace(/\\/g, "\\\\").replace(/\"/g, '\\"');

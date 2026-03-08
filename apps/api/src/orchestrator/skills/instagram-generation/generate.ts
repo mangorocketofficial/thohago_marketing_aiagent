@@ -13,7 +13,12 @@ import {
 } from "./persistence";
 import { buildInstagramPrompt, parseInstagramDraft } from "./prompt";
 import { resolveInstagramGenerationSlot } from "./slot";
-import type { InstagramGenerationResult, InstagramImageMode } from "./types";
+import type {
+  InstagramGenerationResult,
+  InstagramImageMode,
+  InstagramSlide,
+  InstagramSlideDraft
+} from "./types";
 
 const DEFAULT_TEMPLATE_ID: TemplateId = "koica_cover_01";
 
@@ -73,8 +78,10 @@ export const generateAndPersistInstagram = async (params: {
 
     const parsedDraft = parseInstagramDraft(llm.text);
     const template = getTemplate(templateId);
-    const requiredCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
-    const overlayTexts = buildOverlayTextMap(templateId, parsedDraft.overlayTexts);
+    const perSlideImageCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
+    const slideDrafts = normalizeSlideDrafts(parsedDraft.slides, parsedDraft.overlayTexts);
+    const slideCount = slideDrafts.length;
+    const requiredCount = slideCount * perSlideImageCount;
 
     const selected = await selectImagesForInstagram({
       orgId: params.orgId,
@@ -85,6 +92,16 @@ export const generateAndPersistInstagram = async (params: {
       manualSelections: params.manualImageSelections
     });
 
+    const slides = buildSlides({
+      templateId,
+      slideDrafts,
+      selectedImages: selected.selectedImages.map((entry) => ({
+        fileId: entry.fileId,
+        relativePath: entry.relativePath
+      })),
+      perSlideImageCount
+    });
+    const firstSlide = slides[0] ?? emptySlide();
     const outputFormat: "png" | "jpg" = "png";
     const campaignTitle = await loadCampaignTitle({
       orgId: params.orgId,
@@ -100,10 +117,12 @@ export const generateAndPersistInstagram = async (params: {
       topic: effectiveTopic,
       caption,
       hashtags: parsedDraft.hashtags,
-      overlayTexts,
+      overlayTexts: firstSlide.overlayTexts,
       templateId,
-      selectedImageFileIds: selected.selectedImages.map((entry) => entry.fileId),
-      selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      selectedImageFileIds: firstSlide.imageFileIds,
+      selectedImagePaths: firstSlide.imagePaths,
+      slides,
+      isCarousel: slides.length > 1,
       imageSelectionSource: selected.selectionSource,
       imageSelectionReason: selected.telemetryReason,
       model: llm.model,
@@ -135,9 +154,11 @@ export const generateAndPersistInstagram = async (params: {
       caption,
       model: llm.model,
       templateId,
-      overlayTexts,
-      imageFileIds: selected.selectedImages.map((entry) => entry.fileId),
-      selectedImagePaths: selected.selectedImages.map((entry) => entry.relativePath),
+      overlayTexts: firstSlide.overlayTexts,
+      imageFileIds: firstSlide.imageFileIds,
+      selectedImagePaths: firstSlide.imagePaths,
+      slides,
+      isCarousel: slides.length > 1,
       imageSelectionSource: selected.selectionSource,
       imageSelectionReason: selected.telemetryReason,
       requiresLocalCompose: true,
@@ -157,6 +178,51 @@ export const generateAndPersistInstagram = async (params: {
 
 const normalizeTemplateId = (templateId: string | null): TemplateId =>
   templateId && getTemplate(templateId) ? templateId : DEFAULT_TEMPLATE_ID;
+
+const normalizeSlideDrafts = (
+  slides: InstagramSlideDraft[] | undefined,
+  fallbackOverlayTexts: Record<string, string>
+): InstagramSlideDraft[] => {
+  if (Array.isArray(slides) && slides.length > 0) {
+    return slides;
+  }
+  return [
+    {
+      role: "custom",
+      overlayTexts: fallbackOverlayTexts
+    }
+  ];
+};
+
+const buildSlides = (params: {
+  templateId: TemplateId;
+  slideDrafts: InstagramSlideDraft[];
+  selectedImages: Array<{ fileId: string; relativePath: string }>;
+  perSlideImageCount: number;
+}): InstagramSlide[] =>
+  params.slideDrafts.map((slideDraft, slideIndex) => {
+    const startIndex = slideIndex * params.perSlideImageCount;
+    const imageChunk =
+      params.perSlideImageCount > 0
+        ? params.selectedImages.slice(startIndex, startIndex + params.perSlideImageCount)
+        : [];
+
+    return {
+      slideIndex,
+      role: slideDraft.role,
+      overlayTexts: buildOverlayTextMap(params.templateId, slideDraft.overlayTexts),
+      imageFileIds: imageChunk.map((entry) => entry.fileId),
+      imagePaths: imageChunk.map((entry) => entry.relativePath)
+    };
+  });
+
+const emptySlide = (): InstagramSlide => ({
+  slideIndex: 0,
+  role: "custom",
+  overlayTexts: {},
+  imageFileIds: [],
+  imagePaths: []
+});
 
 const buildOverlayTextMap = (templateId: TemplateId, overlayTexts: Record<string, string>): Record<string, string> => {
   const template = getTemplate(templateId);

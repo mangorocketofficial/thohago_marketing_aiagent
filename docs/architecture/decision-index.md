@@ -175,3 +175,14 @@ Use append-only `content_metrics` snapshots with latest-score reads, and run lar
 
 Reason  
 Snapshot history preserves performance trend context while keeping scoring/retrieval contracts stable; async follow-up prevents large metric uploads from blocking request latency.
+
+## D-017
+
+Phase
+7-4
+
+Decision
+Make `slides[]` the canonical Instagram carousel model and derive legacy top-level overlay/image fields from slide 0.
+
+Reason
+This keeps carousel storage aligned with template-level multi-image slot semantics while preserving compatibility with existing single-image readers, cache paths, and lightweight preview surfaces.

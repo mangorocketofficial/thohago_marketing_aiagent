@@ -1,5 +1,6 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityImageThumbnail } from "./ImagePickerModal";
+import type { InstagramEditorSlide } from "./metadata";
 
 type TemplatePhotoSlot = {
   id: string;
@@ -90,25 +91,42 @@ const asTemplateDefinitionArray = (value: unknown): TemplateDefinition[] => {
 type UseInstagramPreviewRuntimeParams = {
   contentId: string;
   templateId: string;
-  overlayTexts: Record<string, string>;
-  imageFileIds: string[] | null;
-  imagePaths: string[] | null;
+  slides: InstagramEditorSlide[];
   activityFolder: string;
   expectedUpdatedAt: string;
   onMetadataUpdatedAt: (nextUpdatedAt: string) => void;
   onNotice: (message: string) => void;
 };
 
-type RecomposePatch = Partial<{
-  templateId: string;
-  overlayTexts: Record<string, string>;
-  imageFileIds: string[] | null;
-  imagePaths: string[] | null;
-}>;
-
-type RecomposeOptions = {
+type RecomposeSlideInput = {
+  slides: InstagramEditorSlide[];
+  slideIndex: number;
+  templateId?: string;
   persistMetadata?: boolean;
 };
+
+type RecomposeAllInput = {
+  slides: InstagramEditorSlide[];
+  templateId?: string;
+  persistMetadata?: boolean;
+};
+
+const toMetadataSlidesPayload = (slides: InstagramEditorSlide[]) =>
+  slides.map((slide, index) => ({
+    slideIndex: index,
+    role: slide.role,
+    overlayTexts: slide.overlayTexts,
+    imageFileIds: slide.imageFileIds,
+    imagePaths: slide.imagePaths
+  }));
+
+const toComposeSlidesPayload = (slides: InstagramEditorSlide[]) =>
+  slides.map((slide, index) => ({
+    slideIndex: index,
+    overlayTexts: slide.overlayTexts,
+    imagePaths: slide.imagePaths,
+    imageFileIds: slide.imageFileIds
+  }));
 
 /**
  * Owns template loading, local compose execution, image picker thumbnails, and metadata persistence.
@@ -116,16 +134,14 @@ type RecomposeOptions = {
 export const useInstagramPreviewRuntime = ({
   contentId,
   templateId,
-  overlayTexts,
-  imageFileIds,
-  imagePaths,
+  slides,
   activityFolder,
   expectedUpdatedAt,
   onMetadataUpdatedAt,
   onNotice
 }: UseInstagramPreviewRuntimeParams) => {
   const [templates, setTemplates] = useState<TemplateDefinition[]>([]);
-  const [imageUrl, setImageUrl] = useState("");
+  const [slideImageUrls, setSlideImageUrls] = useState<string[]>([]);
   const [isRecomposing, setIsRecomposing] = useState(false);
   const [pickerImages, setPickerImages] = useState<ActivityImageThumbnail[]>([]);
   const [isPickerLoading, setIsPickerLoading] = useState(false);
@@ -160,17 +176,35 @@ export const useInstagramPreviewRuntime = ({
   const requiredImageCount = currentTemplate.photos.filter((slot) => !slot.optional).length;
   const maxImageCount = currentTemplate.photos.length;
 
-  const requestRecompose = useCallback(
-    async (patch?: RecomposePatch, options?: RecomposeOptions) => {
-      const nextTemplateId = patch?.templateId ?? templateId;
-      const nextOverlayTexts =
-        patch && Object.prototype.hasOwnProperty.call(patch, "overlayTexts")
-          ? patch.overlayTexts ?? {}
-          : overlayTexts;
-      const nextImageFileIds =
-        patch && Object.prototype.hasOwnProperty.call(patch, "imageFileIds") ? patch.imageFileIds : imageFileIds;
-      const nextImagePaths =
-        patch && Object.prototype.hasOwnProperty.call(patch, "imagePaths") ? patch.imagePaths : imagePaths;
+  const persistMetadata = useCallback(
+    async (nextTemplateId: string, nextSlides: InstagramEditorSlide[]) => {
+      const saveResult = await window.desktopRuntime.content.saveInstagramMetadata({
+        contentId,
+        templateId: nextTemplateId,
+        slides: toMetadataSlidesPayload(nextSlides),
+        expectedUpdatedAt: metadataUpdatedAtRef.current || undefined
+      });
+
+      if (!saveResult.ok) {
+        onNotice(saveResult.message || "Failed to save instagram metadata.");
+        return false;
+      }
+
+      if (saveResult.updatedAt) {
+        metadataUpdatedAtRef.current = saveResult.updatedAt;
+        onMetadataUpdatedAt(saveResult.updatedAt);
+      }
+      return true;
+    },
+    [contentId, onMetadataUpdatedAt, onNotice]
+  );
+
+  const requestRecomposeSlide = useCallback(
+    async ({ slides: nextSlides, slideIndex, templateId: nextTemplateId = templateId, persistMetadata: shouldPersist = true }: RecomposeSlideInput) => {
+      const targetSlide = nextSlides[slideIndex];
+      if (!targetSlide) {
+        return;
+      }
 
       const seq = requestSeqRef.current + 1;
       requestSeqRef.current = seq;
@@ -178,11 +212,12 @@ export const useInstagramPreviewRuntime = ({
 
       const composeResult = await window.desktopRuntime.content.composeLocal({
         contentId,
+        slideIndex,
         templateId: nextTemplateId,
-        overlayTexts: nextOverlayTexts,
-        ...(Array.isArray(nextImagePaths) ? { imagePaths: nextImagePaths } : {}),
-        ...(Array.isArray(nextImageFileIds) ? { imageFileIds: nextImageFileIds } : {}),
-        clientRequestId: `${contentId}:${seq}`
+        overlayTexts: targetSlide.overlayTexts,
+        ...(targetSlide.imagePaths.length > 0 ? { imagePaths: targetSlide.imagePaths } : {}),
+        ...(targetSlide.imageFileIds.length > 0 ? { imageFileIds: targetSlide.imageFileIds } : {}),
+        clientRequestId: `${contentId}:slide:${slideIndex}:${seq}`
       });
 
       if (seq !== requestSeqRef.current) {
@@ -195,49 +230,79 @@ export const useInstagramPreviewRuntime = ({
         return;
       }
 
-      setImageUrl(composeResult.thumbnailDataUrl);
+      setSlideImageUrls((prev) => {
+        const next = nextSlides.map((_, index) => prev[index] ?? "");
+        next[slideIndex] = composeResult.thumbnailDataUrl;
+        return next;
+      });
 
-      if (options?.persistMetadata !== false) {
-        const saveResult = await window.desktopRuntime.content.saveInstagramMetadata({
-          contentId,
-          templateId: nextTemplateId,
-          overlayTexts: nextOverlayTexts,
-          ...(Array.isArray(nextImageFileIds) ? { imageFileIds: nextImageFileIds } : {}),
-          ...(metadataUpdatedAtRef.current ? { expectedUpdatedAt: metadataUpdatedAtRef.current } : {})
-        });
-
-        if (seq !== requestSeqRef.current) {
-          return;
-        }
-
-        if (!saveResult.ok) {
+      if (shouldPersist) {
+        const saved = await persistMetadata(nextTemplateId, nextSlides);
+        if (!saved) {
           setIsRecomposing(false);
-          onNotice(saveResult.message || "Failed to save instagram metadata.");
           return;
-        }
-
-        if (saveResult.updatedAt) {
-          metadataUpdatedAtRef.current = saveResult.updatedAt;
-          onMetadataUpdatedAt(saveResult.updatedAt);
         }
       }
 
       setIsRecomposing(false);
       onNotice("");
     },
-    [contentId, imageFileIds, imagePaths, onMetadataUpdatedAt, onNotice, overlayTexts, templateId]
+    [contentId, onNotice, persistMetadata, templateId]
   );
 
-  const queueRecompose = useCallback(
-    (patch?: RecomposePatch, options?: RecomposeOptions) => {
+  const requestRecomposeAll = useCallback(
+    async ({ slides: nextSlides, templateId: nextTemplateId = templateId, persistMetadata: shouldPersist = true }: RecomposeAllInput) => {
+      const seq = requestSeqRef.current + 1;
+      requestSeqRef.current = seq;
+      setIsRecomposing(true);
+
+      const composeResult = await window.desktopRuntime.content.composeCarousel({
+        contentId,
+        templateId: nextTemplateId,
+        slides: toComposeSlidesPayload(nextSlides),
+        clientRequestId: `${contentId}:carousel:${seq}`
+      });
+
+      if (seq !== requestSeqRef.current) {
+        return;
+      }
+
+      if (!composeResult.ok) {
+        setIsRecomposing(false);
+        onNotice(composeResult.message || "Failed to compose carousel.");
+        return;
+      }
+
+      const nextImageUrls = nextSlides.map(() => "");
+      for (const slide of composeResult.slides) {
+        nextImageUrls[slide.slideIndex] = slide.thumbnailDataUrl;
+      }
+      setSlideImageUrls(nextImageUrls);
+
+      if (shouldPersist) {
+        const saved = await persistMetadata(nextTemplateId, nextSlides);
+        if (!saved) {
+          setIsRecomposing(false);
+          return;
+        }
+      }
+
+      setIsRecomposing(false);
+      onNotice("");
+    },
+    [contentId, onNotice, persistMetadata, templateId]
+  );
+
+  const queueRecomposeSlide = useCallback(
+    (input: RecomposeSlideInput) => {
       if (debounceTimerRef.current !== null) {
         window.clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = window.setTimeout(() => {
-        void requestRecompose(patch, options);
+        void requestRecomposeSlide(input);
       }, RECOMPOSE_DEBOUNCE_MS);
     },
-    [requestRecompose]
+    [requestRecomposeSlide]
   );
 
   useEffect(
@@ -254,10 +319,14 @@ export const useInstagramPreviewRuntime = ({
       window.clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+    setSlideImageUrls([]);
   }, [contentId]);
 
   useEffect(() => {
-    void requestRecompose(undefined, { persistMetadata: false });
+    void requestRecomposeAll({
+      slides,
+      persistMetadata: false
+    });
     // Intentionally only on content switch; edit-triggered recompose is user-action driven.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentId]);
@@ -282,12 +351,13 @@ export const useInstagramPreviewRuntime = ({
     currentTemplate,
     requiredImageCount,
     maxImageCount,
-    imageUrl,
+    slideImageUrls,
     isRecomposing,
     pickerImages,
     isPickerLoading,
-    requestRecompose,
-    queueRecompose,
+    requestRecomposeSlide,
+    requestRecomposeAll,
+    queueRecomposeSlide,
     loadPickerImages
   };
 };

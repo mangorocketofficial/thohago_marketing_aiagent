@@ -19,6 +19,19 @@ export type ImageComposeResult = {
   sizeBytes: number;
 };
 
+export type CarouselComposeInput = {
+  templateId: TemplateId;
+  slides: Array<{
+    userImages: string[];
+    overlayTexts: Record<string, string>;
+  }>;
+  outputFormat: "png" | "jpg";
+};
+
+export type CarouselComposeResult = {
+  slides: ImageComposeResult[];
+};
+
 /**
  * Compose one Instagram image from template photo/text schema.
  * Non-editable visual decorations must be pre-baked into background.png.
@@ -77,6 +90,23 @@ export const composeInstagramImage = async (input: ImageComposeInput): Promise<I
     height,
     format: input.outputFormat,
     sizeBytes: buffer.length
+  };
+};
+
+export const composeCarouselImages = async (input: CarouselComposeInput): Promise<CarouselComposeResult> => {
+  const results: ImageComposeResult[] = [];
+  for (const slide of input.slides) {
+    results.push(
+      await composeInstagramImage({
+        templateId: input.templateId,
+        userImages: slide.userImages,
+        overlayTexts: slide.overlayTexts,
+        outputFormat: input.outputFormat
+      })
+    );
+  }
+  return {
+    slides: results
   };
 };
 

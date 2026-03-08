@@ -4,6 +4,7 @@ import { supabaseAdmin } from "../lib/supabase-admin";
 import { getTemplate, type TemplateId } from "@repo/media-engine";
 
 export const DEFAULT_TEMPLATE_ID: TemplateId = "koica_cover_01";
+export const MAX_INSTAGRAM_IMAGE_FILE_IDS = 40;
 
 export type InstagramContentRow = {
   id: string;
@@ -129,11 +130,14 @@ export const loadInstagramContentRow = async (params: {
   };
 };
 
-const resolveImagePathsByFileIds = async (params: {
+export const resolveImagePathsByFileIds = async (params: {
   orgId: string;
   imageFileIds: string[];
 }): Promise<ResolvedImageSelection> => {
-  const normalizedIds = dedupeStrings(params.imageFileIds.map((entry) => entry.trim()).filter(Boolean)).slice(0, 8);
+  const normalizedIds = dedupeStrings(params.imageFileIds.map((entry) => entry.trim()).filter(Boolean)).slice(
+    0,
+    MAX_INSTAGRAM_IMAGE_FILE_IDS
+  );
   if (normalizedIds.length === 0) {
     return {
       fileIds: [],

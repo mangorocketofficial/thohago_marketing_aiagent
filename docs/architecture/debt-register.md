@@ -131,3 +131,14 @@ Reason
 
 Affects  
 Phase 8-2
+
+DEBT-013
+
+Description
+Lightweight Instagram read surfaces such as generation-complete cards still collapse carousel metadata and preview to slide 0.
+
+Reason
+7-4 prioritized canonical slide storage, Electron compose/download, and full editor support first; secondary single-image consumers were left on compatibility fields to avoid broader UI regression.
+
+Affects
+Phase 7-4 polish

@@ -32,6 +32,32 @@ export type InstagramDraft = {
   hashtags: string[];
   overlayTexts: Record<string, string>;
   suggestedImageKeywords: string[];
+  slides?: InstagramSlideDraft[];
+};
+
+export type InstagramSlideRole =
+  | "cover"
+  | "problem"
+  | "solution"
+  | "benefit"
+  | "data"
+  | "detail"
+  | "testimonial"
+  | "cta"
+  | "custom";
+
+export type InstagramSlideDraft = {
+  role: InstagramSlideRole;
+  overlayTexts: Record<string, string>;
+  suggestedImageKeywords?: string[];
+};
+
+export type InstagramSlide = {
+  slideIndex: number;
+  role: InstagramSlideRole;
+  overlayTexts: Record<string, string>;
+  imageFileIds: string[];
+  imagePaths: string[];
 };
 
 export type InstagramGenerationResult = {
@@ -45,6 +71,8 @@ export type InstagramGenerationResult = {
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
   selectedImagePaths: string[];
+  slides: InstagramSlide[];
+  isCarousel: boolean;
   imageSelectionSource: "manual_selection" | "index_activity_folder" | "index_org_fallback" | "recency_fallback" | "none";
   imageSelectionReason: string | null;
   requiresLocalCompose: boolean;

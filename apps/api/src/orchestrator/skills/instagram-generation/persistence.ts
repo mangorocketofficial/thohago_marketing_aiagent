@@ -1,6 +1,18 @@
 import { HttpError } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { asRecord, asString, type InstagramGenerationResult, type ScheduleSlotRow, type SlotSource } from "./types";
+import {
+  deriveLegacyInstagramFields,
+  normalizeInstagramSlides,
+  serializeInstagramSlides
+} from "../../instagram-slides-shared";
+import {
+  asRecord,
+  asString,
+  type InstagramGenerationResult,
+  type InstagramSlide,
+  type ScheduleSlotRow,
+  type SlotSource
+} from "./types";
 
 type ImageSelectionSource = "manual_selection" | "index_activity_folder" | "index_org_fallback" | "recency_fallback" | "none";
 
@@ -119,10 +131,8 @@ export const loadExistingGeneratedResult = async (params: {
   const metadata = asRecord(row.metadata);
   const localSave = asRecord(metadata.local_save_suggestion);
   const outputFormat = asString(metadata.output_format, "").toLowerCase() === "jpg" ? "jpg" : "png";
-  const imageFileIds = Array.isArray(metadata.image_file_ids)
-    ? metadata.image_file_ids.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-    : [];
-  const overlayTexts = asStringMap(metadata.overlay_texts);
+  const slides = normalizeInstagramSlides(metadata);
+  const legacy = deriveLegacyInstagramFields(slides);
 
   return {
     contentId: asString(row.id, ""),
@@ -132,14 +142,14 @@ export const loadExistingGeneratedResult = async (params: {
     caption: asString(row.body, ""),
     model: asString(metadata.generation_model, "claude") === "gpt-4o-mini" ? "gpt-4o-mini" : "claude",
     templateId: asString(metadata.template_id, "koica_cover_01"),
-    overlayTexts,
-    imageFileIds,
-    selectedImagePaths: Array.isArray(metadata.image_paths)
-      ? metadata.image_paths.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-      : [],
+    overlayTexts: legacy.overlayTexts,
+    imageFileIds: legacy.imageFileIds,
+    selectedImagePaths: legacy.imagePaths,
+    slides,
+    isCarousel: legacy.isCarousel,
     imageSelectionSource: normalizeImageSelectionSource(
       metadata.image_selection_source,
-      imageFileIds.length > 0 ? "index_activity_folder" : "none"
+      legacy.imageFileIds.length > 0 ? "index_activity_folder" : "none"
     ),
     imageSelectionReason: asString(metadata.image_selection_reason, "").trim() || null,
     requiresLocalCompose: true,
@@ -166,6 +176,8 @@ export const insertDraftInstagramContent = async (params: {
   templateId: string;
   selectedImageFileIds: string[];
   selectedImagePaths: string[];
+  slides: InstagramSlide[];
+  isCarousel: boolean;
   imageSelectionSource: ImageSelectionSource;
   imageSelectionReason: string | null;
   model: "claude" | "gpt-4o-mini";
@@ -211,6 +223,8 @@ export const insertDraftInstagramContent = async (params: {
         overlay_texts: params.overlayTexts,
         image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,
+        is_carousel: params.isCarousel,
+        slides: serializeInstagramSlides(params.slides),
         image_selection_source: params.imageSelectionSource,
         image_selection_reason: params.imageSelectionReason,
         output_format: params.outputFormat,

@@ -8,6 +8,7 @@ type InstagramActionBarProps = {
   isSaving: boolean;
   isRecomposing: boolean;
   localSaveStatus: "idle" | "saved" | "error";
+  downloadLabel?: string;
   onDownloadImage: () => void;
   onSave: () => void;
   onRegenerate: () => void;
@@ -23,6 +24,7 @@ export const InstagramActionBar = ({
   isSaving,
   isRecomposing,
   localSaveStatus,
+  downloadLabel = "Download image",
   onDownloadImage,
   onSave,
   onRegenerate
@@ -44,7 +46,7 @@ export const InstagramActionBar = ({
     <div className="instagram-action-bar-wrap">
       <div className="instagram-action-bar">
         <button type="button" onClick={onDownloadImage} disabled={isRecomposing}>
-          Download image
+          {downloadLabel}
         </button>
         <button type="button" onClick={() => void handleCopyCaption()}>
           {copyStatus === "copied" ? "Copied!" : copyStatus === "error" ? "Copy failed" : "Copy caption"}

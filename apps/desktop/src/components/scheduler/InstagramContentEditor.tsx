@@ -5,7 +5,8 @@ import { CaptionEditor } from "./instagram/CaptionEditor";
 import { ImagePickerModal } from "./instagram/ImagePickerModal";
 import { ImagePreview } from "./instagram/ImagePreview";
 import { InstagramActionBar } from "./instagram/InstagramActionBar";
-import { buildInstagramEditorSeed, composeCaptionBody } from "./instagram/metadata";
+import { buildInstagramEditorSeed, composeCaptionBody, type InstagramEditorSlide } from "./instagram/metadata";
+import { SlideNavigator } from "./instagram/SlideNavigator";
 import { TemplateImageControls } from "./instagram/TemplateImageControls";
 import { useInstagramPreviewRuntime } from "./instagram/useInstagramPreviewRuntime";
 
@@ -18,6 +19,9 @@ const resolveStatusLabel = (slotStatus: ContentEditorProps["slotStatus"]): strin
   if (slotStatus === "published") return "Published";
   return "Skipped";
 };
+
+const replaceSlideAt = (slides: InstagramEditorSlide[], slideIndex: number, nextSlide: InstagramEditorSlide): InstagramEditorSlide[] =>
+  slides.map((slide, index) => (index === slideIndex ? nextSlide : slide));
 
 /**
  * Visual editor for instagram image drafts with local compose + metadata sync.
@@ -35,11 +39,9 @@ export const InstagramContentEditor = ({
   const [savedBody, setSavedBody] = useState(composeCaptionBody(seed.caption, seed.hashtags));
   const [updatedAt, setUpdatedAt] = useState(content.updated_at ?? "");
   const [templateId, setTemplateId] = useState(seed.templateId);
-  const [overlayTexts, setOverlayTexts] = useState<Record<string, string>>(seed.overlayTexts);
-  const [imageFileIds, setImageFileIds] = useState<string[] | null>(seed.imageFileIds.length > 0 ? seed.imageFileIds : null);
-  const [imagePaths, setImagePaths] = useState<string[] | null>(seed.imagePaths.length > 0 ? seed.imagePaths : null);
-  const [imageNames, setImageNames] = useState(seed.imageNames);
+  const [slides, setSlides] = useState(seed.slides);
   const [activityFolder, setActivityFolder] = useState(seed.activityFolder);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [localSaveStatus, setLocalSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -51,19 +53,18 @@ export const InstagramContentEditor = ({
     currentTemplate,
     requiredImageCount,
     maxImageCount,
-    imageUrl,
+    slideImageUrls,
     isRecomposing,
     pickerImages,
     isPickerLoading,
-    requestRecompose,
-    queueRecompose,
+    requestRecomposeSlide,
+    requestRecomposeAll,
+    queueRecomposeSlide,
     loadPickerImages
   } = useInstagramPreviewRuntime({
     contentId: content.id,
     templateId,
-    overlayTexts,
-    imageFileIds,
-    imagePaths,
+    slides,
     activityFolder,
     expectedUpdatedAt: updatedAt,
     onMetadataUpdatedAt: setUpdatedAt,
@@ -72,7 +73,9 @@ export const InstagramContentEditor = ({
 
   const fullBody = composeCaptionBody(caption, hashtags);
   const isDirty = fullBody !== savedBody;
-  const selectedImageCount = imageFileIds ? imageFileIds.length : imageNames.length;
+  const currentSlide = slides[activeSlideIndex] ?? slides[0];
+  const currentImageNames = currentSlide?.imageNames ?? [];
+  const selectedImageCount = currentSlide?.imageFileIds.length ?? 0;
   const templateOptions = templates.length > 0 ? templates : [currentTemplate];
 
   useEffect(() => {
@@ -81,14 +84,16 @@ export const InstagramContentEditor = ({
     setSavedBody(composeCaptionBody(seed.caption, seed.hashtags));
     setUpdatedAt(content.updated_at ?? "");
     setTemplateId(seed.templateId);
-    setOverlayTexts(seed.overlayTexts);
-    setImageFileIds(seed.imageFileIds.length > 0 ? seed.imageFileIds : null);
-    setImagePaths(seed.imagePaths.length > 0 ? seed.imagePaths : null);
-    setImageNames(seed.imageNames);
+    setSlides(seed.slides);
     setActivityFolder(seed.activityFolder);
+    setActiveSlideIndex(0);
     setLocalSaveStatus("idle");
     setNotice("");
   }, [content.id, content.updated_at, seed]);
+
+  useEffect(() => {
+    setActiveSlideIndex((prev) => Math.min(prev, Math.max(0, slides.length - 1)));
+  }, [slides.length]);
 
   useEffect(() => {
     if (!isDirty) {
@@ -143,6 +148,26 @@ export const InstagramContentEditor = ({
     }
   };
 
+  const updateActiveSlide = (updater: (slide: InstagramEditorSlide) => InstagramEditorSlide, composeMode: "queue" | "request") => {
+    if (!currentSlide) {
+      return;
+    }
+    const nextSlide = updater(currentSlide);
+    const nextSlides = replaceSlideAt(slides, activeSlideIndex, nextSlide);
+    setSlides(nextSlides);
+    if (composeMode === "queue") {
+      queueRecomposeSlide({
+        slides: nextSlides,
+        slideIndex: activeSlideIndex
+      });
+      return;
+    }
+    void requestRecomposeSlide({
+      slides: nextSlides,
+      slideIndex: activeSlideIndex
+    });
+  };
+
   return (
     <section className="ui-content-editor instagram-content-editor">
       <div className="ui-content-editor-head">
@@ -167,7 +192,7 @@ export const InstagramContentEditor = ({
       </div>
 
       <ImagePreview
-        imageUrl={imageUrl}
+        imageUrl={slideImageUrls[activeSlideIndex] ?? ""}
         width={currentTemplate.size.width}
         height={currentTemplate.size.height}
         textSlots={currentTemplate.texts.map((slot) => ({
@@ -180,23 +205,32 @@ export const InstagramContentEditor = ({
           font_size: slot.font_size,
           align: slot.align
         }))}
-        overlayTexts={overlayTexts}
+        overlayTexts={currentSlide?.overlayTexts ?? {}}
         isRecomposing={isRecomposing}
         onEditOverlayText={(slotId, nextValue) => {
-          setOverlayTexts((prev) => {
-            const next = {
-              ...prev,
-              [slotId]: nextValue
-            };
-            queueRecompose({ overlayTexts: next });
-            return next;
-          });
+          updateActiveSlide(
+            (slide) => ({
+              ...slide,
+              overlayTexts: {
+                ...slide.overlayTexts,
+                [slotId]: nextValue
+              }
+            }),
+            "queue"
+          );
         }}
+      />
+
+      <SlideNavigator
+        slideCount={slides.length}
+        activeIndex={activeSlideIndex}
+        slideRoles={slides.map((slide) => slide.role)}
+        onChangeIndex={setActiveSlideIndex}
       />
 
       <TemplateImageControls
         currentTemplateId={templateId}
-        currentImageNames={imageNames}
+        currentImageNames={currentImageNames}
         selectedImageCount={selectedImageCount}
         requiredImageCount={requiredImageCount}
         maxImageCount={maxImageCount}
@@ -207,19 +241,24 @@ export const InstagramContentEditor = ({
         }))}
         onChangeTemplate={(nextTemplateId) => {
           setTemplateId(nextTemplateId);
-          void requestRecompose({ templateId: nextTemplateId });
+          void requestRecomposeAll({
+            templateId: nextTemplateId,
+            slides
+          });
         }}
         onAddImage={(slotIndex) => {
           void openImagePicker(slotIndex);
         }}
         onRemoveImage={(slotIndex) => {
-          const nextIds = [...(imageFileIds ?? [])].filter((_, index) => index !== slotIndex);
-          const nextPaths = [...(imagePaths ?? [])].filter((_, index) => index !== slotIndex);
-          const nextNames = imageNames.filter((_, index) => index !== slotIndex);
-          setImageFileIds(nextIds);
-          setImagePaths(nextPaths);
-          setImageNames(nextNames);
-          void requestRecompose({ imageFileIds: nextIds, imagePaths: nextPaths });
+          updateActiveSlide(
+            (slide) => ({
+              ...slide,
+              imageFileIds: slide.imageFileIds.filter((_, index) => index !== slotIndex),
+              imagePaths: slide.imagePaths.filter((_, index) => index !== slotIndex),
+              imageNames: slide.imageNames.filter((_, index) => index !== slotIndex)
+            }),
+            "request"
+          );
         }}
       />
 
@@ -233,11 +272,13 @@ export const InstagramContentEditor = ({
         isSaving={isSaving}
         isRecomposing={isRecomposing}
         localSaveStatus={localSaveStatus}
+        downloadLabel={slides.length > 1 ? "Download images" : "Download image"}
         onDownloadImage={() => {
           void (async () => {
             const result = await window.desktopRuntime.content.downloadImage({
               contentId: content.id,
-              suggestedFileName: `instagram_${content.id}.png`
+              suggestedFileName: `instagram_${content.id}.png`,
+              slideCount: slides.length
             });
             if (!result.ok && !result.cancelled) {
               setNotice(result.message || "Failed to download image.");
@@ -267,9 +308,9 @@ export const InstagramContentEditor = ({
             const picked = pickerImages.find((entry) => entry.fileId === fileId);
             const pickedName = picked?.fileName ?? fileId.slice(0, 8);
             const pickedPath = picked?.relativePath ?? "";
-            const nextIds = [...(imageFileIds ?? [])];
-            const nextPaths = [...(imagePaths ?? [])];
-            const nextNames = [...imageNames];
+            const nextIds = [...(currentSlide?.imageFileIds ?? [])];
+            const nextPaths = [...(currentSlide?.imagePaths ?? [])];
+            const nextNames = [...(currentSlide?.imageNames ?? [])];
             const target = slotIndex ?? nextIds.length;
             nextIds[target] = fileId;
             nextPaths[target] = pickedPath;
@@ -277,10 +318,16 @@ export const InstagramContentEditor = ({
             const boundedIds = maxImageCount > 0 ? nextIds.slice(0, maxImageCount) : nextIds;
             const boundedPaths = maxImageCount > 0 ? nextPaths.slice(0, maxImageCount) : nextPaths;
             const boundedNames = maxImageCount > 0 ? nextNames.slice(0, maxImageCount) : nextNames;
-            setImageFileIds(boundedIds);
-            setImagePaths(boundedPaths);
-            setImageNames(boundedNames);
-            void requestRecompose({ imageFileIds: boundedIds, imagePaths: boundedPaths });
+
+            updateActiveSlide(
+              (slide) => ({
+                ...slide,
+                imageFileIds: boundedIds,
+                imagePaths: boundedPaths,
+                imageNames: boundedNames
+              }),
+              "request"
+            );
           }}
           onClose={() => setIsPickerOpen(false)}
         />
