@@ -181,10 +181,11 @@
       "analytics": {
         "eyebrow": "Performance",
         "title": "Performance",
-        "description": "Enter performance metrics and use them to improve future AI output.",
+        "description": "Review API-collected performance data and the AI insights derived from it.",
         "tabs": {
           "insights": "Insights",
-          "input": "Performance Input"
+          "review": "Performance Check",
+          "fixture": "Demo"
         },
         "generatedAtLabel": "Generated at",
         "metricTotalContents": "Total contents",
@@ -193,6 +194,7 @@
         "bestPublishTimesTitle": "Best publish times by channel",
         "topCtaTitle": "Top CTA phrases",
         "contentPatternTitle": "Content pattern summary",
+        "channelRecommendationsTitle": "Channel recommendations",
         "userPreferenceTitle": "User edit preference summary",
         "channelRecommendationEmpty": "No insights data available.",
         "table": {
@@ -200,11 +202,13 @@
           "bestTime": "Best time",
           "contentCount": "Contents"
         },
-        "input": {
-          "eyebrow": "Performance Data",
-          "title": "Enter Content Performance",
-          "description": "Submit engagement metrics to improve future AI content planning.",
-          "channelFilterAll": "All",
+        "source": {
+          "live": "Showing analytics derived from live data.",
+          "empty": "No analytics data has been collected yet.",
+          "error": "Failed to load analytics data.",
+          "apiPending": "Published content exists, but collected metrics are not available yet."
+        },
+        "metrics": {
           "fields": {
             "likes": "Likes",
             "comments": "Comments",
@@ -212,21 +216,67 @@
             "saves": "Saves",
             "follower_delta": "Follower Change",
             "views": "Views"
-          },
-          "submitButton": "Save & Update AI",
-          "resetButton": "Reset",
-          "dirtyCount": "{{count}} items entered",
-          "submitting": "Saving...",
-          "successMessage": "{{saved}} saved. AI insights updated.",
-          "partialFailure": "{{saved}} saved, {{failed}} failed.",
+          }
+        },
+        "insights": {
+          "loading": "Loading insights...",
+          "empty": "No insights to display."
+        },
+        "review": {
+          "eyebrow": "Performance Review",
+          "title": "Channel Performance Dashboard",
+          "description": "Check the latest API-collected metrics and scores for published contents.",
+          "channelFilterAll": "All",
+          "loading": "Loading performance data...",
           "empty": "No published content to display.",
-          "loading": "Loading content...",
           "loadMore": "Load more",
-          "noMetrics": "No performance data yet"
+          "summary": {
+            "channel": "Channel",
+            "contents": "Contents",
+            "avgScore": "Average score"
+          }
         },
         "score": {
           "label": "Score",
           "notAvailable": "-"
+        },
+        "fixture": {
+          "eyebrow": "Demo Analytics",
+          "title": "WFK Performance Analytics (Demo)",
+          "description": "Preview the analytics experience using WFK dummy data. Run to see how performance insights will look with real metrics.",
+          "runButton": "Load demo data",
+          "running": "Analyzing...",
+          "completed": "{{passed}} / {{total}} checks passed.",
+          "loadFailed": "Failed to load fixture files.",
+          "restartRequired": "Main-process fixture handler is not active. Restart the desktop app and run again.",
+          "empty": "Click the button above to load WFK demo data and preview analytics.",
+          "stat": {
+            "totalContents": "Total contents",
+            "avgScore": "Avg. score",
+            "trackedChannels": "Channels",
+            "topCtaCount": "CTA phrases",
+            "passed": "QA passed",
+            "failed": "QA failed"
+          },
+          "scoredContents": {
+            "title": "Content performance scores",
+            "channel": "Channel",
+            "body": "Content",
+            "publishedAt": "Published",
+            "score": "Score"
+          },
+          "qaSection": {
+            "title": "QA check details",
+            "toggle": "Show QA checks ({{passed}}/{{total}})",
+            "checkId": "Check",
+            "result": "Result",
+            "description": "Description",
+            "detail": "Detail"
+          },
+          "result": {
+            "pass": "PASS",
+            "fail": "FAIL"
+          }
         }
       },
       "emailAutomation": {

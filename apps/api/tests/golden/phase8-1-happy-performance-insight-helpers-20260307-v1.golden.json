@@ -74,9 +74,9 @@
       "sign up"
     ],
     "recommendations": {
-      "instagram": "Strong performance (74.5 avg, high-confidence, n=12). Scale this channel while preserving the current format and CTA style.",
-      "threads": "Moderate performance (49.2 avg, low-confidence, n=4). Run controlled experiments on publish time and CTA variants.",
-      "facebook": "2 published items. Increase publishing frequency to build reliable insights."
+      "instagram": "Strong performance (74.5 avg, high-confidence, n=12). Preserve the winning hook and CTA structure while scaling volume carefully.",
+      "threads": "Moderate performance (49.2 avg, low-confidence, n=4). Run controlled tests on publish time, opening hook, and CTA clarity.",
+      "facebook": "2 published items. Increase publishing frequency and metrics coverage to build reliable insights."
     }
   },
   "is_deterministic": "yes",
@@ -84,4 +84,3 @@
   "approved_by": "Codex",
   "version": "1"
 }
-

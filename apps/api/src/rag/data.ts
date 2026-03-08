@@ -1,3 +1,4 @@
+import { parseAccumulatedInsights as parseSharedAccumulatedInsights } from "@repo/analytics";
 import type {
   AccumulatedInsights,
   Campaign,
@@ -161,24 +162,7 @@ const readInterviewAnswers = (value: unknown): OrgBrandSettings["interview_answe
 };
 
 export const parseAccumulatedInsights = (value: unknown): AccumulatedInsights | null => {
-  const row = toRecord(value);
-  const generatedAt = readOptionalString(row.generated_at);
-  if (!generatedAt) {
-    return null;
-  }
-
-  const bestPublishTimes = readStringRecord(row.best_publish_times);
-  const channelRecommendations = readStringRecord(row.channel_recommendations);
-
-  return {
-    best_publish_times: bestPublishTimes,
-    top_cta_phrases: readStringArray(row.top_cta_phrases),
-    content_pattern_summary: readOptionalString(row.content_pattern_summary) ?? "",
-    channel_recommendations: channelRecommendations,
-    user_edit_preference_summary: readOptionalString(row.user_edit_preference_summary) ?? "",
-    generated_at: generatedAt,
-    content_count_at_generation: Math.max(0, Math.floor(readNumber(row.content_count_at_generation, 0)))
-  };
+  return parseSharedAccumulatedInsights(value);
 };
 
 export const readReviewMarkdown = (brandSettings: OrgBrandSettings): string => {

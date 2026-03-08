@@ -505,7 +505,6 @@ const App = () => {
             }
             analyticsPage={
               <AnalyticsPage
-                supabase={supabase}
                 orgId={chatConfig?.orgId ?? desktopConfig?.orgId ?? null}
               />
             }

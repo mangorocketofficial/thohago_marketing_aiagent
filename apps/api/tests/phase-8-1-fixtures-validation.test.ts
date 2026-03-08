@@ -3,20 +3,24 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { computePerformanceScore, computeRobustReference, type OrgChannelStats } from "../src/rag/performance-scorer";
 import {
+  ANALYTICS_CHANNELS,
+  DEFAULT_METRIC_REFERENCES,
+  buildContentPatternSummary,
   buildPerformanceAwareRecommendations,
   computeBestPublishTimes,
-  extractTopCtaPhrases
-} from "../src/rag/performance-insight-helpers";
-import { parseAccumulatedInsights } from "../src/rag/data";
+  computePerformanceScore,
+  extractTopCtaPhrases,
+  normalizeMetricsForStorage,
+  parseAccumulatedInsights
+} from "@repo/analytics";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 type ContentFixture = {
   id: string;
-  channel: string;
+  channel: (typeof ANALYTICS_CHANNELS)[number];
   body: string | null;
   published_at: string | null;
   created_at: string;
@@ -25,8 +29,6 @@ type ContentFixture = {
 
 type MetricsEntry = {
   content_id: string;
-  _channel?: string;
-  _note?: string;
   likes?: number;
   comments?: number;
   shares?: number;
@@ -41,15 +43,59 @@ type MetricsBatchFixture = {
   entries: MetricsEntry[];
 };
 
+type ExpectedInsightsFixture = {
+  best_publish_times: Record<string, string>;
+  top_cta_phrases: {
+    expected_phrases: string[];
+    min_count: number;
+    max_count: number;
+  };
+  content_pattern_summary: {
+    expected_pattern: string;
+  };
+  channel_recommendations: Record<
+    string,
+    {
+      expected_contains: string;
+      score_range: [number, number];
+    }
+  >;
+};
+
 const loadJson = async <T>(fileName: string): Promise<T> => {
   const raw = await readFile(resolve(__dirname, "fixtures", fileName), "utf-8");
   return JSON.parse(raw) as T;
 };
 
-const CHANNELS = ["instagram", "threads", "naver_blog", "facebook", "youtube"] as const;
+const parseAvg = (recommendation: string): number | null => {
+  const matched = recommendation.match(/([0-9]+(?:\.[0-9]+)?)\s*avg/i);
+  return matched ? Number.parseFloat(matched[1] ?? "") : null;
+};
+
+const buildScoredRows = (contents: ContentFixture[], batch: MetricsBatchFixture) => {
+  const entriesByContentId = new Map(batch.entries.map((entry) => [entry.content_id, entry]));
+  return contents.map((content) => {
+    const entry = entriesByContentId.get(content.id);
+    const score = entry
+      ? computePerformanceScore(
+          normalizeMetricsForStorage(content.channel, entry),
+          content.channel,
+          DEFAULT_METRIC_REFERENCES
+        )
+      : null;
+
+    return {
+      id: content.id,
+      channel: content.channel,
+      body: content.body,
+      published_at: content.published_at,
+      performance_score: score
+    };
+  });
+};
 
 describe("phase 8-1 fixture structural validation", () => {
-  it("wfk-published-contents has 20 items covering all 5 channels", async () => {
+  it("wfk-published-contents has 20 items covering all analytics channels", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
 
     assert.equal(contents.length, 20);
@@ -59,204 +105,123 @@ describe("phase 8-1 fixture structural validation", () => {
       channelCounts[item.channel] = (channelCounts[item.channel] ?? 0) + 1;
     }
 
-    for (const ch of CHANNELS) {
-      assert.ok((channelCounts[ch] ?? 0) >= 2, `channel ${ch} should have at least 2 contents`);
+    for (const channel of ANALYTICS_CHANNELS) {
+      assert.ok((channelCounts[channel] ?? 0) >= 2, `channel ${channel} should have at least 2 contents`);
     }
   });
 
-  it("all content ids are unique UUIDs", async () => {
+  it("all content ids are unique", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
-    const ids = new Set(contents.map((c) => c.id));
+    const ids = new Set(contents.map((content) => content.id));
     assert.equal(ids.size, contents.length, "duplicate content ids found");
   });
 
-  it("all contents have published_at in valid ISO format", async () => {
+  it("all contents have valid published_at values", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
     for (const item of contents) {
       assert.ok(item.published_at, `content ${item.id} missing published_at`);
-      const date = new Date(item.published_at);
-      assert.ok(!Number.isNaN(date.getTime()), `content ${item.id} has invalid published_at`);
+      assert.ok(!Number.isNaN(new Date(item.published_at).getTime()), `content ${item.id} has invalid published_at`);
     }
   });
 
-  it("metrics batch has matching content_ids for all 20 contents", async () => {
+  it("metrics batch covers all 20 published contents", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
     const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
 
     assert.equal(batch.entries.length, 20);
-
-    const contentIds = new Set(contents.map((c) => c.id));
+    const contentIds = new Set(contents.map((content) => content.id));
     for (const entry of batch.entries) {
       assert.ok(contentIds.has(entry.content_id), `metrics entry ${entry.content_id} not in published contents`);
     }
   });
 
-  it("each metrics entry has at least one numeric value", async () => {
-    const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
-    const metricFields = ["likes", "comments", "shares", "saves", "follower_delta", "views"];
-
-    for (const entry of batch.entries) {
-      const hasValue = metricFields.some(
-        (field) => typeof (entry as Record<string, unknown>)[field] === "number"
-      );
-      assert.ok(hasValue, `entry ${entry.content_id} has no metric values`);
-    }
-  });
-
-  it("naver_blog/youtube entries use views field", async () => {
+  it("requires views for naver_blog and youtube entries", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
     const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
-
-    const blogYoutubeIds = new Set(
-      contents.filter((c) => c.channel === "naver_blog" || c.channel === "youtube").map((c) => c.id)
-    );
+    const channelByContentId = new Map(contents.map((content) => [content.id, content.channel]));
 
     for (const entry of batch.entries) {
-      if (blogYoutubeIds.has(entry.content_id)) {
-        assert.ok(
-          typeof entry.views === "number",
-          `blog/youtube entry ${entry.content_id} should have views field`
-        );
+      const channel = channelByContentId.get(entry.content_id);
+      if (channel === "naver_blog" || channel === "youtube") {
+        assert.equal(typeof entry.views, "number", `expected views for ${entry.content_id}`);
       }
     }
-  });
-
-  it("idempotency key is valid format", async () => {
-    const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
-    assert.ok(batch.request_idempotency_key);
-    assert.ok(/^[A-Za-z0-9:_-]{8,120}$/.test(batch.request_idempotency_key));
   });
 });
 
 describe("phase 8-1 scoring integration with fixtures", () => {
-  const defaultStats: OrgChannelStats = {
-    channel: "instagram",
-    sample_count: 0,
-    references: { likes: 50, comments: 10, shares: 5, saves: 15, follower_delta: 20 }
-  };
+  it("scores representative fixture rows into expected bands", async () => {
+    const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
+    const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
+    const scoredRows = buildScoredRows(contents, batch);
 
-  it("high-performing instagram content scores above 70", async () => {
-    const score = computePerformanceScore(
-      { likes: 320, comments: 48, shares: 35, saves: 92, follower_delta: 28 },
-      "instagram",
-      defaultStats
-    );
-    assert.ok(typeof score === "number");
-    assert.ok(score >= 70, `expected >= 70, got ${score}`);
-  });
+    const highInstagram = scoredRows.find((row) => row.id.endsWith("0001"))?.performance_score;
+    const lowInstagram = scoredRows.find((row) => row.id.endsWith("0004"))?.performance_score;
+    const highBlog = scoredRows.find((row) => row.id.endsWith("0011"))?.performance_score;
+    const highYoutube = scoredRows.find((row) => row.id.endsWith("0021"))?.performance_score;
 
-  it("low-performing instagram content scores below 50", async () => {
-    const score = computePerformanceScore(
-      { likes: 65, comments: 4, shares: 2, saves: 18, follower_delta: -2 },
-      "instagram",
-      defaultStats
-    );
-    assert.ok(typeof score === "number");
-    assert.ok(score < 50, `expected < 50, got ${score}`);
-  });
-
-  it("high-performing naver_blog content scores above 70", async () => {
-    const blogStats: OrgChannelStats = {
-      channel: "naver_blog",
-      sample_count: 0,
-      references: { likes: 50, comments: 10, shares: 5, saves: 15, follower_delta: 20 }
-    };
-    const score = computePerformanceScore(
-      { likes: 3200, comments: 45 },
-      "naver_blog",
-      blogStats
-    );
-    assert.ok(typeof score === "number");
-    assert.ok(score >= 70, `expected >= 70, got ${score}`);
-  });
-
-  it("high-performing youtube content scores above 70", async () => {
-    const ytStats: OrgChannelStats = {
-      channel: "youtube",
-      sample_count: 0,
-      references: { likes: 50, comments: 10, shares: 5, saves: 15, follower_delta: 20 }
-    };
-    const score = computePerformanceScore(
-      { likes: 8500, comments: 65 },
-      "youtube",
-      ytStats
-    );
-    assert.ok(typeof score === "number");
-    assert.ok(score >= 70, `expected >= 70, got ${score}`);
+    assert.ok(typeof highInstagram === "number" && highInstagram >= 70, `expected instagram >= 70, got ${highInstagram}`);
+    assert.ok(typeof lowInstagram === "number" && lowInstagram < 50, `expected instagram < 50, got ${lowInstagram}`);
+    assert.ok(typeof highBlog === "number" && highBlog >= 70, `expected blog >= 70, got ${highBlog}`);
+    assert.ok(typeof highYoutube === "number" && highYoutube >= 80, `expected youtube >= 80, got ${highYoutube}`);
   });
 });
 
 describe("phase 8-1 insight helpers with fixture data", () => {
-  it("computeBestPublishTimes picks correct time buckets for Asia/Seoul", async () => {
+  it("derives publish times, CTAs, and recommendations from fixture rows", async () => {
     const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
     const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
-    const defaultStats: OrgChannelStats = {
-      channel: "instagram",
-      sample_count: 0,
-      references: { likes: 50, comments: 10, shares: 5, saves: 15, follower_delta: 20 }
-    };
+    const expected = await loadJson<ExpectedInsightsFixture>("wfk-expected-insights.json");
+    const scoredRows = buildScoredRows(contents, batch);
 
-    const rows = contents.map((c) => {
-      const entry = batch.entries.find((e) => e.content_id === c.id);
-      const metrics = entry
-        ? { likes: entry.likes ?? entry.views ?? null, comments: entry.comments ?? null,
-            shares: entry.shares ?? null, saves: entry.saves ?? null, follower_delta: entry.follower_delta ?? null }
-        : null;
-      const score = metrics
-        ? computePerformanceScore(metrics, c.channel as "instagram", defaultStats)
-        : null;
-      return {
-        channel: c.channel,
-        published_at: c.published_at,
-        performance_score: score
-      };
-    });
+    const channelCounts = contents.reduce<Record<string, number>>((acc, content) => {
+      acc[content.channel] = (acc[content.channel] ?? 0) + 1;
+      return acc;
+    }, {});
 
-    const bestTimes = computeBestPublishTimes(rows, "Asia/Seoul");
+    const scoreSumByChannel: Record<string, number> = {};
+    const scoreCountByChannel: Record<string, number> = {};
+    for (const row of scoredRows) {
+      if (typeof row.performance_score !== "number") {
+        continue;
+      }
+      scoreSumByChannel[row.channel] = (scoreSumByChannel[row.channel] ?? 0) + row.performance_score;
+      scoreCountByChannel[row.channel] = (scoreCountByChannel[row.channel] ?? 0) + 1;
+    }
+    const avgScores = Object.fromEntries(
+      Object.entries(scoreSumByChannel).map(([channel, sum]) => [channel, sum / (scoreCountByChannel[channel] ?? 1)])
+    );
 
-    assert.ok(bestTimes.instagram, "instagram should have a best publish time");
-    assert.ok(bestTimes.instagram.includes("(Asia/Seoul)"), "should include timezone");
+    const bestTimes = computeBestPublishTimes(scoredRows, "Asia/Seoul");
+    const phrases = extractTopCtaPhrases(scoredRows, 5);
+    const recommendations = buildPerformanceAwareRecommendations(channelCounts, avgScores, scoreCountByChannel);
 
-    // Instagram high-performer published at 09:30 UTC = 18:30 KST → bucket 18:00-20:00
-    assert.ok(bestTimes.instagram.startsWith("18:00"), `expected 18:00 bucket, got ${bestTimes.instagram}`);
+    assert.deepEqual(bestTimes, expected.best_publish_times);
+    assert.equal(phrases.length >= expected.top_cta_phrases.min_count, true);
+    assert.equal(phrases.length <= expected.top_cta_phrases.max_count, true);
+
+    const matchedPhraseCount = expected.top_cta_phrases.expected_phrases.filter((phrase) =>
+      phrases.some((actual) => actual.includes(phrase.toLowerCase()) || phrase.toLowerCase().includes(actual))
+    ).length;
+    assert.ok(matchedPhraseCount >= 3, `expected at least 3 CTA phrase matches, got ${phrases.join(", ")}`);
+
+    const contentPattern = buildContentPatternSummary(channelCounts);
+    assert.equal(contentPattern, expected.content_pattern_summary.expected_pattern);
+
+    for (const [channel, rule] of Object.entries(expected.channel_recommendations)) {
+      const actual = recommendations[channel];
+      const avg = parseAvg(actual ?? "");
+      assert.ok(actual?.includes(rule.expected_contains), `missing phrase for ${channel}: ${actual}`);
+      assert.ok(typeof avg === "number" && avg >= rule.score_range[0] && avg <= rule.score_range[1], `${channel} avg out of range: ${avg}`);
+    }
   });
 
-  it("extractTopCtaPhrases finds Korean and English CTAs from high scorers", async () => {
-    const contents = await loadJson<ContentFixture[]>("wfk-published-contents.json");
-    const batch = await loadJson<MetricsBatchFixture>("wfk-metrics-batch-input.json");
-    const defaultStats: OrgChannelStats = {
-      channel: "instagram",
-      sample_count: 0,
-      references: { likes: 50, comments: 10, shares: 5, saves: 15, follower_delta: 20 }
-    };
-
-    const rows = contents.map((c) => {
-      const entry = batch.entries.find((e) => e.content_id === c.id);
-      const metrics = entry
-        ? { likes: entry.likes ?? entry.views ?? null, comments: entry.comments ?? null,
-            shares: entry.shares ?? null, saves: entry.saves ?? null, follower_delta: entry.follower_delta ?? null }
-        : null;
-      const score = metrics
-        ? computePerformanceScore(metrics, c.channel as "instagram", defaultStats)
-        : null;
-      return { body: c.body, performance_score: score };
-    });
-
-    const phrases = extractTopCtaPhrases(rows, 5);
-
-    assert.ok(phrases.length >= 2, `expected at least 2 CTA phrases, got ${phrases.length}`);
-    assert.ok(phrases.length <= 5, `expected at most 5 CTA phrases, got ${phrases.length}`);
-
-    // High-scoring content (id 001) has "지금 바로 신청" and "프로필 링크"
-    const allPhrases = phrases.join(" ");
-    const hasKoreanCta = allPhrases.includes("지금") || allPhrases.includes("프로필") || allPhrases.includes("링크");
-    assert.ok(hasKoreanCta, `expected Korean CTA phrases, got: ${phrases.join(", ")}`);
-  });
-
-  it("wfk-dummy-insights.json still parses with parseAccumulatedInsights", async () => {
+  it("wfk-dummy-insights fixture still parses as accumulated insights", async () => {
     const raw = await loadJson<Record<string, unknown>>("wfk-dummy-insights.json");
     const parsed = parseAccumulatedInsights(raw);
-    assert.ok(parsed, "old fixture should still parse");
+
+    assert.ok(parsed, "fixture should parse");
     assert.equal(parsed.content_count_at_generation, 87);
+    assert.ok(parsed.content_pattern_summary.startsWith("총 87개 콘텐츠"));
   });
 });

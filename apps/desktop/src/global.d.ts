@@ -1,11 +1,11 @@
 export {};
 import type {
+  AccumulatedInsights,
   Campaign,
   BrandProfile,
   ChatActionCardAction,
   ChatActionCardEventType,
   Content,
-  ContentMetricsInput,
   InterviewAnswers,
   OnboardingCrawlSourceResult,
   OnboardingCrawlStatus,
@@ -150,8 +150,15 @@ type ContentListInstagramTemplatesResult =
 type ContentSaveInstagramMetadataPayload = {
   contentId: string;
   templateId: string;
-  overlayTexts: Record<string, string>;
+  overlayTexts?: Record<string, string>;
   imageFileIds?: string[];
+  slides?: Array<{
+    slideIndex: number;
+    role: string;
+    overlayTexts: Record<string, string>;
+    imageFileIds?: string[];
+    imagePaths?: string[];
+  }>;
   expectedUpdatedAt?: string;
 };
 
@@ -174,6 +181,7 @@ type ContentComposeLocalPayload = {
   overlayTexts: Record<string, string>;
   imagePaths?: string[];
   imageFileIds?: string[];
+  slideIndex?: number;
   clientRequestId?: string;
 };
 
@@ -185,6 +193,39 @@ type ContentComposeLocalResult =
       width: number;
       height: number;
       sizeBytes: number;
+      requestId: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      code?: string;
+      status?: number;
+      details?: Record<string, unknown>;
+    };
+
+type ContentComposeCarouselPayload = {
+  contentId: string;
+  templateId: string;
+  slides: Array<{
+    slideIndex: number;
+    overlayTexts: Record<string, string>;
+    imagePaths?: string[];
+    imageFileIds?: string[];
+  }>;
+  clientRequestId?: string;
+};
+
+type ContentComposeCarouselResult =
+  | {
+      ok: true;
+      slides: Array<{
+        slideIndex: number;
+        composedPath: string;
+        thumbnailDataUrl: string;
+        width: number;
+        height: number;
+        sizeBytes: number;
+      }>;
       requestId: string;
     }
   | {
@@ -224,6 +265,7 @@ type ContentLoadActivityThumbnailsResult =
 type ContentDownloadImagePayload = {
   contentId: string;
   suggestedFileName?: string;
+  slideCount?: number;
 };
 
 type ContentDownloadImageResult =
@@ -254,18 +296,34 @@ type MetricsListPublishedWithMetricsResult = {
   message?: string;
 };
 
-type MetricsSubmitBatchPayload = {
-  entries: ContentMetricsInput[];
-  requestIdempotencyKey?: string;
-};
+type MetricsInsightsSource = "live" | "empty" | "error";
 
-type MetricsSubmitBatchResult = {
+type MetricsGetInsightsResult = {
   ok: boolean;
-  saved: number;
-  failed: number;
-  insights_refreshed: boolean;
+  insights: AccumulatedInsights | null;
+  updated_at: string | null;
+  source: MetricsInsightsSource;
   message?: string;
 };
+
+type MetricsWfkFixturesPayload = {
+  published_contents: unknown;
+  metrics_batch_input: unknown;
+  expected_insights: unknown;
+  validation_test_source: string;
+};
+
+type MetricsLoadWfkFixturesResult =
+  | {
+      ok: true;
+      fixtures: MetricsWfkFixturesPayload;
+      message?: string;
+    }
+  | {
+      ok: false;
+      fixtures: null;
+      message: string;
+    };
 
 type ChatAction =
   | "get-active-session"
@@ -627,16 +685,18 @@ declare global {
         saveLocal: (payload: ContentSaveLocalPayload) => Promise<ContentSaveLocalResult>;
         listInstagramTemplates: () => Promise<ContentListInstagramTemplatesResult>;
         composeLocal: (payload: ContentComposeLocalPayload) => Promise<ContentComposeLocalResult>;
+        composeCarousel: (payload: ContentComposeCarouselPayload) => Promise<ContentComposeCarouselResult>;
         loadActivityThumbnails: (
           payload?: ContentLoadActivityThumbnailsPayload
         ) => Promise<ContentLoadActivityThumbnailsResult>;
         downloadImage: (payload: ContentDownloadImagePayload) => Promise<ContentDownloadImageResult>;
       };
       metrics: {
+        getInsights: () => Promise<MetricsGetInsightsResult>;
         listPublishedWithMetrics: (
           payload?: MetricsListPublishedWithMetricsPayload
         ) => Promise<MetricsListPublishedWithMetricsResult>;
-        submitBatch: (payload: MetricsSubmitBatchPayload) => Promise<MetricsSubmitBatchResult>;
+        loadWfkFixtures: () => Promise<MetricsLoadWfkFixturesResult>;
       };
       onboarding: {
         onCrawlProgress: (cb: (payload: {

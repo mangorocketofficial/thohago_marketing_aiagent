@@ -42,12 +42,25 @@ contextBridge.exposeInMainWorld("desktopRuntime", {
     saveLocal: (payload) => ipcRenderer.invoke("content:save-local", payload),
     listInstagramTemplates: () => ipcRenderer.invoke("content:list-instagram-templates"),
     composeLocal: (payload) => ipcRenderer.invoke("content:compose-local", payload),
+    composeCarousel: (payload) => ipcRenderer.invoke("content:compose-carousel", payload),
     loadActivityThumbnails: (payload) => ipcRenderer.invoke("content:load-activity-thumbnails", payload),
     downloadImage: (payload) => ipcRenderer.invoke("content:download-image", payload)
   },
   metrics: {
+    getInsights: () => ipcRenderer.invoke("metrics:get-insights"),
     listPublishedWithMetrics: (payload) => ipcRenderer.invoke("metrics:list-published-with-metrics", payload),
-    submitBatch: (payload) => ipcRenderer.invoke("metrics:submit-batch", payload)
+    loadWfkFixtures: async () => {
+      try {
+        return await ipcRenderer.invoke("metrics:load-wfk-fixtures");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load WFK fixtures.";
+        return {
+          ok: false,
+          fixtures: null,
+          message: `${message} Restart the desktop app to refresh main-process IPC handlers.`
+        };
+      }
+    }
   },
   onboarding: {
     onCrawlProgress: (cb) => subscribe("onboarding:crawl-progress", cb),

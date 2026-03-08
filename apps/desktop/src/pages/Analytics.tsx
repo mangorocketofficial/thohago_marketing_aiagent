@@ -1,32 +1,33 @@
 import { useState } from "react";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { useTranslation } from "react-i18next";
+import { FixtureValidationPanel } from "./analytics/FixtureValidationPanel";
 import { InsightsPanel } from "./analytics/InsightsPanel";
-import { PerformanceInputPanel } from "./analytics/PerformanceInputPanel";
+import { PerformanceReviewPanel } from "./analytics/PerformanceReviewPanel";
 import { useAnalyticsData } from "./analytics/useAnalyticsData";
 
 type AnalyticsPageProps = {
-  supabase: SupabaseClient | null;
   orgId: string | null;
 };
 
-export const AnalyticsPage = ({ supabase, orgId }: AnalyticsPageProps) => {
+export const AnalyticsPage = ({ orgId }: AnalyticsPageProps) => {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"insights" | "input">("insights");
+  const [tab, setTab] = useState<"insights" | "review" | "fixture">("review");
   const {
     insights,
     insightsUpdatedAt,
+    insightsSource,
+    insightsNotice,
     publishedContents,
+    publishedSource,
+    publishedNotice,
     isLoadingInsights,
     isLoadingPublished,
     isLoadingMore,
     hasMorePublished,
-    notice,
     refreshInsights,
     refreshPublished,
-    loadMorePublished,
-    refreshAll
-  } = useAnalyticsData({ supabase, orgId });
+    loadMorePublished
+  } = useAnalyticsData({ orgId });
 
   return (
     <div className="app-shell ui-page-shell">
@@ -37,6 +38,13 @@ export const AnalyticsPage = ({ supabase, orgId }: AnalyticsPageProps) => {
         <div className="ui-analytics-tab-row">
           <button
             type="button"
+            className={`ui-analytics-tab ${tab === "review" ? "active" : ""}`}
+            onClick={() => setTab("review")}
+          >
+            {t("ui.pages.analytics.tabs.review")}
+          </button>
+          <button
+            type="button"
             className={`ui-analytics-tab ${tab === "insights" ? "active" : ""}`}
             onClick={() => setTab("insights")}
           >
@@ -44,10 +52,10 @@ export const AnalyticsPage = ({ supabase, orgId }: AnalyticsPageProps) => {
           </button>
           <button
             type="button"
-            className={`ui-analytics-tab ${tab === "input" ? "active" : ""}`}
-            onClick={() => setTab("input")}
+            className={`ui-analytics-tab ${tab === "fixture" ? "active" : ""}`}
+            onClick={() => setTab("fixture")}
           >
-            {t("ui.pages.analytics.tabs.input")}
+            {t("ui.pages.analytics.tabs.fixture")}
           </button>
         </div>
       </section>
@@ -56,28 +64,27 @@ export const AnalyticsPage = ({ supabase, orgId }: AnalyticsPageProps) => {
         <InsightsPanel
           insights={insights}
           updatedAt={insightsUpdatedAt}
+          source={insightsSource}
+          notice={insightsNotice}
           isLoading={isLoadingInsights}
           onRefresh={() => {
             void refreshInsights();
           }}
         />
-      ) : (
-        <PerformanceInputPanel
+      ) : tab === "review" ? (
+        <PerformanceReviewPanel
           publishedContents={publishedContents}
+          source={publishedSource}
+          notice={publishedNotice}
           isLoading={isLoadingPublished}
           isLoadingMore={isLoadingMore}
           hasMore={hasMorePublished}
           onRefreshPublished={refreshPublished}
           onLoadMorePublished={loadMorePublished}
-          onSubmitCompleted={async () => {
-            await refreshAll();
-            setTab("insights");
-          }}
         />
+      ) : (
+        <FixtureValidationPanel />
       )}
-
-      {notice ? <p className="notice">{notice}</p> : null}
     </div>
   );
 };
-

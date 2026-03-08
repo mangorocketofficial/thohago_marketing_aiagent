@@ -1,3 +1,4 @@
+import { ANALYTICS_CHANNELS } from "@repo/analytics";
 import { HttpError } from "../lib/errors";
 import type {
   CampaignPlan,
@@ -11,7 +12,7 @@ import type {
 export const DEFAULT_WORKSPACE_TYPE = "general";
 export const DEFAULT_SCOPE_ID = "default";
 
-const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const CHANNEL_SET = new Set(ANALYTICS_CHANNELS);
 
 export const asString = (value: unknown, fallback = ""): string => {
   if (typeof value === "string") {

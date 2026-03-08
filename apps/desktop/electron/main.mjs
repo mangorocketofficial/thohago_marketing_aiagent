@@ -4,7 +4,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { composeInstagramImage, getTemplate } from "@repo/media-engine";
+import { ANALYTICS_CHANNELS } from "@repo/analytics";
+import { composeCarouselImages, composeInstagramImage, getTemplate } from "@repo/media-engine";
 import { createInitialCrawlState, runOnboardingCrawl } from "./crawler/index.mjs";
 import { SEED_ORG_ID } from "./constants.mjs";
 import {
@@ -119,7 +120,7 @@ const SLOT_STATUS_SET = new Set([
   "skipped",
   "failed"
 ]);
-const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const CHANNEL_SET = new Set(ANALYTICS_CHANNELS);
 
 const parsePositiveInteger = (value) => {
   const parsed =
@@ -129,6 +130,19 @@ const parsePositiveInteger = (value) => {
         ? Number.parseInt(value.trim(), 10)
         : Number.NaN;
   if (!Number.isFinite(parsed) || parsed < 1) {
+    return null;
+  }
+  return Math.floor(parsed);
+};
+
+const parseNonNegativeInteger = (value) => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return null;
   }
   return Math.floor(parsed);
@@ -336,6 +350,21 @@ const resolveInstagramCachePath = (watchPath, contentId) => {
   };
 };
 
+const resolveInstagramSlideCachePath = (watchPath, contentId, slideIndex) => {
+  const cache = resolveInstagramCachePath(watchPath, contentId);
+  const normalizedSlideIndex = parseNonNegativeInteger(slideIndex);
+  if (normalizedSlideIndex === null) {
+    throw new Error("slideIndex must be a non-negative integer.");
+  }
+  const slidePath = path.resolve(cache.cacheDir, `slide-${normalizedSlideIndex}.png`);
+  ensurePathInsideRoot(path.resolve(watchPath), slidePath);
+  return {
+    ...cache,
+    slideIndex: normalizedSlideIndex,
+    slidePath
+  };
+};
+
 const parseOptionalStringArrayPayload = (value) => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -356,6 +385,35 @@ const parseOptionalStringMapPayload = (value) => {
     map[id] = entry;
   }
   return Object.keys(map).length > 0 ? map : undefined;
+};
+
+const parseOptionalInstagramSlidesPayload = (value) => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .map((entry, index) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return null;
+      }
+      const row = entry;
+      const slideIndex = parseNonNegativeInteger(row.slideIndex ?? row.slide_index ?? index);
+      if (slideIndex === null) {
+        return null;
+      }
+      const overlayTexts = parseOptionalStringMapPayload(row.overlayTexts ?? row.overlay_texts) ?? {};
+      const imagePaths = parseOptionalStringArrayPayload(row.imagePaths ?? row.image_paths);
+      const imageFileIds = parseOptionalStringArrayPayload(row.imageFileIds ?? row.image_file_ids);
+      return {
+        slideIndex,
+        role: typeof row.role === "string" ? row.role.trim() : "",
+        overlayTexts,
+        ...(imagePaths ? { imagePaths } : {}),
+        ...(imageFileIds ? { imageFileIds } : {})
+      };
+    })
+    .filter((entry) => !!entry);
 };
 
 const parseOptionalSchedulerCursor = (value) => {
@@ -407,18 +465,11 @@ const parseOptionalMetricsChannel = (value) => {
   return normalized;
 };
 
-const parseMetricsRequestIdempotencyKey = (value) => {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-  const normalized = String(value).trim();
-  if (!normalized) {
-    return null;
-  }
-  if (!/^[A-Za-z0-9:_-]{8,120}$/.test(normalized)) {
-    throw new Error("requestIdempotencyKey format is invalid.");
-  }
-  return normalized;
+const resolveRepoRootPath = () => path.resolve(__dirname, "..", "..", "..");
+
+const loadJsonFixtureFile = async (filePath) => {
+  const raw = await fs.promises.readFile(filePath, "utf8");
+  return JSON.parse(raw);
 };
 
 const buildChatActionIdempotencyKey = (params) => {
@@ -1890,6 +1941,7 @@ const registerIpcHandlers = () => {
 
     const overlayTexts = parseOptionalStringMapPayload(payload?.overlayTexts);
     const imageFileIds = parseOptionalStringArrayPayload(payload?.imageFileIds);
+    const slides = parseOptionalInstagramSlidesPayload(payload?.slides);
 
     try {
       const body = await callOrchestratorApi(
@@ -1900,6 +1952,16 @@ const registerIpcHandlers = () => {
             template_id: templateId,
             ...(overlayTexts ? { overlay_texts: overlayTexts } : {}),
             ...(imageFileIds ? { image_file_ids: imageFileIds } : {}),
+            ...(slides
+              ? {
+                  slides: slides.map((slide) => ({
+                    slide_index: slide.slideIndex,
+                    role: slide.role,
+                    overlay_texts: slide.overlayTexts,
+                    ...(slide.imageFileIds ? { image_file_ids: slide.imageFileIds } : {})
+                  }))
+                }
+              : {}),
             ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {})
           })
         }
@@ -1937,6 +1999,15 @@ const registerIpcHandlers = () => {
     const clientRequestId = typeof payload?.clientRequestId === "string" ? payload.clientRequestId.trim() : "";
     try {
       const contentId = sanitizeContentId(payload?.contentId);
+      const slideIndex = parseNonNegativeInteger(payload?.slideIndex ?? 0);
+      if (slideIndex === null) {
+        return {
+          ok: false,
+          message: "slideIndex must be a non-negative integer.",
+          code: "invalid_payload",
+          status: 400
+        };
+      }
       const templateId = typeof payload?.templateId === "string" ? payload.templateId.trim() : "";
       if (!templateId) {
         return {
@@ -1992,9 +2063,12 @@ const registerIpcHandlers = () => {
         outputFormat: "png"
       });
 
-      const cache = resolveInstagramCachePath(watchPath, contentId);
+      const cache = resolveInstagramSlideCachePath(watchPath, contentId, slideIndex);
       await fs.promises.mkdir(cache.cacheDir, { recursive: true });
-      await fs.promises.writeFile(cache.composedPath, composed.buffer);
+      await fs.promises.writeFile(cache.slidePath, composed.buffer);
+      if (slideIndex === 0) {
+        await fs.promises.writeFile(cache.composedPath, composed.buffer);
+      }
       const thumbnailDataUrl = toThumbnailDataUrlFromBuffer(composed.buffer, 420);
       if (!thumbnailDataUrl) {
         return {
@@ -2007,7 +2081,7 @@ const registerIpcHandlers = () => {
 
       return {
         ok: true,
-        composedPath: cache.composedPath,
+        composedPath: cache.slidePath,
         thumbnailDataUrl,
         width: composed.width,
         height: composed.height,
@@ -2016,6 +2090,132 @@ const registerIpcHandlers = () => {
       };
     } catch (error) {
       const runtimeError = toRuntimeError(error, "Failed to compose instagram image locally.");
+      return {
+        ok: false,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "compose_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("content:compose-carousel", async (_, payload) => {
+    const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
+    if (!watchPath) {
+      return {
+        ok: false,
+        message: "watchPath is not configured.",
+        code: "no_watch_path",
+        status: 400
+      };
+    }
+
+    const clientRequestId = typeof payload?.clientRequestId === "string" ? payload.clientRequestId.trim() : "";
+    try {
+      const contentId = sanitizeContentId(payload?.contentId);
+      const templateId = typeof payload?.templateId === "string" ? payload.templateId.trim() : "";
+      if (!templateId) {
+        return {
+          ok: false,
+          message: "templateId is required.",
+          code: "invalid_payload",
+          status: 400
+        };
+      }
+
+      const template = getTemplate(templateId);
+      if (!template) {
+        return {
+          ok: false,
+          message: `Unsupported templateId: ${templateId}`,
+          code: "invalid_payload",
+          status: 400
+        };
+      }
+
+      const slides = parseOptionalInstagramSlidesPayload(payload?.slides);
+      if (!slides || slides.length === 0) {
+        return {
+          ok: false,
+          message: "slides are required.",
+          code: "invalid_payload",
+          status: 400
+        };
+      }
+
+      const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
+      const maxImageCount = template.photos.length;
+      const resolvedSlides = slides.map((slide, index) => {
+        const resolvedImagePaths = (slide.imagePaths ?? [])
+          .map((relativePath) => {
+            try {
+              return resolveComposeImagePath(relativePath);
+            } catch {
+              return "";
+            }
+          })
+          .filter((entry) => !!entry);
+
+        if (resolvedImagePaths.length < requiredImageCount || resolvedImagePaths.length > maxImageCount) {
+          throw new Error(
+            `Invalid image slot count for slide ${index + 1}. Expected ${requiredImageCount}-${maxImageCount}, got ${resolvedImagePaths.length}.`
+          );
+        }
+
+        return {
+          slideIndex: slide.slideIndex,
+          overlayTexts: slide.overlayTexts,
+          userImages: resolvedImagePaths
+        };
+      });
+
+      const composed = await composeCarouselImages({
+        templateId,
+        slides: resolvedSlides.map((slide) => ({
+          userImages: slide.userImages,
+          overlayTexts: slide.overlayTexts
+        })),
+        outputFormat: "png"
+      });
+
+      const cache = resolveInstagramCachePath(watchPath, contentId);
+      await fs.promises.mkdir(cache.cacheDir, { recursive: true });
+      const slideResults = [];
+
+      for (const [index, result] of composed.slides.entries()) {
+        const slideCache = resolveInstagramSlideCachePath(watchPath, contentId, index);
+        await fs.promises.writeFile(slideCache.slidePath, result.buffer);
+        if (index === 0) {
+          await fs.promises.writeFile(slideCache.composedPath, result.buffer);
+        }
+        const thumbnailDataUrl = toThumbnailDataUrlFromBuffer(result.buffer, 420);
+        if (!thumbnailDataUrl) {
+          return {
+            ok: false,
+            message: "Failed to generate preview thumbnail.",
+            code: "compose_failed",
+            status: 500
+          };
+        }
+
+        slideResults.push({
+          slideIndex: resolvedSlides[index]?.slideIndex ?? index,
+          composedPath: slideCache.slidePath,
+          thumbnailDataUrl,
+          width: result.width,
+          height: result.height,
+          sizeBytes: result.sizeBytes
+        });
+      }
+
+      return {
+        ok: true,
+        slides: slideResults,
+        requestId: clientRequestId || `${Date.now()}`
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to compose instagram carousel locally.");
       return {
         ok: false,
         message: runtimeError.message,
@@ -2113,21 +2313,11 @@ const registerIpcHandlers = () => {
       };
     }
 
+    const slideCount = parsePositiveInteger(payload?.slideCount) ?? 1;
     const suggestedFileName =
       typeof payload?.suggestedFileName === "string" && payload.suggestedFileName.trim()
         ? payload.suggestedFileName.trim()
         : `instagram_${contentId}.png`;
-
-    const result = await dialog.showSaveDialog({
-      defaultPath: suggestedFileName,
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg"] }]
-    });
-    if (!result.filePath) {
-      return {
-        ok: false,
-        cancelled: true
-      };
-    }
 
     try {
       const watchPath = String(runtimeState.watchPath || getDesktopConfig().watchPath || "").trim();
@@ -2141,7 +2331,44 @@ const registerIpcHandlers = () => {
         };
       }
 
-      const cache = resolveInstagramCachePath(watchPath, sanitizeContentId(contentId));
+      const normalizedContentId = sanitizeContentId(contentId);
+      const cache = resolveInstagramCachePath(watchPath, normalizedContentId);
+      if (slideCount > 1) {
+        const directoryResult = await dialog.showOpenDialog({
+          properties: ["openDirectory", "createDirectory"]
+        });
+        const targetDirectory = directoryResult.filePaths[0];
+        if (!targetDirectory) {
+          return {
+            ok: false,
+            cancelled: true
+          };
+        }
+
+        for (let index = 0; index < slideCount; index += 1) {
+          const slideCache = resolveInstagramSlideCachePath(watchPath, normalizedContentId, index);
+          await fs.promises.access(slideCache.slidePath, fs.constants.R_OK);
+          await fs.promises.copyFile(slideCache.slidePath, path.resolve(targetDirectory, `slide-${index + 1}.png`));
+        }
+
+        return {
+          ok: true,
+          cancelled: false,
+          filePath: targetDirectory
+        };
+      }
+
+      const result = await dialog.showSaveDialog({
+        defaultPath: suggestedFileName,
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg"] }]
+      });
+      if (!result.filePath) {
+        return {
+          ok: false,
+          cancelled: true
+        };
+      }
+
       await fs.promises.access(cache.composedPath, fs.constants.R_OK);
       await fs.promises.copyFile(cache.composedPath, result.filePath);
       return {
@@ -2158,6 +2385,29 @@ const registerIpcHandlers = () => {
         code: runtimeError.code ?? "request_failed",
         status: runtimeError.status ?? 500,
         details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:get-insights", async () => {
+    try {
+      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/metrics/insights`, {
+        method: "GET"
+      });
+      return {
+        ok: true,
+        insights: body?.insights ?? null,
+        updated_at: typeof body?.updated_at === "string" ? body.updated_at : null,
+        source: body?.source === "live" ? "live" : "empty"
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load analytics insights.";
+      return {
+        ok: false,
+        insights: null,
+        updated_at: null,
+        source: "error",
+        message
       };
     }
   });
@@ -2207,41 +2457,33 @@ const registerIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle("metrics:submit-batch", async (_, payload) => {
-    const entries = Array.isArray(payload?.entries) ? payload.entries : [];
-    if (!entries.length) {
-      return {
-        ok: false,
-        saved: 0,
-        failed: 0,
-        insights_refreshed: false,
-        message: "entries must be a non-empty array."
-      };
-    }
-
+  ipcMain.handle("metrics:load-wfk-fixtures", async () => {
     try {
-      const requestIdempotencyKey = parseMetricsRequestIdempotencyKey(payload?.requestIdempotencyKey);
-      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/metrics/batch`, {
-        method: "POST",
-        body: JSON.stringify({
-          entries,
-          ...(requestIdempotencyKey ? { request_idempotency_key: requestIdempotencyKey } : {})
-        })
-      });
+      const repoRoot = resolveRepoRootPath();
+      const fixturesDir = path.resolve(repoRoot, "apps", "api", "tests", "fixtures");
+      const validationTestPath = path.resolve(repoRoot, "apps", "api", "tests", "phase-8-1-fixtures-validation.test.ts");
+
+      const [publishedContents, metricsBatchInput, expectedInsights, validationTestSource] = await Promise.all([
+        loadJsonFixtureFile(path.resolve(fixturesDir, "wfk-published-contents.json")),
+        loadJsonFixtureFile(path.resolve(fixturesDir, "wfk-metrics-batch-input.json")),
+        loadJsonFixtureFile(path.resolve(fixturesDir, "wfk-expected-insights.json")),
+        fs.promises.readFile(validationTestPath, "utf8")
+      ]);
 
       return {
         ok: true,
-        saved: typeof body?.saved === "number" && Number.isFinite(body.saved) ? body.saved : 0,
-        failed: typeof body?.failed === "number" && Number.isFinite(body.failed) ? body.failed : 0,
-        insights_refreshed: body?.insights_refreshed === true
+        fixtures: {
+          published_contents: publishedContents,
+          metrics_batch_input: metricsBatchInput,
+          expected_insights: expectedInsights,
+          validation_test_source: validationTestSource
+        }
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to submit metrics batch.";
+      const message = error instanceof Error ? error.message : "Failed to load WFK fixtures.";
       return {
         ok: false,
-        saved: 0,
-        failed: entries.length,
-        insights_refreshed: false,
+        fixtures: null,
         message
       };
     }

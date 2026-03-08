@@ -1,10 +1,11 @@
+import { ANALYTICS_CHANNELS } from "@repo/analytics";
 import { HttpError } from "../../lib/errors";
 import type { ScheduleSlotStatus } from "../../orchestrator/scheduler-status";
 import type { ScheduledContentCursor } from "../queries/list-scheduled-content";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CHANNEL_SET = new Set(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
+const CHANNEL_SET = new Set(ANALYTICS_CHANNELS);
 const SLOT_STATUS_SET: Set<ScheduleSlotStatus> = new Set([
   "scheduled",
   "generating",

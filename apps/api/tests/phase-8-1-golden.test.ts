@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { HttpError } from "../src/lib/errors";
 import {
   buildPerformanceAwareRecommendations,
   computeBestPublishTimes,
   extractTopCtaPhrases
-} from "../src/rag/compute-insights";
+} from "@repo/analytics";
+import { HttpError } from "../src/lib/errors";
 import { computePerformanceScore, type OrgChannelStats } from "../src/rag/performance-scorer";
 import {
   encodeMetricsCursor,
@@ -132,4 +132,3 @@ describe("Phase 8-1 golden snapshots", () => {
     );
   });
 });
-

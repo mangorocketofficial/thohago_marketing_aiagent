@@ -95,6 +95,7 @@ export type ContentMetricsRow = {
   content_id: string;
   channel: Channel;
   likes: number | null;
+  views: number | null;
   comments: number | null;
   shares: number | null;
   saves: number | null;
@@ -106,7 +107,7 @@ export type ContentMetricsRow = {
   created_at: string;
 };
 
-/** Published content card with latest metrics snapshot for analytics input UI. */
+/** Published content card with latest metrics snapshot for analytics review UI. */
 export type PublishedContentWithMetrics = {
   id: string;
   channel: Channel;

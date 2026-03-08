@@ -1,11 +1,11 @@
 {
-  "description": "WFK org batch metrics input — simulates manual entry for 20 published contents",
-  "request_idempotency_key": "wfk-test-batch-20260307-001",
+  "description": "WFK org batch metrics input fixture for API-collected analytics coverage.",
+  "request_idempotency_key": "wfk-test-batch-20260308-001",
   "entries": [
     {
       "content_id": "c0000001-0000-0000-0000-000000000001",
       "_channel": "instagram",
-      "_note": "23기 모집 공고 — 고성과 (강한 CTA, 저녁시간 발행)",
+      "_note": "recruitment announcement with strong CTA",
       "likes": 320,
       "comments": 48,
       "shares": 35,
@@ -15,7 +15,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000002",
       "_channel": "instagram",
-      "_note": "에티오피아 봉사 후기 — 중상 성과",
+      "_note": "field story with healthy engagement",
       "likes": 210,
       "comments": 32,
       "shares": 18,
@@ -25,7 +25,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000003",
       "_channel": "instagram",
-      "_note": "SDGs 캠페인 — 보통 성과",
+      "_note": "campaign story with moderate engagement",
       "likes": 140,
       "comments": 15,
       "shares": 8,
@@ -35,7 +35,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000004",
       "_channel": "instagram",
-      "_note": "체크리스트 — 저성과 (이른 아침 발행)",
+      "_note": "checklist post with weak engagement",
       "likes": 65,
       "comments": 4,
       "shares": 2,
@@ -45,7 +45,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000005",
       "_channel": "instagram",
-      "_note": "상반기 일정 공개 — 중간 성과",
+      "_note": "schedule announcement with stable engagement",
       "likes": 180,
       "comments": 22,
       "shares": 14,
@@ -55,35 +55,35 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000011",
       "_channel": "naver_blog",
-      "_note": "모집 안내 — 고성과 (오전 10시 발행, 강한 CTA)",
+      "_note": "recruitment guide with strong search demand",
       "views": 3200,
       "comments": 45
     },
     {
       "content_id": "c0000001-0000-0000-0000-000000000012",
       "_channel": "naver_blog",
-      "_note": "라오스 현장 리포트 — 중상 성과",
+      "_note": "field report with moderate traffic",
       "views": 2100,
       "comments": 28
     },
     {
       "content_id": "c0000001-0000-0000-0000-000000000013",
       "_channel": "naver_blog",
-      "_note": "캄보디아 의료봉사 후기 — 보통 성과",
+      "_note": "returnee story with mid-tier traffic",
       "views": 1400,
       "comments": 18
     },
     {
       "content_id": "c0000001-0000-0000-0000-000000000014",
       "_channel": "naver_blog",
-      "_note": "FAQ 총정리 — 중간 성과 (실용적 콘텐츠)",
+      "_note": "faq summary with practical intent",
       "views": 1800,
       "comments": 12
     },
     {
       "content_id": "c0000001-0000-0000-0000-000000000021",
       "_channel": "youtube",
-      "_note": "밀착 다큐 VLOG — 고성과",
+      "_note": "vlog episode with high watch interest",
       "views": 8500,
       "likes": 420,
       "comments": 65
@@ -91,7 +91,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000022",
       "_channel": "youtube",
-      "_note": "합격자 인터뷰 — 중상 성과",
+      "_note": "interview episode with solid performance",
       "views": 5200,
       "likes": 280,
       "comments": 42
@@ -99,7 +99,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000023",
       "_channel": "youtube",
-      "_note": "문화 가이드 — 보통 성과",
+      "_note": "culture guide with moderate watch demand",
       "views": 3100,
       "likes": 150,
       "comments": 22
@@ -107,7 +107,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000031",
       "_channel": "facebook",
-      "_note": "모집 공고 — 고성과 (공유 많음)",
+      "_note": "recruitment announcement with strong sharing",
       "likes": 180,
       "comments": 25,
       "shares": 62
@@ -115,7 +115,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000032",
       "_channel": "facebook",
-      "_note": "사진 모음 — 보통 성과",
+      "_note": "photo recap with moderate interaction",
       "likes": 95,
       "comments": 12,
       "shares": 18
@@ -123,7 +123,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000033",
       "_channel": "facebook",
-      "_note": "동문 네트워크 — 중간 성과",
+      "_note": "online session announcement",
       "likes": 120,
       "comments": 15,
       "shares": 28
@@ -131,7 +131,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000041",
       "_channel": "threads",
-      "_note": "마감 D-7 — 고성과 (긴급성 CTA)",
+      "_note": "deadline CTA post",
       "likes": 95,
       "comments": 18,
       "shares": 22,
@@ -140,7 +140,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000042",
       "_channel": "threads",
-      "_note": "현장 스냅 — 보통 성과",
+      "_note": "field snapshot",
       "likes": 52,
       "comments": 8,
       "shares": 5,
@@ -149,7 +149,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000043",
       "_channel": "threads",
-      "_note": "혜택 총정리 — 중상 성과",
+      "_note": "selection process summary",
       "likes": 78,
       "comments": 14,
       "shares": 16,
@@ -158,7 +158,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000044",
       "_channel": "threads",
-      "_note": "합격 발표일 안내 — 중간 성과",
+      "_note": "announcement reminder",
       "likes": 60,
       "comments": 10,
       "shares": 8,
@@ -167,7 +167,7 @@
     {
       "content_id": "c0000001-0000-0000-0000-000000000045",
       "_channel": "threads",
-      "_note": "AMA 세션 — 저성과 (타이밍 아쉬움)",
+      "_note": "ama preview with low engagement",
       "likes": 35,
       "comments": 6,
       "shares": 3,

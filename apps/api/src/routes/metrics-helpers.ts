@@ -1,3 +1,4 @@
+import { ANALYTICS_CHANNELS, ANALYTICS_METRIC_FIELDS, normalizeMetricsForStorage } from "@repo/analytics";
 import type { Response } from "express";
 import type { Channel, ContentMetricsInput } from "@repo/types";
 import { HttpError, toHttpError } from "../lib/errors";
@@ -8,8 +9,8 @@ import { type RawMetrics } from "../rag/performance-scorer";
 import { syncPerformanceScoreToRag } from "../rag/rag-score-sync";
 
 export const PUBLISHED_STATUSES = ["published", "historical"] as const;
-const CHANNEL_SET = new Set<Channel>(["instagram", "threads", "naver_blog", "facebook", "youtube"]);
-const FIELD_ORDER = ["views", "likes", "comments", "shares", "saves", "follower_delta"] as const;
+const CHANNEL_SET = new Set<Channel>(ANALYTICS_CHANNELS);
+const FIELD_ORDER = ANALYTICS_METRIC_FIELDS;
 
 export const MAX_BATCH_ENTRIES = 100;
 export const MAX_LIST_LIMIT = 50;
@@ -105,6 +106,9 @@ export const parseMetricsCursor = (value: unknown): MetricsCursor | null => {
   }
 };
 
+export const buildMetricsCursorFilter = (cursor: MetricsCursor): string =>
+  `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`;
+
 const hasAnyMetric = (entry: ParsedMetricsInput): boolean =>
   FIELD_ORDER.some((field) => typeof (entry as Record<string, unknown>)[field] === "number");
 
@@ -144,34 +148,7 @@ export const parseMetricsEntries = (value: unknown): ParsedMetricsInput[] => {
 };
 
 export const toCanonicalMetrics = (channel: Channel, entry: ParsedMetricsInput): RawMetrics => {
-  if (channel === "naver_blog" || channel === "youtube") {
-    return {
-      likes: entry.views ?? entry.likes ?? null,
-      comments: entry.comments
-    };
-  }
-  if (channel === "facebook") {
-    return {
-      likes: entry.likes,
-      comments: entry.comments,
-      shares: entry.shares
-    };
-  }
-  if (channel === "threads") {
-    return {
-      likes: entry.likes,
-      comments: entry.comments,
-      shares: entry.shares,
-      follower_delta: entry.follower_delta
-    };
-  }
-  return {
-    likes: entry.likes,
-    comments: entry.comments,
-    shares: entry.shares,
-    saves: entry.saves,
-    follower_delta: entry.follower_delta
-  };
+  return normalizeMetricsForStorage(channel, entry);
 };
 
 export const parseRequestIdempotencyKey = (body: Record<string, unknown>): string | null => {
@@ -196,4 +173,3 @@ export const runMetricsFollowUp = async (orgId: string, scoresByContent: Map<str
   await updateAccumulatedInsights(orgId);
   await invalidateMemoryCache(orgId);
 };
-

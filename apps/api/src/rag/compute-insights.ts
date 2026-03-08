@@ -1,15 +1,15 @@
-import type { AccumulatedInsights, Channel } from "@repo/types";
-import { supabaseAdmin } from "../lib/supabase-admin";
 import {
+  ANALYTICS_CHANNELS,
   buildContentPatternSummary,
   buildPerformanceAwareRecommendations,
   computeBestPublishTimes,
   extractTopCtaPhrases,
   normalizeTimezone
-} from "./performance-insight-helpers";
+} from "@repo/analytics";
+import type { AccumulatedInsights, Channel } from "@repo/types";
+import { supabaseAdmin } from "../lib/supabase-admin";
 
 const PUBLISHED_STATUSES = ["published", "historical"] as const;
-const CHANNELS: readonly Channel[] = ["instagram", "threads", "naver_blog", "facebook", "youtube"] as const;
 
 type PublishedContentRow = {
   id: string;
@@ -195,7 +195,7 @@ export const computeInsights = async (orgId: string): Promise<AccumulatedInsight
   const published = await loadPublishedContents(orgId);
 
   const countEntries = await Promise.all(
-    CHANNELS.map(async (channel) => [channel, await countPublishedByChannel(orgId, channel)] as const)
+    ANALYTICS_CHANNELS.map(async (channel) => [channel, await countPublishedByChannel(orgId, channel)] as const)
   );
   const channelCounts: Record<string, number> = {};
   for (const [channel, count] of countEntries) {

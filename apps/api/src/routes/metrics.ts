@@ -1,3 +1,4 @@
+import { parseAccumulatedInsights } from "@repo/analytics";
 import { Router } from "express";
 import type { Channel, ContentMetricsRow, PublishedContentWithMetrics } from "@repo/types";
 import { requireApiSecret } from "../lib/auth";
@@ -10,6 +11,7 @@ import {
   MAX_LIST_LIMIT,
   PUBLISHED_STATUSES,
   SYNC_FOLLOWUP_ENTRY_LIMIT,
+  buildMetricsCursorFilter,
   encodeMetricsCursor,
   parseMetricsCursor,
   parseMetricsEntries,
@@ -22,6 +24,35 @@ import {
 } from "./metrics-helpers";
 
 export const metricsRouter: Router = Router();
+
+metricsRouter.get("/orgs/:orgId/metrics/insights", async (req, res) => {
+  if (!requireApiSecret(req, res)) {
+    return;
+  }
+
+  try {
+    const orgId = parseRequiredString(req.params.orgId, "orgId");
+    const { data, error } = await supabaseAdmin
+      .from("org_brand_settings")
+      .select("accumulated_insights,updated_at")
+      .eq("org_id", orgId)
+      .maybeSingle();
+
+    if (error) {
+      throw new HttpError(500, "db_error", `Failed to load accumulated insights: ${error.message}`);
+    }
+
+    const insights = parseAccumulatedInsights(data?.accumulated_insights ?? null);
+    res.json({
+      ok: true,
+      insights,
+      updated_at: typeof data?.updated_at === "string" ? data.updated_at : null,
+      source: insights ? "live" : "empty"
+    });
+  } catch (error) {
+    sendMetricsError(res, error);
+  }
+});
 
 metricsRouter.get("/orgs/:orgId/metrics/published-contents", async (req, res) => {
   if (!requireApiSecret(req, res)) {
@@ -47,7 +78,7 @@ metricsRouter.get("/orgs/:orgId/metrics/published-contents", async (req, res) =>
       query = query.eq("channel", channel);
     }
     if (cursor) {
-      query = query.lt("created_at", cursor.created_at);
+      query = query.or(buildMetricsCursorFilter(cursor));
     }
 
     const { data, error } = await query;
@@ -67,7 +98,7 @@ metricsRouter.get("/orgs/:orgId/metrics/published-contents", async (req, res) =>
       const { data: metricsData, error: metricsError } = await supabaseAdmin
         .from("content_metrics")
         .select(
-          "id,org_id,content_id,channel,likes,comments,shares,saves,follower_delta,performance_score,collection_source,idempotency_key,collected_at,created_at"
+          "id,org_id,content_id,channel,likes,views,comments,shares,saves,follower_delta,performance_score,collection_source,idempotency_key,collected_at,created_at"
         )
         .eq("org_id", orgId)
         .in("content_id", contentIds)
@@ -217,12 +248,13 @@ metricsRouter.post("/orgs/:orgId/metrics/batch", async (req, res) => {
         content_id: entry.content_id,
         channel: content.channel,
         likes: metrics.likes ?? null,
+        views: metrics.views ?? null,
         comments: metrics.comments ?? null,
         shares: metrics.shares ?? null,
         saves: metrics.saves ?? null,
         follower_delta: metrics.follower_delta ?? null,
         performance_score: performanceScore,
-        collection_source: "manual",
+        collection_source: "api_batch",
         idempotency_key: idempotencyKey,
         collected_at: new Date().toISOString()
       });
@@ -268,4 +300,3 @@ metricsRouter.post("/orgs/:orgId/metrics/batch", async (req, res) => {
     sendMetricsError(res, error);
   }
 });
-

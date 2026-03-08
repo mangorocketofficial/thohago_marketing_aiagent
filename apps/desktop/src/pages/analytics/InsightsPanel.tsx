@@ -1,14 +1,15 @@
+import { extractKeyCountEntries, toOrderedAnalyticsChannels } from "@repo/analytics";
+import type { AccumulatedInsights } from "@repo/types";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { AccumulatedInsights } from "@repo/types";
 import { resolveChannelPresentation } from "../../components/scheduler/card-presentation";
-import { extractKeyCountEntries } from "./insights-parser";
-
-const CHANNEL_ORDER = ["naver_blog", "instagram", "youtube", "facebook", "threads"] as const;
+import type { AnalyticsReadSource } from "./useAnalyticsData";
 
 type InsightsPanelProps = {
   insights: AccumulatedInsights | null;
   updatedAt: string | null;
+  source: AnalyticsReadSource;
+  notice: string;
   isLoading: boolean;
   onRefresh: () => void;
 };
@@ -24,36 +25,43 @@ const formatDateTime = (value: string | null): string => {
   return parsed.toLocaleString();
 };
 
-const toOrderedChannels = (channels: string[]): string[] => {
-  const known = new Set(CHANNEL_ORDER as readonly string[]);
-  const set = new Set(channels.map((channel) => channel.trim().toLowerCase()).filter(Boolean));
-  const ordered = CHANNEL_ORDER.filter((channel) => set.has(channel));
-  const extras = [...set].filter((channel) => !known.has(channel)).sort((a, b) => a.localeCompare(b));
-  return [...ordered, ...extras];
+const buildBannerText = (
+  source: AnalyticsReadSource,
+  notice: string,
+  t: ReturnType<typeof useTranslation>["t"]
+): string => {
+  if (source === "error") {
+    return notice || t("ui.pages.analytics.source.error");
+  }
+  if (source === "empty") {
+    return t("ui.pages.analytics.source.empty");
+  }
+  return t("ui.pages.analytics.source.live");
 };
 
-export const InsightsPanel = ({ insights, updatedAt, isLoading, onRefresh }: InsightsPanelProps) => {
+export const InsightsPanel = ({ insights, updatedAt, source, notice, isLoading, onRefresh }: InsightsPanelProps) => {
   const { t } = useTranslation();
 
   const channels = useMemo(() => {
     if (!insights) {
       return [];
     }
-    return toOrderedChannels([...Object.keys(insights.best_publish_times), ...Object.keys(insights.channel_recommendations)]);
+    return toOrderedAnalyticsChannels([
+      ...Object.keys(insights.best_publish_times),
+      ...Object.keys(insights.channel_recommendations)
+    ]);
   }, [insights]);
 
   const channelCounts = useMemo(() => {
-    if (!insights) {
-      return new Map<string, number>();
-    }
-    return new Map(extractKeyCountEntries(insights.content_pattern_summary).map((entry) => [entry.key, entry.count]));
+    return new Map(extractKeyCountEntries(insights?.content_pattern_summary ?? "").map((entry) => [entry.key, entry.count]));
   }, [insights]);
 
   const editPreferenceCounts = useMemo(() => {
-    if (!insights) {
-      return [];
-    }
-    return extractKeyCountEntries(insights.user_edit_preference_summary);
+    return extractKeyCountEntries(insights?.user_edit_preference_summary ?? "");
+  }, [insights]);
+
+  const recommendationChannels = useMemo(() => {
+    return toOrderedAnalyticsChannels(Object.keys(insights?.channel_recommendations ?? {}));
   }, [insights]);
 
   return (
@@ -61,22 +69,22 @@ export const InsightsPanel = ({ insights, updatedAt, isLoading, onRefresh }: Ins
       <section className="panel ui-page-panel">
         <div className="ui-meta-row">
           <p className="meta">
-            {t("ui.pages.analytics.generatedAtLabel")}:{" "}
-            <strong>{formatDateTime(insights?.generated_at ?? updatedAt)}</strong>
+            {t("ui.pages.analytics.generatedAtLabel")}: <strong>{formatDateTime(insights?.generated_at ?? updatedAt)}</strong>
           </p>
           <button type="button" onClick={onRefresh} disabled={isLoading}>
             {t("ui.common.refresh")}
           </button>
         </div>
+        <p className={`ui-analytics-source-banner ${source}`}>{buildBannerText(source, notice, t)}</p>
       </section>
 
       {isLoading ? (
         <section className="panel ui-page-panel">
-          <p className="empty">{t("ui.pages.analytics.input.loading")}</p>
+          <p className="empty">{t("ui.pages.analytics.insights.loading")}</p>
         </section>
       ) : !insights ? (
         <section className="panel ui-page-panel">
-          <p className="empty">{t("ui.pages.analytics.input.noMetrics")}</p>
+          <p className="empty">{t("ui.pages.analytics.insights.empty")}</p>
         </section>
       ) : (
         <>
@@ -147,9 +155,7 @@ export const InsightsPanel = ({ insights, updatedAt, isLoading, onRefresh }: Ins
             </article>
             <article className="ui-insight-card">
               <h2>{t("ui.pages.analytics.userPreferenceTitle")}</h2>
-              <p className="ui-insight-summary">
-                {insights.user_edit_preference_summary || t("ui.common.notAvailable")}
-              </p>
+              <p className="ui-insight-summary">{insights.user_edit_preference_summary || t("ui.common.notAvailable")}</p>
               {editPreferenceCounts.length > 0 ? (
                 <div className="ui-insight-chip-row">
                   {editPreferenceCounts.map((entry) => (
@@ -161,9 +167,27 @@ export const InsightsPanel = ({ insights, updatedAt, isLoading, onRefresh }: Ins
               ) : null}
             </article>
           </section>
+
+          <section className="panel ui-page-panel">
+            <h2>{t("ui.pages.analytics.channelRecommendationsTitle")}</h2>
+            {recommendationChannels.length === 0 ? (
+              <p className="empty">{t("ui.pages.analytics.channelRecommendationEmpty")}</p>
+            ) : (
+              <div className="ui-insight-recommendation-grid">
+                {recommendationChannels.map((channel) => (
+                  <article key={channel} className="ui-insight-card ui-insight-recommendation-card">
+                    <div className="ui-insight-recommendation-head">
+                      <h3>{resolveChannelPresentation(channel).label}</h3>
+                      <span className="ui-insight-pill">{channelCounts.get(channel) ?? 0}</span>
+                    </div>
+                    <p>{insights.channel_recommendations[channel]}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
     </>
   );
 };
-
