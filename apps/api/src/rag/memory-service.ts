@@ -1,6 +1,8 @@
 import { buildMemoryMd, countTokens } from "@repo/rag";
+import { toLatestAnalysisSummary } from "../analytics/report-repository";
 import { HttpError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { getLatestAnalysisReport } from "../analytics/report-repository";
 import { loadActiveCampaigns, loadOrgBrandSettings, parseAccumulatedInsights } from "./data";
 
 export type MemoryMdResponse = {
@@ -50,9 +52,9 @@ export const getMemoryMdForOrg = async (orgId: string): Promise<MemoryMdResponse
     throw new HttpError(404, "not_found", "Organization brand settings not found.");
   }
 
-  const campaigns = await loadActiveCampaigns(orgId);
+  const [campaigns, latestReport] = await Promise.all([loadActiveCampaigns(orgId), getLatestAnalysisReport(orgId)]);
   const insights = parseAccumulatedInsights(brandSettings.accumulated_insights);
-  const next = buildMemoryMd(brandSettings, campaigns, insights);
+  const next = buildMemoryMd(brandSettings, campaigns, insights, toLatestAnalysisSummary(latestReport));
 
   if (
     brandSettings.memory_md &&

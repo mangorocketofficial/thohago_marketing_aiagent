@@ -1,6 +1,8 @@
 import express from "express";
+import { startAnalyticsAnalysisWorker } from "./analytics/analysis-worker";
 import { env } from "./lib/env";
 import { supabaseAdmin } from "./lib/supabase-admin";
+import { analyticsRouter } from "./routes/analytics";
 import { contentsRouter } from "./routes/contents";
 import { entitlementRouter } from "./routes/entitlement";
 import { healthRouter } from "./routes/health";
@@ -26,6 +28,7 @@ app.use(triggerRouter);
 app.use(imageIndexRouter);
 app.use(sessionsRouter);
 app.use(contentsRouter);
+app.use(analyticsRouter);
 app.use(metricsRouter);
 app.use(onboardingRouter);
 app.use(memoryRouter);
@@ -55,7 +58,9 @@ const requiredTables = [
   "org_brand_settings",
   "org_subscriptions",
   "activity_image_indexes",
-  "content_metrics"
+  "content_metrics",
+  "analysis_reports",
+  "analytics_analysis_runs"
 ] as const;
 
 const verifyRequiredTables = async () => {
@@ -67,7 +72,7 @@ const verifyRequiredTables = async () => {
 
     if (/Could not find the table '.+' in the schema cache/i.test(error.message)) {
       console.warn(
-        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260307120000_phase_8_1_performance_metrics.sql on the connected project.`
+        `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260309120000_phase_8_3_autonomous_analytics_loop.sql on the connected project.`
       );
       continue;
     }
@@ -88,7 +93,7 @@ const verifyPhase32ProjectionColumns = async () => {
 
   if (/column .+ does not exist/i.test(error.message) || /Could not find the column/i.test(error.message)) {
     console.warn(
-      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260307120000_phase_8_1_performance_metrics.sql on the connected project.`
+      `[API] Schema not ready: ${error.message}. Apply Supabase migrations in order through 20260309120000_phase_8_3_autonomous_analytics_loop.sql on the connected project.`
     );
     return;
   }
@@ -110,4 +115,5 @@ app.listen(env.apiPort, () => {
   void verifyRequiredTables();
   void verifyPhase32ProjectionColumns();
   startRagIngestionWorker();
+  startAnalyticsAnalysisWorker();
 });

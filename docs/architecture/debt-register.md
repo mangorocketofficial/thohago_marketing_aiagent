@@ -142,3 +142,14 @@ Reason
 
 Affects
 Phase 7-4 polish
+
+DEBT-014
+
+Description
+Autonomous analytics cadence, recovery, and dispatch still run from in-process API timers instead of a separately managed worker runtime.
+
+Reason
+8-3 prioritized durable DB queue semantics first; deployment-specific worker separation was deferred to keep the loop shippable in the current single-runtime setup.
+
+Affects
+Phase 8-3 hardening

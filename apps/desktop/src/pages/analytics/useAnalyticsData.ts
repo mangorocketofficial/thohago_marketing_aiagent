@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { parseAccumulatedInsights } from "@repo/analytics";
-import type { AccumulatedInsights, Channel, PublishedContentWithMetrics } from "@repo/types";
+import type { AccumulatedInsights, AnalysisReportRecord, Channel, PublishedContentWithMetrics } from "@repo/types";
 
 const PAGE_SIZE = 20;
 
@@ -24,6 +24,10 @@ export const useAnalyticsData = ({ orgId }: UseAnalyticsDataArgs) => {
   const [publishedSource, setPublishedSource] = useState<AnalyticsReadSource>("empty");
   const [insightsNotice, setInsightsNotice] = useState("");
   const [publishedNotice, setPublishedNotice] = useState("");
+  const [latestReport, setLatestReport] = useState<AnalysisReportRecord | null>(null);
+  const [latestReportNotice, setLatestReportNotice] = useState("");
+  const [isLoadingLatestReport, setIsLoadingLatestReport] = useState(false);
+  const [isTriggeringAnalysis, setIsTriggeringAnalysis] = useState(false);
 
   const refreshInsights = useCallback(async () => {
     if (!orgId) {
@@ -91,6 +95,46 @@ export const useAnalyticsData = ({ orgId }: UseAnalyticsDataArgs) => {
     }
   }, [orgId]);
 
+  const refreshLatestReport = useCallback(async () => {
+    if (!orgId) {
+      setLatestReport(null);
+      setLatestReportNotice("");
+      return;
+    }
+
+    setIsLoadingLatestReport(true);
+    try {
+      const response = await window.desktopRuntime.metrics.getLatestAnalysisReport();
+      if (!response.ok) {
+        setLatestReport(null);
+        setLatestReportNotice(response.message ?? "Failed to load latest analysis report.");
+        return;
+      }
+
+      setLatestReport(response.report);
+      setLatestReportNotice("");
+    } finally {
+      setIsLoadingLatestReport(false);
+    }
+  }, [orgId]);
+
+  const triggerAnalysis = useCallback(async () => {
+    if (!orgId) {
+      return;
+    }
+
+    setIsTriggeringAnalysis(true);
+    try {
+      const response = await window.desktopRuntime.metrics.triggerAnalysis();
+      setLatestReportNotice(response.message ?? "");
+      if (response.queued === false) {
+        await refreshLatestReport();
+      }
+    } finally {
+      setIsTriggeringAnalysis(false);
+    }
+  }, [orgId, refreshLatestReport]);
+
   const loadMorePublished = useCallback(async () => {
     if (!publishedNextCursor) {
       return;
@@ -128,13 +172,14 @@ export const useAnalyticsData = ({ orgId }: UseAnalyticsDataArgs) => {
   }, [publishedFilter, publishedNextCursor]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshInsights(), refreshPublished(publishedFilter)]);
-  }, [publishedFilter, refreshInsights, refreshPublished]);
+    await Promise.all([refreshInsights(), refreshPublished(publishedFilter), refreshLatestReport()]);
+  }, [publishedFilter, refreshInsights, refreshLatestReport, refreshPublished]);
 
   useEffect(() => {
     void refreshInsights();
     void refreshPublished(null);
-  }, [orgId, refreshInsights, refreshPublished]);
+    void refreshLatestReport();
+  }, [orgId, refreshInsights, refreshLatestReport, refreshPublished]);
 
   return {
     insights,
@@ -144,14 +189,20 @@ export const useAnalyticsData = ({ orgId }: UseAnalyticsDataArgs) => {
     publishedContents,
     publishedSource,
     publishedNotice,
+    latestReport,
+    latestReportNotice,
     isLoadingInsights,
     isLoadingPublished,
+    isLoadingLatestReport,
     isLoadingMore,
+    isTriggeringAnalysis,
     hasMorePublished: !!publishedNextCursor,
     publishedFilter,
     refreshInsights,
     refreshPublished,
+    refreshLatestReport,
     loadMorePublished,
-    refreshAll
+    refreshAll,
+    triggerAnalysis
   };
 };

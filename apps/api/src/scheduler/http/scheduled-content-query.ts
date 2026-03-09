@@ -1,4 +1,4 @@
-import { ANALYTICS_CHANNELS } from "@repo/analytics";
+import { ANALYTICS_CHANNELS, isAnalyticsChannel } from "@repo/analytics";
 import { HttpError } from "../../lib/errors";
 import type { ScheduleSlotStatus } from "../../orchestrator/scheduler-status";
 import type { ScheduledContentCursor } from "../queries/list-scheduled-content";
@@ -125,7 +125,7 @@ const parseChannel = (value: unknown): string | null => {
     return null;
   }
   const normalized = raw.toLowerCase();
-  if (!CHANNEL_SET.has(normalized)) {
+  if (!isAnalyticsChannel(normalized) || !CHANNEL_SET.has(normalized)) {
     throw new HttpError(400, "invalid_payload", "channel is not supported.");
   }
   return normalized;

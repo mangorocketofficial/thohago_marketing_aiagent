@@ -69,3 +69,5 @@
 | 7-2d | Vision-Based Image Index System for Instagram Auto Selection | Done | 2026-03-05 | [phase-7-2d-completion.md](./phase-7-2d-completion.md) |
 | 7-4 | Instagram Multi-Image Carousel Support | Done | 2026-03-08 | [phase-7-4-completion.md](./phase-7-4-completion.md) |
 | 8-1 | Performance Analytics Feedback Loop | Done | 2026-03-07 | [phase-8-1-completion.md](./phase-8-1-completion.md) |
+| 8-2 | Analytics Read Model Refactor | Done | 2026-03-08 | [phase-8-2-completion.md](./phase-8-2-completion.md) |
+| 8-3 | Autonomous Analytics Analysis Loop | Done | 2026-03-09 | [phase-8-3-completion.md](./phase-8-3-completion.md) |

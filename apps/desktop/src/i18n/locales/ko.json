@@ -222,6 +222,20 @@
           "loading": "인사이트를 불러오는 중입니다...",
           "empty": "표시할 인사이트가 없습니다."
         },
+        "analysis": {
+          "title": "최신 성과 분석 리포트",
+          "description": "LLM이 생성한 최신 성과 분석과 다음 액션을 확인합니다.",
+          "loading": "최신 분석 리포트를 불러오는 중입니다...",
+          "empty": "아직 생성된 성과 분석 리포트가 없습니다.",
+          "analyzedAt": "분석 시각",
+          "contentCount": "분석 콘텐츠 수",
+          "model": "모델",
+          "keyActions": "핵심 개선 액션",
+          "viewFull": "전체 리포트 보기",
+          "refresh": "분석 실행",
+          "refreshing": "분석 요청 중...",
+          "close": "닫기"
+        },
         "review": {
           "eyebrow": "성과 확인",
           "title": "채널 성과 대시보드",

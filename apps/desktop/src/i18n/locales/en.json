@@ -222,6 +222,20 @@
           "loading": "Loading insights...",
           "empty": "No insights to display."
         },
+        "analysis": {
+          "title": "Latest Performance Analysis",
+          "description": "Review the latest LLM-generated performance report and the next actions.",
+          "loading": "Loading the latest analysis report...",
+          "empty": "No performance analysis report has been generated yet.",
+          "analyzedAt": "Analyzed at",
+          "contentCount": "Contents analyzed",
+          "model": "Model",
+          "keyActions": "Key improvement actions",
+          "viewFull": "View full report",
+          "refresh": "Run analysis",
+          "refreshing": "Queueing analysis...",
+          "close": "Close"
+        },
         "review": {
           "eyebrow": "Performance Review",
           "title": "Channel Performance Dashboard",

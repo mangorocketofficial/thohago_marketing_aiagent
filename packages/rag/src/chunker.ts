@@ -6,7 +6,8 @@ export const STRATEGY_MAP: Record<RagSourceType, ChunkStrategy> = {
   brand_profile: "heading_split",
   content: "single_doc",
   local_doc: "sliding_window",
-  chat_pattern: "structured"
+  chat_pattern: "structured",
+  analysis_report: "heading_split"
 };
 
 export type ChunkContext = {

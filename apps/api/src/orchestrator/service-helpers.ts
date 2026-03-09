@@ -1,4 +1,4 @@
-import { ANALYTICS_CHANNELS } from "@repo/analytics";
+import { ANALYTICS_CHANNELS, isAnalyticsChannel } from "@repo/analytics";
 import { HttpError } from "../lib/errors";
 import type {
   CampaignPlan,
@@ -341,7 +341,7 @@ export const parseState = (raw: unknown, trigger: PipelineTriggerRow | null): Se
 
 export const normalizeChannel = (value: unknown): string => {
   const candidate = asString(value, "instagram").trim().toLowerCase();
-  return CHANNEL_SET.has(candidate) ? candidate : "instagram";
+  return isAnalyticsChannel(candidate) && CHANNEL_SET.has(candidate) ? candidate : "instagram";
 };
 
 const truncateDisplayTitle = (value: string, maxLength = 50): string => {

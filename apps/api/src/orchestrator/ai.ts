@@ -769,6 +769,27 @@ export const generateContentDraft = async (
     promptParts.push(ctx.tier2Sections, "");
   }
 
+  if (ctx.latestAnalysis) {
+    const bestPublishTime = ctx.memoryMd
+      ? (() => {
+          const matched = ctx.memoryMd.match(new RegExp(`-\\s*${normalizedChannel}:\\s*(.+)`, "i"));
+          return matched?.[1]?.trim() ?? "n/a";
+        })()
+      : "n/a";
+    const ctaMatches = ctx.memoryMd
+      ? [...ctx.memoryMd.matchAll(/-\s*"([^"\n]+)"/g)].map((match) => match[1]?.trim() ?? "").filter(Boolean).slice(0, 3)
+      : [];
+
+    promptParts.push(
+      "=== Performance Guidance ===",
+      `Latest analysis summary: ${ctx.latestAnalysis.summary}`,
+      `Reflect these actions: ${ctx.latestAnalysis.key_actions.join(" | ") || "n/a"}`,
+      `Best publish time for this channel: ${bestPublishTime}`,
+      `Effective CTA references: ${ctaMatches.join(" | ") || "n/a"}`,
+      ""
+    );
+  }
+
   const revisionReason = normalizeString(options?.revisionReason, "");
   const previousDraft = normalizeString(options?.previousDraft, "");
   if (revisionReason || previousDraft) {

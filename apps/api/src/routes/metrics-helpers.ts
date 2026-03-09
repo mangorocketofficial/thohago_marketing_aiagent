@@ -1,6 +1,7 @@
 import { ANALYTICS_CHANNELS, ANALYTICS_METRIC_FIELDS, normalizeMetricsForStorage } from "@repo/analytics";
 import type { Response } from "express";
 import type { Channel, ContentMetricsInput } from "@repo/types";
+import { maybeEnqueueAnalysisRun } from "../analytics/run-queue";
 import { HttpError, toHttpError } from "../lib/errors";
 import { parseOptionalString, parseRequiredString } from "../lib/request-parsers";
 import { updateAccumulatedInsights } from "../rag/compute-insights";
@@ -172,4 +173,11 @@ export const runMetricsFollowUp = async (orgId: string, scoresByContent: Map<str
   );
   await updateAccumulatedInsights(orgId);
   await invalidateMemoryCache(orgId);
+  try {
+    await maybeEnqueueAnalysisRun(orgId, "new_metrics");
+  } catch (error) {
+    console.warn(
+      `[METRICS] Failed to enqueue analytics analysis for org ${orgId}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 };

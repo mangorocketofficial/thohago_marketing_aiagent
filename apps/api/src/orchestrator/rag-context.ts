@@ -1,6 +1,8 @@
 ﻿import { countTokens, truncateToTokenBudget, type OrgBrandSettings, type RagSearchResult } from "@repo/rag";
 import { env } from "../lib/env";
 import { getRagEmbedder, ragConfig, ragRetriever } from "../lib/rag";
+import type { LatestAnalysisSummary } from "@repo/types";
+import { getLatestAnalysisReport, toLatestAnalysisSummary } from "../analytics/report-repository";
 import {
   getDocumentExtractsByFolder,
   loadOrgBrandSettings,
@@ -18,7 +20,8 @@ type Tier2SectionType =
   | "content_same_channel"
   | "content_cross_channel"
   | "local_doc"
-  | "chat_pattern";
+  | "chat_pattern"
+  | "analysis_report";
 
 type Tier2Results = Record<Tier2SectionType, RagSearchResult[]>;
 
@@ -27,7 +30,8 @@ const SOURCE_ORDER: Tier2SectionType[] = [
   "content_same_channel",
   "content_cross_channel",
   "local_doc",
-  "chat_pattern"
+  "chat_pattern",
+  "analysis_report"
 ];
 
 const CONTENT_CROSS_CHANNEL_BUDGET = Math.min(300, Math.max(0, env.ragTier2ContentBudget));
@@ -38,7 +42,8 @@ const TIER2_SUB_BUDGETS: Record<Tier2SectionType, number> = {
   content_same_channel: CONTENT_SAME_CHANNEL_BUDGET,
   content_cross_channel: CONTENT_CROSS_CHANNEL_BUDGET,
   local_doc: env.ragTier2LocalDocBudget,
-  chat_pattern: env.ragTier2ChatPatternBudget
+  chat_pattern: env.ragTier2ChatPatternBudget,
+  analysis_report: env.ragTier2AnalysisReportBudget
 };
 
 const CONTENT_RETRIEVAL = {
@@ -54,7 +59,8 @@ const SECTION_LABELS: Record<Tier2SectionType, string> = {
   content_same_channel: "Same-channel past content (format + hashtags reference)",
   content_cross_channel: "Cross-channel related content (message only; ignore format)",
   local_doc: "Related local documents",
-  chat_pattern: "User edit patterns"
+  chat_pattern: "User edit patterns",
+  analysis_report: "Recent performance analysis reports"
 };
 
 const CAMPAIGN_CONTEXT_BUDGETS = {
@@ -335,7 +341,7 @@ const fetchTier2 = async (
     const embedder = getRagEmbedder();
     const queryEmbedding = await embedder.generateEmbedding(queryText, ragConfig.defaultEmbeddingProfile);
 
-    const [brandStrategies, sameChannelContent, relatedDocs, editPatterns] = await Promise.all([
+    const [brandStrategies, sameChannelContent, relatedDocs, editPatterns, analysisReports] = await Promise.all([
       ragRetriever.searchSimilar(orgId, queryEmbedding, {
         source_types: ["brand_profile"],
         metadata_filter: normalizedChannel ? { section_channel: normalizedChannel } : {},
@@ -362,6 +368,12 @@ const fetchTier2 = async (
         metadata_filter: normalizedChannel ? { channel: normalizedChannel } : {},
         top_k: 2,
         min_similarity: 0.6,
+        embedding_profile: ragConfig.defaultEmbeddingProfile
+      }),
+      ragRetriever.searchSimilar(orgId, queryEmbedding, {
+        source_types: ["analysis_report"],
+        top_k: 2,
+        min_similarity: 0.55,
         embedding_profile: ragConfig.defaultEmbeddingProfile
       })
     ]);
@@ -390,7 +402,8 @@ const fetchTier2 = async (
       content_same_channel: sameChannelContent,
       content_cross_channel: crossChannelContent,
       local_doc: relatedDocs,
-      chat_pattern: editPatterns
+      chat_pattern: editPatterns,
+      analysis_report: analysisReports
     };
   } catch (error) {
     console.warn(
@@ -471,6 +484,7 @@ export type ContentGenerationContext = {
   contextLevel: ContextLevel;
   memoryMd: string | null;
   tier2Sections: string;
+  latestAnalysis: LatestAnalysisSummary | null;
   meta: RagContextMeta;
 };
 
@@ -584,17 +598,20 @@ export const buildContentGenerationContext = async (
       contextLevel: "minimal",
       memoryMd: null,
       tier2Sections: "",
+      latestAnalysis: null,
       meta: emptyMeta("minimal")
     };
   }
 
   const memoryTokens = countTokens(memory.markdown);
+  const latestAnalysis = toLatestAnalysisSummary(await getLatestAnalysisReport(orgId));
   const tier2 = await fetchTier2(orgId, channel, topic, activityFolder);
   if (!tier2) {
     return {
       contextLevel: "partial",
       memoryMd: memory.markdown,
       tier2Sections: "",
+      latestAnalysis,
       meta: {
         context_level: "partial",
         memory_md_generated_at: memory.generatedAt,
@@ -616,6 +633,7 @@ export const buildContentGenerationContext = async (
     contextLevel,
     memoryMd: memory.markdown,
     tier2Sections: finalTier2Sections,
+    latestAnalysis,
     meta: {
       context_level: contextLevel,
       memory_md_generated_at: memory.generatedAt,

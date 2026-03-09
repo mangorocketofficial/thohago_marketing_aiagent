@@ -1,10 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AccumulatedInsights,
+  AnalysisReportRecord,
+  AnalysisRunRecord,
+  AnalysisTriggerReason,
   Campaign,
   CampaignPlan,
   CampaignPlanSchedule,
   CampaignStatus,
+  LatestAnalysisSummary,
   MemoryMd,
   OrgBrandSettings,
   RagChunk,
@@ -20,10 +24,14 @@ import type {
 
 export type {
   AccumulatedInsights,
+  AnalysisReportRecord,
+  AnalysisRunRecord,
+  AnalysisTriggerReason,
   Campaign,
   CampaignPlan,
   CampaignPlanSchedule,
   CampaignStatus,
+  LatestAnalysisSummary,
   MemoryMd,
   OrgBrandSettings,
   RagChunk,

@@ -1,6 +1,8 @@
 export {};
 import type {
   AccumulatedInsights,
+  AnalysisReportRecord,
+  AnalysisRunRecord,
   Campaign,
   BrandProfile,
   ChatActionCardAction,
@@ -154,6 +156,7 @@ type ContentSaveInstagramMetadataPayload = {
   imageFileIds?: string[];
   slides?: Array<{
     slideIndex: number;
+    templateId?: string;
     role: string;
     overlayTexts: Record<string, string>;
     imageFileIds?: string[];
@@ -208,6 +211,7 @@ type ContentComposeCarouselPayload = {
   templateId: string;
   slides: Array<{
     slideIndex: number;
+    templateId?: string;
     overlayTexts: Record<string, string>;
     imagePaths?: string[];
     imageFileIds?: string[];
@@ -303,6 +307,24 @@ type MetricsGetInsightsResult = {
   insights: AccumulatedInsights | null;
   updated_at: string | null;
   source: MetricsInsightsSource;
+  message?: string;
+};
+
+type MetricsTriggerAnalysisResult = {
+  ok: boolean;
+  queued: boolean;
+  run: AnalysisRunRecord | null;
+  reason?: string;
+  message?: string;
+};
+
+type MetricsGetAnalysisReportPayload = {
+  reportId: string;
+};
+
+type MetricsGetAnalysisReportResult = {
+  ok: boolean;
+  report: AnalysisReportRecord | null;
   message?: string;
 };
 
@@ -696,6 +718,9 @@ declare global {
         listPublishedWithMetrics: (
           payload?: MetricsListPublishedWithMetricsPayload
         ) => Promise<MetricsListPublishedWithMetricsResult>;
+        triggerAnalysis: () => Promise<MetricsTriggerAnalysisResult>;
+        getLatestAnalysisReport: () => Promise<MetricsGetAnalysisReportResult>;
+        getAnalysisReport: (payload: MetricsGetAnalysisReportPayload) => Promise<MetricsGetAnalysisReportResult>;
         loadWfkFixtures: () => Promise<MetricsLoadWfkFixturesResult>;
       };
       onboarding: {

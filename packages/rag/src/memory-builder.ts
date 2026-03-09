@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { AccumulatedInsights, Campaign, MemoryMd, OrgBrandSettings } from "@repo/types";
+import type { AccumulatedInsights, Campaign, LatestAnalysisSummary, MemoryMd, OrgBrandSettings } from "@repo/types";
 import { countTokens } from "./token-counter";
 
 const DEFAULT_MEMORY_TOKEN_BUDGET = 2000;
@@ -164,10 +164,29 @@ const buildInsightsSection = (insights: AccumulatedInsights, compact = false): s
   return lines.join("\n");
 };
 
+const buildLatestAnalysisSection = (analysis: LatestAnalysisSummary, compact = false): string => {
+  const actions = compact ? analysis.key_actions.slice(0, 2) : analysis.key_actions;
+  const lines = ["## Latest Performance Analysis", ""];
+
+  lines.push(compact ? shortenToSentences(analysis.summary, 2) : analysis.summary);
+  lines.push("");
+  if (actions.length) {
+    lines.push("### Key Actions");
+    for (const action of actions) {
+      lines.push(`- ${action}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`> Analyzed at: ${analysis.analyzed_at}`);
+  return lines.join("\n");
+};
+
 const buildSectionBlocks = (
   brandSettings: OrgBrandSettings,
   activeCampaigns: Campaign[],
-  insights: AccumulatedInsights | null
+  insights: AccumulatedInsights | null,
+  latestAnalysis: LatestAnalysisSummary | null
 ): SectionBlock[] => {
   const blocks: SectionBlock[] = [
     {
@@ -264,6 +283,16 @@ const buildSectionBlocks = (
     });
   }
 
+  if (latestAnalysis) {
+    blocks.push({
+      key: "latest_analysis",
+      priority: 6,
+      required: false,
+      content: buildLatestAnalysisSection(latestAnalysis, false),
+      compactContent: buildLatestAnalysisSection(latestAnalysis, true)
+    });
+  }
+
   return blocks;
 };
 
@@ -320,7 +349,8 @@ const toCampaignSnapshot = (campaigns: Campaign[]) =>
 export const computeMemoryFreshnessKey = (
   brandSettings: OrgBrandSettings,
   activeCampaigns: Campaign[],
-  insights: AccumulatedInsights | null
+  insights: AccumulatedInsights | null,
+  latestAnalysis: LatestAnalysisSummary | null
 ): string => {
   const payload = {
     brand_summary: brandSettings.brand_summary ?? "",
@@ -342,6 +372,14 @@ export const computeMemoryFreshnessKey = (
           generated_at: insights.generated_at,
           content_count_at_generation: insights.content_count_at_generation
         }
+      : null,
+    latest_analysis: latestAnalysis
+      ? {
+          summary: latestAnalysis.summary,
+          key_actions: [...latestAnalysis.key_actions],
+          analyzed_at: latestAnalysis.analyzed_at,
+          content_count: latestAnalysis.content_count
+        }
       : null
   };
 
@@ -352,14 +390,15 @@ export const buildMemoryMd = (
   brandSettings: OrgBrandSettings,
   activeCampaigns: Campaign[],
   insightsInput: AccumulatedInsights | null,
+  latestAnalysis: LatestAnalysisSummary | null,
   options: BuildMemoryOptions = {}
 ): MemoryMd => {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const tokenBudget = options.tokenBudget ?? DEFAULT_MEMORY_TOKEN_BUDGET;
   const insights = normalizeInsights(insightsInput);
-  const freshnessKey = computeMemoryFreshnessKey(brandSettings, activeCampaigns, insights);
+  const freshnessKey = computeMemoryFreshnessKey(brandSettings, activeCampaigns, insights, latestAnalysis);
 
-  const blocks = buildSectionBlocks(brandSettings, activeCampaigns, insights);
+  const blocks = buildSectionBlocks(brandSettings, activeCampaigns, insights, latestAnalysis);
   let markdown = assembleBlocks(blocks);
   let tokenCount = countTokens(markdown);
   if (tokenCount > tokenBudget) {

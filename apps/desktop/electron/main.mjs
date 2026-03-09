@@ -402,11 +402,13 @@ const parseOptionalInstagramSlidesPayload = (value) => {
       if (slideIndex === null) {
         return null;
       }
+      const templateId = typeof row.templateId === "string" ? row.templateId.trim() : typeof row.template_id === "string" ? row.template_id.trim() : "";
       const overlayTexts = parseOptionalStringMapPayload(row.overlayTexts ?? row.overlay_texts) ?? {};
       const imagePaths = parseOptionalStringArrayPayload(row.imagePaths ?? row.image_paths);
       const imageFileIds = parseOptionalStringArrayPayload(row.imageFileIds ?? row.image_file_ids);
       return {
         slideIndex,
+        ...(templateId ? { templateId } : {}),
         role: typeof row.role === "string" ? row.role.trim() : "",
         overlayTexts,
         ...(imagePaths ? { imagePaths } : {}),
@@ -1956,6 +1958,7 @@ const registerIpcHandlers = () => {
               ? {
                   slides: slides.map((slide) => ({
                     slide_index: slide.slideIndex,
+                    ...(slide.templateId ? { template_id: slide.templateId } : {}),
                     role: slide.role,
                     overlay_texts: slide.overlayTexts,
                     ...(slide.imageFileIds ? { image_file_ids: slide.imageFileIds } : {})
@@ -2144,9 +2147,12 @@ const registerIpcHandlers = () => {
         };
       }
 
-      const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
-      const maxImageCount = template.photos.length;
       const resolvedSlides = slides.map((slide, index) => {
+        const slideTemplateId = typeof slide.templateId === "string" && slide.templateId.trim() ? slide.templateId.trim() : templateId;
+        const slideTemplate = getTemplate(slideTemplateId);
+        if (!slideTemplate) {
+          throw new Error(`Unsupported templateId for slide ${index + 1}: ${slideTemplateId}`);
+        }
         const resolvedImagePaths = (slide.imagePaths ?? [])
           .map((relativePath) => {
             try {
@@ -2157,6 +2163,8 @@ const registerIpcHandlers = () => {
           })
           .filter((entry) => !!entry);
 
+        const requiredImageCount = slideTemplate.photos.filter((slot) => !slot.optional).length;
+        const maxImageCount = slideTemplate.photos.length;
         if (resolvedImagePaths.length < requiredImageCount || resolvedImagePaths.length > maxImageCount) {
           throw new Error(
             `Invalid image slot count for slide ${index + 1}. Expected ${requiredImageCount}-${maxImageCount}, got ${resolvedImagePaths.length}.`
@@ -2165,6 +2173,7 @@ const registerIpcHandlers = () => {
 
         return {
           slideIndex: slide.slideIndex,
+          templateId: slideTemplateId,
           overlayTexts: slide.overlayTexts,
           userImages: resolvedImagePaths
         };
@@ -2173,6 +2182,7 @@ const registerIpcHandlers = () => {
       const composed = await composeCarouselImages({
         templateId,
         slides: resolvedSlides.map((slide) => ({
+          templateId: slide.templateId,
           userImages: slide.userImages,
           overlayTexts: slide.overlayTexts
         })),
@@ -2408,6 +2418,88 @@ const registerIpcHandlers = () => {
         updated_at: null,
         source: "error",
         message
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:trigger-analysis", async () => {
+    try {
+      const body = await callOrchestratorApi(`/orgs/${encodeURIComponent(runtimeState.orgId)}/analytics/trigger-analysis`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      return {
+        ok: true,
+        queued: body?.queued === true,
+        run: body?.run ?? null,
+        reason: typeof body?.reason === "string" ? body.reason : undefined,
+        message: typeof body?.message === "string" ? body.message : undefined
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to trigger analytics analysis.");
+      return {
+        ok: false,
+        queued: false,
+        run: null,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:get-latest-analysis-report", async () => {
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/analytics/reports/latest`,
+        { method: "GET" }
+      );
+      return {
+        ok: true,
+        report: body?.report ?? null
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to load latest analysis report.");
+      return {
+        ok: false,
+        report: null,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
+      };
+    }
+  });
+
+  ipcMain.handle("metrics:get-analysis-report", async (_, payload) => {
+    const reportId = typeof payload?.reportId === "string" ? payload.reportId.trim() : "";
+    if (!reportId) {
+      return {
+        ok: false,
+        report: null,
+        message: "reportId is required."
+      };
+    }
+
+    try {
+      const body = await callOrchestratorApi(
+        `/orgs/${encodeURIComponent(runtimeState.orgId)}/analytics/reports/${encodeURIComponent(reportId)}`,
+        { method: "GET" }
+      );
+      return {
+        ok: true,
+        report: body?.report ?? null
+      };
+    } catch (error) {
+      const runtimeError = toRuntimeError(error, "Failed to load analysis report.");
+      return {
+        ok: false,
+        report: null,
+        message: runtimeError.message,
+        code: runtimeError.code ?? "request_failed",
+        status: runtimeError.status ?? 500,
+        details: runtimeError.details
       };
     }
   });

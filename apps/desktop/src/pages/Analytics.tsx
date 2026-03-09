@@ -17,16 +17,21 @@ export const AnalyticsPage = ({ orgId }: AnalyticsPageProps) => {
     insightsUpdatedAt,
     insightsSource,
     insightsNotice,
+    latestReport,
+    latestReportNotice,
     publishedContents,
     publishedSource,
     publishedNotice,
     isLoadingInsights,
+    isLoadingLatestReport,
     isLoadingPublished,
     isLoadingMore,
+    isTriggeringAnalysis,
     hasMorePublished,
     refreshInsights,
     refreshPublished,
-    loadMorePublished
+    loadMorePublished,
+    triggerAnalysis
   } = useAnalyticsData({ orgId });
 
   return (
@@ -67,8 +72,15 @@ export const AnalyticsPage = ({ orgId }: AnalyticsPageProps) => {
           source={insightsSource}
           notice={insightsNotice}
           isLoading={isLoadingInsights}
+          latestReport={latestReport}
+          latestReportNotice={latestReportNotice}
+          isLoadingLatestReport={isLoadingLatestReport}
+          isTriggeringAnalysis={isTriggeringAnalysis}
           onRefresh={() => {
             void refreshInsights();
+          }}
+          onTriggerAnalysis={() => {
+            void triggerAnalysis();
           }}
         />
       ) : tab === "review" ? (

@@ -171,6 +171,7 @@ const ragTier2BrandProfileBudget = parsePositiveInt(readEnv("RAG_TIER2_BRAND_PRO
 const ragTier2ContentBudget = parsePositiveInt(readEnv("RAG_TIER2_CONTENT_BUDGET", "1500"), 1500);
 const ragTier2LocalDocBudget = parsePositiveInt(readEnv("RAG_TIER2_LOCAL_DOC_BUDGET", "1200"), 1200);
 const ragTier2ChatPatternBudget = parsePositiveInt(readEnv("RAG_TIER2_CHAT_PATTERN_BUDGET", "500"), 500);
+const ragTier2AnalysisReportBudget = parsePositiveInt(readEnv("RAG_TIER2_ANALYSIS_REPORT_BUDGET", "600"), 600);
 const ragForbiddenCheckEnabled = parseBoolean(readEnv("RAG_FORBIDDEN_CHECK_ENABLED", "true"), true);
 const ragForbiddenMaxRetries = parseNonNegativeInt(readEnv("RAG_FORBIDDEN_MAX_RETRIES", "1"), 1);
 const workingMemoryMaxTurns = parsePositiveInt(readEnv("WORKING_MEMORY_MAX_TURNS", "12"), 12);
@@ -187,6 +188,21 @@ const anthropicPromptCachingEnabled = parseBoolean(readEnv("ANTHROPIC_PROMPT_CAC
 const subscriptionBypass = parseBoolean(readEnv("SUBSCRIPTION_BYPASS", "false"), false);
 const subscriptionDefaultStatus = parseSubscriptionStatus(readEnv("SUBSCRIPTION_DEFAULT_STATUS", "active"), "active");
 const subscriptionTrialDays = parseNonNegativeInt(readEnv("SUBSCRIPTION_TRIAL_DAYS", "14"), 14);
+const analyticsWorkerEnabled = parseBoolean(readEnv("ANALYTICS_WORKER_ENABLED", "true"), true);
+const analysisCadenceDays = parsePositiveInt(readEnv("ANALYSIS_CADENCE_DAYS", "7"), 7);
+const analysisCadenceSweepIntervalMs = parsePositiveInt(
+  readEnv("ANALYSIS_CADENCE_SWEEP_INTERVAL_MS", "21600000"),
+  21600000
+);
+const analysisRecoveryIntervalMs = parsePositiveInt(readEnv("ANALYSIS_RECOVERY_INTERVAL_MS", "60000"), 60000);
+const analysisLeaseMs = parsePositiveInt(readEnv("ANALYSIS_LEASE_MS", "300000"), 300000);
+const analysisCooldownHours = parsePositiveInt(readEnv("ANALYSIS_COOLDOWN_HOURS", "6"), 6);
+const analysisMinScoredContents = parsePositiveInt(readEnv("ANALYSIS_MIN_SCORED_CONTENTS", "10"), 10);
+const analysisNewMetricsThreshold = parsePositiveInt(readEnv("ANALYSIS_NEW_METRICS_THRESHOLD", "20"), 20);
+const analysisMaxTokens = parsePositiveInt(readEnv("ANALYSIS_MAX_TOKENS", "4000"), 4000);
+const analysisReportHistoryRagCount = parsePositiveInt(readEnv("ANALYSIS_REPORT_HISTORY_RAG_COUNT", "4"), 4);
+const analysisReportExportEnabled = parseBoolean(readEnv("ANALYSIS_REPORT_EXPORT_ENABLED", "false"), false);
+const analysisReportExportDir = readEnv("ANALYSIS_REPORT_EXPORT_DIR", "docs/reports/analytics");
 
 export const env = {
   apiPort,
@@ -194,7 +210,7 @@ export const env = {
   supabaseUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseServiceRoleKey: requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
   anthropicApiKey: readEnv("ANTHROPIC_API_KEY"),
-  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250514"),
+  anthropicModel: readEnv("ANTHROPIC_MODEL", "claude-opus-4-5"),
   openAiApiKey: readEnv("OPENAI_API_KEY"),
   openAiProfileModel: readEnv("OPENAI_PROFILE_MODEL", "gpt-4o-mini"),
   onboardingPinnedReviewPath: readEnv("ONBOARDING_PINNED_REVIEW_PATH"),
@@ -209,6 +225,7 @@ export const env = {
   ragTier2ContentBudget,
   ragTier2LocalDocBudget,
   ragTier2ChatPatternBudget,
+  ragTier2AnalysisReportBudget,
   ragForbiddenCheckEnabled,
   ragForbiddenMaxRetries,
   workingMemoryMaxTurns,
@@ -221,5 +238,17 @@ export const env = {
   anthropicPromptCachingEnabled,
   subscriptionBypass,
   subscriptionDefaultStatus,
-  subscriptionTrialDays
+  subscriptionTrialDays,
+  analyticsWorkerEnabled,
+  analysisCadenceDays,
+  analysisCadenceSweepIntervalMs,
+  analysisRecoveryIntervalMs,
+  analysisLeaseMs,
+  analysisCooldownHours,
+  analysisMinScoredContents,
+  analysisNewMetricsThreshold,
+  analysisMaxTokens,
+  analysisReportHistoryRagCount,
+  analysisReportExportEnabled,
+  analysisReportExportDir
 };

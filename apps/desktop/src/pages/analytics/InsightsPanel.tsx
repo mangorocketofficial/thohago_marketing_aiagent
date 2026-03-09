@@ -1,8 +1,9 @@
 import { extractKeyCountEntries, toOrderedAnalyticsChannels } from "@repo/analytics";
-import type { AccumulatedInsights } from "@repo/types";
+import type { AccumulatedInsights, AnalysisReportRecord } from "@repo/types";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { resolveChannelPresentation } from "../../components/scheduler/card-presentation";
+import { AnalysisReportCard } from "./AnalysisReportCard";
 import type { AnalyticsReadSource } from "./useAnalyticsData";
 
 type InsightsPanelProps = {
@@ -11,7 +12,12 @@ type InsightsPanelProps = {
   source: AnalyticsReadSource;
   notice: string;
   isLoading: boolean;
+  latestReport: AnalysisReportRecord | null;
+  latestReportNotice: string;
+  isLoadingLatestReport: boolean;
+  isTriggeringAnalysis: boolean;
   onRefresh: () => void;
+  onTriggerAnalysis: () => void;
 };
 
 const formatDateTime = (value: string | null): string => {
@@ -39,7 +45,19 @@ const buildBannerText = (
   return t("ui.pages.analytics.source.live");
 };
 
-export const InsightsPanel = ({ insights, updatedAt, source, notice, isLoading, onRefresh }: InsightsPanelProps) => {
+export const InsightsPanel = ({
+  insights,
+  updatedAt,
+  source,
+  notice,
+  isLoading,
+  latestReport,
+  latestReportNotice,
+  isLoadingLatestReport,
+  isTriggeringAnalysis,
+  onRefresh,
+  onTriggerAnalysis
+}: InsightsPanelProps) => {
   const { t } = useTranslation();
 
   const channels = useMemo(() => {
@@ -77,6 +95,14 @@ export const InsightsPanel = ({ insights, updatedAt, source, notice, isLoading, 
         </div>
         <p className={`ui-analytics-source-banner ${source}`}>{buildBannerText(source, notice, t)}</p>
       </section>
+
+      <AnalysisReportCard
+        report={latestReport}
+        notice={latestReportNotice}
+        isLoading={isLoadingLatestReport}
+        isTriggering={isTriggeringAnalysis}
+        onTriggerAnalysis={onTriggerAnalysis}
+      />
 
       {isLoading ? (
         <section className="panel ui-page-panel">

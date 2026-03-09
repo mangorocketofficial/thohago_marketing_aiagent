@@ -186,3 +186,14 @@ Make `slides[]` the canonical Instagram carousel model and derive legacy top-lev
 
 Reason
 This keeps carousel storage aligned with template-level multi-image slot semantics while preserving compatibility with existing single-image readers, cache paths, and lightweight preview surfaces.
+
+## D-018
+
+Phase
+8-3
+
+Decision
+Use DB-backed report and run tables as the canonical autonomous analytics loop, with file export and RAG copies treated as derived outputs.
+
+Reason
+The loop needed durable retries, cooldown enforcement, report history, and UI-readable full markdown without depending on local filesystem state or process-local memory.

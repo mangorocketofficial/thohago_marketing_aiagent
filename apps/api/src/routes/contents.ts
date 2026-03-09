@@ -29,6 +29,7 @@ export type ContentBodyPatchInput = {
 
 type ContentInstagramSlidePatchInput = {
   slideIndex: number;
+  templateId: string | undefined;
   role: string;
   overlayTexts: Record<string, string>;
   imageFileIds: string[] | undefined;
@@ -147,6 +148,7 @@ const parseOptionalInstagramSlides = (value: unknown, field: string): ContentIns
 
     return {
       slideIndex,
+      templateId: parseOptionalString(row.template_id ?? row.templateId) ?? undefined,
       role: typeof row.role === "string" ? row.role.trim() : "",
       overlayTexts: parseOptionalStringMap(row.overlay_texts ?? row.overlayTexts, `${field}[${index}].overlay_texts`) ?? {},
       imageFileIds: parseOptionalStringArray(
@@ -304,8 +306,6 @@ const buildNextInstagramSlides = async (params: {
   if (!template) {
     throw new HttpError(400, "invalid_payload", `Unsupported template_id: ${params.templateId}`);
   }
-
-  const requiredImageCount = template.photos.filter((slot) => !slot.optional).length;
   const currentSlides = normalizeInstagramSlides(params.metadata);
 
   if (Array.isArray(params.input.slides) && params.input.slides.length > 0) {
@@ -315,6 +315,15 @@ const buildNextInstagramSlides = async (params: {
 
     for (const [index, slideInput] of orderedSlides.entries()) {
       const currentSlide = currentByIndex.get(slideInput.slideIndex) ?? currentSlides[index];
+      const fallbackTemplateId = currentSlide?.templateId ?? params.templateId;
+      const slideTemplateId = normalizeTemplateId(slideInput.templateId, fallbackTemplateId);
+      if (slideInput.templateId && slideInput.templateId !== slideTemplateId) {
+        throw new HttpError(400, "invalid_payload", `Unsupported slide template_id: ${slideInput.templateId}`);
+      }
+      const slideTemplate = getTemplate(slideTemplateId);
+      if (!slideTemplate) {
+        throw new HttpError(400, "invalid_payload", `Unsupported template_id: ${slideTemplateId}`);
+      }
       const imageSelection = Array.isArray(slideInput.imageFileIds)
         ? await resolveImagePathsByFileIds({
             orgId: params.orgId,
@@ -326,13 +335,14 @@ const buildNextInstagramSlides = async (params: {
           };
 
       validateImageSlotCount({
-        requiredImageCount,
+        requiredImageCount: slideTemplate.photos.filter((slot) => !slot.optional).length,
         providedImageCount: imageSelection.paths.length,
-        maxImageCount: template.photos.length
+        maxImageCount: slideTemplate.photos.length
       });
 
       nextSlides.push({
         slideIndex: index,
+        templateId: slideTemplateId,
         role: normalizeInstagramSlideRole(slideInput.role, currentSlide?.role ?? "custom"),
         overlayTexts: normalizeOverlayTextMap(slideInput.overlayTexts, currentSlide?.overlayTexts ?? {}),
         imageFileIds: imageSelection.fileIds,
@@ -349,7 +359,7 @@ const buildNextInstagramSlides = async (params: {
     metadata: params.metadata
   });
   validateImageSlotCount({
-    requiredImageCount,
+    requiredImageCount: template.photos.filter((slot) => !slot.optional).length,
     providedImageCount: selection.paths.length,
     maxImageCount: template.photos.length
   });
@@ -359,6 +369,7 @@ const buildNextInstagramSlides = async (params: {
   return [
     {
       slideIndex: 0,
+      templateId: params.templateId,
       role: currentSlides[0]?.role ?? "custom",
       overlayTexts,
       imageFileIds: selection.fileIds,
@@ -397,7 +408,7 @@ const updateInstagramMetadata = async (params: {
 
   const nextMetadata: Record<string, unknown> = {
     ...content.metadata,
-    template_id: templateId,
+    template_id: legacy.templateId,
     overlay_texts: legacy.overlayTexts,
     image_file_ids: legacy.imageFileIds,
     image_paths: legacy.imagePaths,

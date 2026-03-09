@@ -685,7 +685,50 @@ export type RagEmbeddingProfile = {
   dimensions: RagEmbeddingDim;
 };
 
-export type RagSourceType = "brand_profile" | "content" | "local_doc" | "chat_pattern";
+export type RagSourceType = "brand_profile" | "content" | "local_doc" | "chat_pattern" | "analysis_report";
+
+export type AnalysisTriggerReason = "new_metrics" | "cadence" | "manual" | "recovery";
+
+export type AnalysisReportRecord = {
+  id: string;
+  org_id: string;
+  trigger_reason: AnalysisTriggerReason;
+  summary: string;
+  key_actions: string[];
+  markdown: string;
+  markdown_hash: string;
+  content_count: number;
+  model_used: string;
+  compared_report_ids: string[];
+  export_path: string | null;
+  exported_at: string | null;
+  analyzed_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AnalysisRunRecord = {
+  id: string;
+  org_id: string;
+  trigger_reason: AnalysisTriggerReason;
+  status: "queued" | "running" | "done" | "failed";
+  idempotency_key: string;
+  requested_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  metric_high_watermark: string | null;
+  report_id: string | null;
+  last_error: string | null;
+};
+
+export type LatestAnalysisSummary = {
+  summary: string;
+  key_actions: string[];
+  analyzed_at: string;
+  content_count: number;
+};
 
 export type WorkflowItemType =
   | "campaign_plan"
@@ -781,3 +824,5 @@ export type MemoryMd = {
   generated_at: string;
   freshness_key: string;
 };
+
+export * from "./instagram-slide-images";
