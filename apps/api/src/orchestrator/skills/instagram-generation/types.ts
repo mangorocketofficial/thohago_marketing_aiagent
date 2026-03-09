@@ -54,6 +54,7 @@ export type InstagramSlideDraft = {
 
 export type InstagramSlide = {
   slideIndex: number;
+  templateId: string;
   role: InstagramSlideRole;
   overlayTexts: Record<string, string>;
   imageFileIds: string[];

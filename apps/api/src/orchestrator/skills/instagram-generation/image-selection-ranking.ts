@@ -122,6 +122,8 @@ type RankedCandidate = ImageSelectionCandidate & {
   clusterKey: string;
 };
 
+const MAX_RANKED_IMAGE_SELECTION_COUNT = 40;
+
 const applyDiversityGuard = (ranked: RankedCandidate[], requiredCount: number): RankedCandidate[] => {
   const selected: RankedCandidate[] = [];
   const clusterCount = new Map<string, number>();
@@ -163,7 +165,7 @@ export const rankAndSelectCandidates = (params: {
   requiredCount: number;
   candidates: ImageSelectionCandidate[];
 }): ImageSelectionCandidate[] => {
-  const requiredCount = Math.max(1, Math.min(4, params.requiredCount));
+  const requiredCount = Math.max(1, Math.min(MAX_RANKED_IMAGE_SELECTION_COUNT, params.requiredCount));
   const candidates = params.candidates.filter((candidate) => !hasBlockedSafety(candidate.safety));
   if (candidates.length === 0) {
     return [];

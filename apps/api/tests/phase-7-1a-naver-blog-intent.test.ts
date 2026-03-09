@@ -57,37 +57,55 @@ const buildInput = (params: {
 
 describe("Phase 7-1a naver blog intent", () => {
   it("matches strong Korean phrase", () => {
-    const match = matchNaverBlogIntent(buildInput({
-      message: "네이버 블로그 글 써줘"
-    }));
+    const match = matchNaverBlogIntent(
+      buildInput({
+        message: "네이버 블로그 작성"
+      })
+    );
 
     assert.ok(match);
     assert.equal(match?.confidence, 0.95);
   });
 
   it("matches blog noun + action", () => {
-    const match = matchNaverBlogIntent(buildInput({
-      message: "blog post generate"
-    }));
+    const match = matchNaverBlogIntent(
+      buildInput({
+        message: "blog post generate"
+      })
+    );
 
     assert.ok(match);
     assert.equal(match?.confidence, 0.88);
   });
 
   it("does not match query-only wording", () => {
-    const match = matchNaverBlogIntent(buildInput({
-      message: "네이버 블로그 상태 확인"
-    }));
+    const match = matchNaverBlogIntent(
+      buildInput({
+        message: "네이버 블로그 상태 확인"
+      })
+    );
+
+    assert.equal(match, null);
+  });
+
+  it("does not hijack instagram posting wording", () => {
+    const match = matchNaverBlogIntent(
+      buildInput({
+        message: "인스타그램 포스팅 작성"
+      })
+    );
 
     assert.equal(match, null);
   });
 
   it("continues active naver blog skill regardless of step", () => {
-    const match = matchNaverBlogIntent(buildInput({
-      message: "아무 말",
-      currentStep: "await_content_approval",
-      activeSkill: "naverblog_generation"
-    }));
+    const match = matchNaverBlogIntent(
+      buildInput({
+        message: "anything",
+        currentStep: "await_content_approval",
+        activeSkill: "naverblog_generation"
+      })
+    );
 
     assert.ok(match);
     assert.equal(match?.confidence, 1);

@@ -60,7 +60,7 @@ describe("Phase 7-2a instagram intent", () => {
   it("matches strong phrase", () => {
     const matched = matchInstagramIntent(
       buildInput({
-        message: "인스타 게시물 만들어"
+        message: "create instagram post"
       })
     );
 
@@ -79,10 +79,21 @@ describe("Phase 7-2a instagram intent", () => {
     assert.ok((matched?.confidence ?? 0) >= 0.88);
   });
 
+  it("treats instagram posting wording as instagram content intent", () => {
+    const matched = matchInstagramIntent(
+      buildInput({
+        message: "인스타그램 포스팅 작성"
+      })
+    );
+
+    assert.ok(matched);
+    assert.ok((matched?.confidence ?? 0) >= 0.9);
+  });
+
   it("ignores analytics query wording", () => {
     const matched = matchInstagramIntent(
       buildInput({
-        message: "인스타 통계 분석"
+        message: "instagram analytics insight"
       })
     );
 
@@ -92,7 +103,7 @@ describe("Phase 7-2a instagram intent", () => {
   it("continues active skill even outside await_user_input step", () => {
     const matched = matchInstagramIntent(
       buildInput({
-        message: "아무 말",
+        message: "anything",
         currentStep: "await_content_approval",
         activeSkill: "instagram_generation"
       })

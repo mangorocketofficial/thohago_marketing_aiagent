@@ -6,38 +6,39 @@ import { parseInstagramDraft } from "../src/orchestrator/skills/instagram-genera
 describe("Phase 7-4 instagram carousel support", () => {
   it("parses carousel slides from prompt output", () => {
     const parsed = parseInstagramDraft(`{
-      "caption": "캠페인 소개",
+      "caption": "Campaign intro",
       "hashtags": ["#campaign"],
       "slides": [
         {
           "role": "cover",
-          "overlay_texts": { "title": "첫 장", "author": "소개" }
+          "overlay_texts": { "title": "Welcome", "author": "Launch" }
         },
         {
           "role": "cta",
-          "overlay_texts": { "title": "함께해요", "author": "지금 참여" }
+          "overlay_texts": { "title": "Apply now", "author": "Join us" }
         }
       ]
     }`);
 
-    assert.equal(parsed.caption, "캠페인 소개");
+    assert.equal(parsed.caption, "Campaign intro");
     assert.deepEqual(parsed.hashtags, ["#campaign"]);
     assert.equal(parsed.slides?.length, 2);
     assert.deepEqual(parsed.slides?.[0], {
       role: "cover",
       overlayTexts: {
-        title: "첫 장",
-        author: "소개"
+        title: "Welcome",
+        author: "Launch"
       }
     });
     assert.deepEqual(parsed.overlayTexts, {
-      title: "첫 장",
-      author: "소개"
+      title: "Welcome",
+      author: "Launch"
     });
   });
 
   it("normalizes legacy metadata into one slide using full top-level image arrays", () => {
     const slides = normalizeInstagramSlides({
+      template_id: "koica_story_02",
       overlay_texts: {
         title: "Legacy"
       },
@@ -48,6 +49,7 @@ describe("Phase 7-4 instagram carousel support", () => {
     assert.deepEqual(slides, [
       {
         slideIndex: 0,
+        templateId: "koica_story_02",
         role: "custom",
         overlayTexts: {
           title: "Legacy"
@@ -62,18 +64,20 @@ describe("Phase 7-4 instagram carousel support", () => {
     const legacy = deriveLegacyInstagramFields([
       {
         slideIndex: 0,
+        templateId: "koica_cover_01",
         role: "cover",
         overlayTexts: {
-          title: "첫 장"
+          title: "Welcome"
         },
         imageFileIds: ["slide-0-image"],
         imagePaths: ["slides/0.jpg"]
       },
       {
         slideIndex: 1,
+        templateId: "koica_cta_04",
         role: "cta",
         overlayTexts: {
-          title: "둘째 장"
+          title: "Apply"
         },
         imageFileIds: ["slide-1-image"],
         imagePaths: ["slides/1.jpg"]
@@ -81,12 +85,59 @@ describe("Phase 7-4 instagram carousel support", () => {
     ]);
 
     assert.deepEqual(legacy, {
+      templateId: "koica_cover_01",
       overlayTexts: {
-        title: "첫 장"
+        title: "Welcome"
       },
       imageFileIds: ["slide-0-image"],
       imagePaths: ["slides/0.jpg"],
       isCarousel: true
     });
+  });
+
+  it("normalizes explicit slide template ids and preserves order", () => {
+    const slides = normalizeInstagramSlides({
+      template_id: "koica_cover_01",
+      slides: [
+        {
+          slide_index: 2,
+          template_id: "koica_cta_04",
+          role: "cta",
+          overlay_texts: {
+            title: "Last"
+          }
+        },
+        {
+          slide_index: 1,
+          role: "detail",
+          overlay_texts: {
+            title: "Middle"
+          }
+        }
+      ]
+    });
+
+    assert.deepEqual(slides, [
+      {
+        slideIndex: 0,
+        templateId: "koica_cover_01",
+        role: "detail",
+        overlayTexts: {
+          title: "Middle"
+        },
+        imageFileIds: [],
+        imagePaths: []
+      },
+      {
+        slideIndex: 1,
+        templateId: "koica_cta_04",
+        role: "cta",
+        overlayTexts: {
+          title: "Last"
+        },
+        imageFileIds: [],
+        imagePaths: []
+      }
+    ]);
   });
 });

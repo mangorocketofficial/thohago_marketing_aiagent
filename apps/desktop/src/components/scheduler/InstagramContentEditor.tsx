@@ -38,7 +38,6 @@ export const InstagramContentEditor = ({
   const [hashtags, setHashtags] = useState(seed.hashtags);
   const [savedBody, setSavedBody] = useState(composeCaptionBody(seed.caption, seed.hashtags));
   const [updatedAt, setUpdatedAt] = useState(content.updated_at ?? "");
-  const [templateId, setTemplateId] = useState(seed.templateId);
   const [slides, setSlides] = useState(seed.slides);
   const [activityFolder, setActivityFolder] = useState(seed.activityFolder);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -48,6 +47,8 @@ export const InstagramContentEditor = ({
   const [pickerTargetSlotIndex, setPickerTargetSlotIndex] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
 
+  const currentSlide = slides[activeSlideIndex] ?? slides[0];
+  const activeTemplateId = currentSlide?.templateId ?? seed.templateId;
   const {
     templates,
     currentTemplate,
@@ -58,12 +59,11 @@ export const InstagramContentEditor = ({
     pickerImages,
     isPickerLoading,
     requestRecomposeSlide,
-    requestRecomposeAll,
     queueRecomposeSlide,
     loadPickerImages
   } = useInstagramPreviewRuntime({
     contentId: content.id,
-    templateId,
+    activeTemplateId,
     slides,
     activityFolder,
     expectedUpdatedAt: updatedAt,
@@ -73,7 +73,6 @@ export const InstagramContentEditor = ({
 
   const fullBody = composeCaptionBody(caption, hashtags);
   const isDirty = fullBody !== savedBody;
-  const currentSlide = slides[activeSlideIndex] ?? slides[0];
   const currentImageNames = currentSlide?.imageNames ?? [];
   const selectedImageCount = currentSlide?.imageFileIds.length ?? 0;
   const templateOptions = templates.length > 0 ? templates : [currentTemplate];
@@ -83,7 +82,6 @@ export const InstagramContentEditor = ({
     setHashtags(seed.hashtags);
     setSavedBody(composeCaptionBody(seed.caption, seed.hashtags));
     setUpdatedAt(content.updated_at ?? "");
-    setTemplateId(seed.templateId);
     setSlides(seed.slides);
     setActivityFolder(seed.activityFolder);
     setActiveSlideIndex(0);
@@ -229,7 +227,7 @@ export const InstagramContentEditor = ({
       />
 
       <TemplateImageControls
-        currentTemplateId={templateId}
+        currentTemplateId={activeTemplateId}
         currentImageNames={currentImageNames}
         selectedImageCount={selectedImageCount}
         requiredImageCount={requiredImageCount}
@@ -240,11 +238,18 @@ export const InstagramContentEditor = ({
           description: template.description
         }))}
         onChangeTemplate={(nextTemplateId) => {
-          setTemplateId(nextTemplateId);
-          void requestRecomposeAll({
-            templateId: nextTemplateId,
-            slides
-          });
+          const nextTemplate = templateOptions.find((template) => template.id === nextTemplateId);
+          const nextMaxCount = nextTemplate?.photos.length ?? maxImageCount;
+          updateActiveSlide(
+            (slide) => ({
+              ...slide,
+              templateId: nextTemplateId,
+              imageFileIds: nextMaxCount > 0 ? slide.imageFileIds.slice(0, nextMaxCount) : slide.imageFileIds,
+              imagePaths: nextMaxCount > 0 ? slide.imagePaths.slice(0, nextMaxCount) : slide.imagePaths,
+              imageNames: nextMaxCount > 0 ? slide.imageNames.slice(0, nextMaxCount) : slide.imageNames
+            }),
+            "request"
+          );
         }}
         onAddImage={(slotIndex) => {
           void openImagePicker(slotIndex);

@@ -1,9 +1,12 @@
 import type { Content } from "@repo/types";
+import { fillInstagramSlideImageGaps } from "@repo/types";
 
 type LocalSaveSuggestion = {
   relativePath: string;
   fileName: string;
 };
+
+const DEFAULT_TEMPLATE_ID = "koica_cover_01";
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -29,6 +32,9 @@ const dedupe = (values: string[]): string[] => {
   }
   return result;
 };
+
+const buildImageNames = (imagePaths: string[], imageFileIds: string[]): string[] =>
+  imagePaths.length > 0 ? imagePaths.map((entry) => fileNameFromPath(entry)).filter(Boolean) : imageFileIds.map((entry) => entry.slice(0, 8));
 
 /**
  * Convert local/absolute path text into display-friendly file name without Node path dependency.
@@ -116,6 +122,7 @@ export const composeCaptionBody = (caption: string, hashtags: string[]): string 
 
 export type InstagramEditorSlide = {
   slideIndex: number;
+  templateId: string;
   role: string;
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
@@ -133,7 +140,18 @@ export type InstagramEditorSeed = {
   isCarousel: boolean;
 };
 
+const resolveRequiredImageCount = (metadata: Record<string, unknown>, slides: InstagramEditorSlide[]): number => {
+  const slideCount = slides.reduce((max, slide) => Math.max(max, slide.imagePaths.length, slide.imageFileIds.length), 0);
+  if (slideCount > 0) {
+    return slideCount;
+  }
+
+  const legacyImageCount = Math.max(asStringArray(metadata.image_paths).length, asStringArray(metadata.image_file_ids).length);
+  return Math.max(1, legacyImageCount);
+};
+
 const buildEditorSlides = (metadata: Record<string, unknown>): InstagramEditorSlide[] => {
+  const fallbackTemplateId = asString(metadata.template_id, DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   const rawSlides = Array.isArray(metadata.slides) ? metadata.slides : [];
   const slides = rawSlides
     .map((entry, index) => {
@@ -142,11 +160,12 @@ const buildEditorSlides = (metadata: Record<string, unknown>): InstagramEditorSl
       const imagePaths = asStringArray(row.image_paths ?? row.imagePaths);
       return {
         slideIndex: typeof row.slide_index === "number" && Number.isFinite(row.slide_index) ? Math.max(0, Math.floor(row.slide_index)) : index,
+        templateId: asString(row.template_id ?? row.templateId, fallbackTemplateId).trim() || fallbackTemplateId,
         role: asString(row.role, "custom").trim() || "custom",
         overlayTexts: asStringMap(row.overlay_texts ?? row.overlayTexts),
         imageFileIds,
         imagePaths,
-        imageNames: imagePaths.length > 0 ? imagePaths.map((entry) => fileNameFromPath(entry)).filter(Boolean) : imageFileIds.map((entry) => entry.slice(0, 8))
+        imageNames: buildImageNames(imagePaths, imageFileIds)
       } satisfies InstagramEditorSlide;
     })
     .sort((left, right) => left.slideIndex - right.slideIndex)
@@ -164,11 +183,12 @@ const buildEditorSlides = (metadata: Record<string, unknown>): InstagramEditorSl
   return [
     {
       slideIndex: 0,
+      templateId: fallbackTemplateId,
       role: "custom",
       overlayTexts: asStringMap(metadata.overlay_texts),
       imageFileIds,
       imagePaths,
-      imageNames: imagePaths.length > 0 ? imagePaths.map((entry) => fileNameFromPath(entry)).filter(Boolean) : imageFileIds.map((entry) => entry.slice(0, 8))
+      imageNames: buildImageNames(imagePaths, imageFileIds)
     }
   ];
 };
@@ -178,8 +198,14 @@ const buildEditorSlides = (metadata: Record<string, unknown>): InstagramEditorSl
  */
 export const buildInstagramEditorSeed = (content: Content): InstagramEditorSeed => {
   const metadata = asRecord(content.metadata);
-  const templateId = asString(metadata.template_id, "koica_cover_01").trim() || "koica_cover_01";
-  const slides = buildEditorSlides(metadata);
+  const rawSlides = buildEditorSlides(metadata);
+  const requiredImageCount = resolveRequiredImageCount(metadata, rawSlides);
+  const slides = fillInstagramSlideImageGaps(rawSlides, requiredImageCount).map((slide, index) => ({
+    ...slide,
+    slideIndex: index,
+    imageNames: buildImageNames(slide.imagePaths, slide.imageFileIds)
+  }));
+  const templateId = slides[0]?.templateId ?? (asString(metadata.template_id, DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID);
   const activityFolder = asString(metadata.activity_folder, "").trim();
 
   const bodyText = typeof content.body === "string" ? content.body : "";

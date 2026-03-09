@@ -1,5 +1,7 @@
 import type { InstagramSlide, InstagramSlideRole } from "./skills/instagram-generation/types";
 
+const DEFAULT_TEMPLATE_ID = "koica_cover_01";
+
 export const INSTAGRAM_SLIDE_ROLES: InstagramSlideRole[] = [
   "cover",
   "problem",
@@ -42,7 +44,7 @@ export const normalizeInstagramSlideRole = (value: unknown, fallback: InstagramS
   return INSTAGRAM_SLIDE_ROLE_SET.has(normalized) ? normalized : fallback;
 };
 
-const normalizeSlide = (value: unknown, fallbackIndex: number): InstagramSlide | null => {
+const normalizeSlide = (value: unknown, fallbackIndex: number, fallbackTemplateId: string): InstagramSlide | null => {
   const row = asRecord(value);
   const slideIndexRaw = row.slide_index ?? row.slideIndex;
   const parsedIndex =
@@ -52,6 +54,7 @@ const normalizeSlide = (value: unknown, fallbackIndex: number): InstagramSlide |
 
   return {
     slideIndex: parsedIndex,
+    templateId: asString(row.template_id ?? row.templateId, fallbackTemplateId).trim() || fallbackTemplateId,
     role: normalizeInstagramSlideRole(row.role),
     overlayTexts: asStringMap(row.overlay_texts ?? row.overlayTexts),
     imageFileIds: asStringArray(row.image_file_ids ?? row.imageFileIds),
@@ -60,9 +63,10 @@ const normalizeSlide = (value: unknown, fallbackIndex: number): InstagramSlide |
 };
 
 export const normalizeInstagramSlides = (metadata: Record<string, unknown>): InstagramSlide[] => {
+  const fallbackTemplateId = asString(metadata.template_id, DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   const parsedSlides = Array.isArray(metadata.slides)
     ? metadata.slides
-        .map((entry, index) => normalizeSlide(entry, index))
+        .map((entry, index) => normalizeSlide(entry, index, fallbackTemplateId))
         .filter((entry): entry is InstagramSlide => !!entry)
         .sort((left, right) => left.slideIndex - right.slideIndex)
         .map((entry, index) => ({
@@ -78,6 +82,7 @@ export const normalizeInstagramSlides = (metadata: Record<string, unknown>): Ins
   return [
     {
       slideIndex: 0,
+      templateId: fallbackTemplateId,
       role: "custom",
       overlayTexts: asStringMap(metadata.overlay_texts),
       imageFileIds: asStringArray(metadata.image_file_ids),
@@ -87,6 +92,7 @@ export const normalizeInstagramSlides = (metadata: Record<string, unknown>): Ins
 };
 
 export const deriveLegacyInstagramFields = (slides: InstagramSlide[]): {
+  templateId: string;
   overlayTexts: Record<string, string>;
   imageFileIds: string[];
   imagePaths: string[];
@@ -94,6 +100,7 @@ export const deriveLegacyInstagramFields = (slides: InstagramSlide[]): {
 } => {
   const firstSlide = slides[0] ?? {
     slideIndex: 0,
+    templateId: DEFAULT_TEMPLATE_ID,
     role: "custom" as const,
     overlayTexts: {},
     imageFileIds: [],
@@ -101,6 +108,7 @@ export const deriveLegacyInstagramFields = (slides: InstagramSlide[]): {
   };
 
   return {
+    templateId: firstSlide.templateId,
     overlayTexts: { ...firstSlide.overlayTexts },
     imageFileIds: [...firstSlide.imageFileIds],
     imagePaths: [...firstSlide.imagePaths],
@@ -111,6 +119,7 @@ export const deriveLegacyInstagramFields = (slides: InstagramSlide[]): {
 export const serializeInstagramSlides = (slides: InstagramSlide[]): Array<Record<string, unknown>> =>
   slides.map((slide) => ({
     slide_index: slide.slideIndex,
+    template_id: slide.templateId,
     role: slide.role,
     overlay_texts: slide.overlayTexts,
     image_file_ids: slide.imageFileIds,

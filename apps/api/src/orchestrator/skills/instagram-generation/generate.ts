@@ -1,6 +1,12 @@
 import { HttpError } from "../../../lib/errors";
 import { getTemplate, type TemplateId } from "@repo/media-engine";
+import { fillInstagramSlideImageGaps } from "@repo/types";
 import { callWithFallback } from "../../llm-client";
+import {
+  buildDeterministicCarouselSlides,
+  buildInstagramCarouselExpansionPrompt,
+  shouldBackfillInstagramCarousel
+} from "./carousel-planner";
 import { buildInstagramGenerationContext } from "./context";
 import { selectImagesForInstagram } from "./image-selector";
 import {
@@ -13,7 +19,9 @@ import {
 } from "./persistence";
 import { buildInstagramPrompt, parseInstagramDraft } from "./prompt";
 import { resolveInstagramGenerationSlot } from "./slot";
+import { assignSlideTemplateIds } from "./template-assignment";
 import type {
+  InstagramDraft,
   InstagramGenerationResult,
   InstagramImageMode,
   InstagramSlide,
@@ -76,10 +84,20 @@ export const generateAndPersistInstagram = async (params: {
       throw new HttpError(502, "generation_failed", llm.errorMessage ?? "Failed to generate instagram caption.");
     }
 
-    const parsedDraft = parseInstagramDraft(llm.text);
+    const parsedDraft = await expandDraftToCarouselIfNeeded({
+      orgId: params.orgId,
+      topic: effectiveTopic,
+      imageMode: params.imageMode,
+      context,
+      draft: parseInstagramDraft(llm.text)
+    });
     const template = getTemplate(templateId);
     const perSlideImageCount = template ? Math.max(0, template.photos.filter((slot) => !slot.optional).length) : 1;
     const slideDrafts = normalizeSlideDrafts(parsedDraft.slides, parsedDraft.overlayTexts);
+    const slideTemplateIds = assignSlideTemplateIds({
+      baseTemplateId: templateId,
+      slideDrafts
+    });
     const slideCount = slideDrafts.length;
     const requiredCount = slideCount * perSlideImageCount;
 
@@ -92,15 +110,27 @@ export const generateAndPersistInstagram = async (params: {
       manualSelections: params.manualImageSelections
     });
 
-    const slides = buildSlides({
-      templateId,
-      slideDrafts,
-      selectedImages: selected.selectedImages.map((entry) => ({
+    const selectedImages = selected.selectedImages.map((entry) => ({
+      fileId: entry.fileId,
+      relativePath: entry.relativePath
+    }));
+    const slides = fillInstagramSlideImageGaps(
+      buildSlides({
+        slideDrafts,
+        slideTemplateIds,
+        selectedImages,
+        perSlideImageCount
+      }),
+      perSlideImageCount,
+      selectedImages.map((entry) => ({
         fileId: entry.fileId,
-        relativePath: entry.relativePath
-      })),
-      perSlideImageCount
-    });
+        imagePath: entry.relativePath
+      }))
+    );
+    if (perSlideImageCount > 0 && slides.some((slide) => slide.imagePaths.length < perSlideImageCount)) {
+      throw new HttpError(422, "generation_failed", "Not enough activity images are available to compose the Instagram draft.");
+    }
+
     const firstSlide = slides[0] ?? emptySlide();
     const outputFormat: "png" | "jpg" = "png";
     const campaignTitle = await loadCampaignTitle({
@@ -179,6 +209,60 @@ export const generateAndPersistInstagram = async (params: {
 const normalizeTemplateId = (templateId: string | null): TemplateId =>
   templateId && getTemplate(templateId) ? templateId : DEFAULT_TEMPLATE_ID;
 
+const expandDraftToCarouselIfNeeded = async (params: {
+  orgId: string;
+  topic: string;
+  imageMode: InstagramImageMode;
+  context: { textSlotIds: string[] };
+  draft: InstagramDraft;
+}): Promise<InstagramDraft> => {
+  if (
+    !shouldBackfillInstagramCarousel({
+      imageMode: params.imageMode,
+      topic: params.topic,
+      caption: params.draft.caption,
+      slides: params.draft.slides
+    })
+  ) {
+    return params.draft;
+  }
+
+  const repairResult = await callWithFallback({
+    orgId: params.orgId,
+    prompt: buildInstagramCarouselExpansionPrompt({
+      topic: params.topic,
+      caption: params.draft.caption,
+      hashtags: params.draft.hashtags,
+      overlayTexts: params.draft.overlayTexts,
+      textSlotIds: params.context.textSlotIds
+    }),
+    maxTokens: 1400
+  });
+
+  if (repairResult.text) {
+    const repairedDraft = parseInstagramDraft(repairResult.text);
+    if (Array.isArray(repairedDraft.slides) && repairedDraft.slides.length > 1) {
+      return {
+        ...params.draft,
+        overlayTexts: repairedDraft.slides[0]?.overlayTexts ?? params.draft.overlayTexts,
+        slides: repairedDraft.slides
+      };
+    }
+  }
+
+  const fallbackSlides = buildDeterministicCarouselSlides({
+    topic: params.topic,
+    caption: params.draft.caption,
+    overlayTexts: params.draft.overlayTexts
+  });
+
+  return {
+    ...params.draft,
+    overlayTexts: fallbackSlides[0]?.overlayTexts ?? params.draft.overlayTexts,
+    slides: fallbackSlides
+  };
+};
+
 const normalizeSlideDrafts = (
   slides: InstagramSlideDraft[] | undefined,
   fallbackOverlayTexts: Record<string, string>
@@ -195,8 +279,8 @@ const normalizeSlideDrafts = (
 };
 
 const buildSlides = (params: {
-  templateId: TemplateId;
   slideDrafts: InstagramSlideDraft[];
+  slideTemplateIds: TemplateId[];
   selectedImages: Array<{ fileId: string; relativePath: string }>;
   perSlideImageCount: number;
 }): InstagramSlide[] =>
@@ -209,8 +293,9 @@ const buildSlides = (params: {
 
     return {
       slideIndex,
+      templateId: params.slideTemplateIds[slideIndex] ?? DEFAULT_TEMPLATE_ID,
       role: slideDraft.role,
-      overlayTexts: buildOverlayTextMap(params.templateId, slideDraft.overlayTexts),
+      overlayTexts: buildOverlayTextMap(params.slideTemplateIds[slideIndex] ?? DEFAULT_TEMPLATE_ID, slideDraft.overlayTexts),
       imageFileIds: imageChunk.map((entry) => entry.fileId),
       imagePaths: imageChunk.map((entry) => entry.relativePath)
     };
@@ -218,6 +303,7 @@ const buildSlides = (params: {
 
 const emptySlide = (): InstagramSlide => ({
   slideIndex: 0,
+  templateId: DEFAULT_TEMPLATE_ID,
   role: "custom",
   overlayTexts: {},
   imageFileIds: [],

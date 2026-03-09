@@ -1,0 +1,71 @@
+{
+  "template_id": "koica_cta_04",
+  "template_name": "KOICA CTA Card",
+  "size": {
+    "width": 1080,
+    "height": 1080
+  },
+  "photos": [
+    {
+      "id": "main_photo",
+      "label": "Main photo",
+      "x": 118,
+      "y": 126,
+      "width": 844,
+      "height": 488,
+      "fit": "cover"
+    }
+  ],
+  "texts": [
+    {
+      "id": "contest_info",
+      "label": "Contest intro",
+      "x": 146,
+      "y": 660,
+      "width": 788,
+      "height": 40,
+      "font_size": 24,
+      "font_color": "#F3EFE7",
+      "align": "center"
+    },
+    {
+      "id": "title",
+      "label": "Title",
+      "x": 120,
+      "y": 726,
+      "width": 840,
+      "height": 116,
+      "font_size": 58,
+      "font_color": "#FFFFFF",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "author",
+      "label": "Author",
+      "x": 184,
+      "y": 878,
+      "width": 712,
+      "height": 48,
+      "font_size": 30,
+      "font_color": "#F9F2DD",
+      "align": "center"
+    },
+    {
+      "id": "badge_text",
+      "label": "Badge text",
+      "x": 782,
+      "y": 558,
+      "width": 148,
+      "height": 54,
+      "font_size": 30,
+      "font_color": "#FFFFFF",
+      "font_weight": "bold",
+      "align": "center"
+    }
+  ],
+  "meta": {
+    "description": "High-contrast CTA layout with bold bottom action band",
+    "thumbnail": "thumbnails/koica_cta_04.png"
+  }
+}

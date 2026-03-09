@@ -22,6 +22,7 @@ export type ImageComposeResult = {
 export type CarouselComposeInput = {
   templateId: TemplateId;
   slides: Array<{
+    templateId?: TemplateId;
     userImages: string[];
     overlayTexts: Record<string, string>;
   }>;
@@ -98,7 +99,7 @@ export const composeCarouselImages = async (input: CarouselComposeInput): Promis
   for (const slide of input.slides) {
     results.push(
       await composeInstagramImage({
-        templateId: input.templateId,
+        templateId: slide.templateId ?? input.templateId,
         userImages: slide.userImages,
         overlayTexts: slide.overlayTexts,
         outputFormat: input.outputFormat

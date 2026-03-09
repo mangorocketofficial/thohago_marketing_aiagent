@@ -1,0 +1,72 @@
+{
+  "template_id": "koica_stats_03",
+  "template_name": "KOICA Stats Card",
+  "size": {
+    "width": 1080,
+    "height": 1080
+  },
+  "photos": [
+    {
+      "id": "main_photo",
+      "label": "Main photo",
+      "x": 88,
+      "y": 132,
+      "width": 604,
+      "height": 456,
+      "fit": "cover"
+    }
+  ],
+  "texts": [
+    {
+      "id": "badge_text",
+      "label": "Badge text",
+      "x": 742,
+      "y": 158,
+      "width": 214,
+      "height": 64,
+      "font_size": 34,
+      "font_color": "#FFFFFF",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "contest_info",
+      "label": "Contest intro",
+      "x": 732,
+      "y": 256,
+      "width": 236,
+      "height": 146,
+      "font_size": 28,
+      "font_color": "#7A5F48",
+      "font_weight": "bold",
+      "align": "center"
+    },
+    {
+      "id": "title",
+      "label": "Title",
+      "x": 92,
+      "y": 694,
+      "width": 888,
+      "height": 112,
+      "font_size": 54,
+      "font_color": "#2D2723",
+      "font_weight": "bold",
+      "align": "left"
+    },
+    {
+      "id": "author",
+      "label": "Author",
+      "x": 92,
+      "y": 840,
+      "width": 888,
+      "height": 72,
+      "font_size": 30,
+      "font_color": "#917A68",
+      "align": "left"
+    }
+  ],
+  "meta": {
+    "description": "Photo + stat panel layout for data and impact slides",
+    "thumbnail": "thumbnails/koica_stats_03.png"
+  }
+}

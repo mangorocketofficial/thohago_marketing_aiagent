@@ -33,7 +33,7 @@ export const TemplateImageControls = ({
   return (
     <div className="instagram-template-image-controls">
       <div className="instagram-control-group">
-        <label htmlFor="instagram-template-select">Template</label>
+        <label htmlFor="instagram-template-select">Slide Template</label>
         <select
           id="instagram-template-select"
           value={currentTemplateId}

@@ -13,6 +13,7 @@ const STRONG_PHRASES = [
 ];
 
 const BLOG_NOUNS = ["네이버", "블로그", "포스팅", "글", "blog", "post"];
+const INSTAGRAM_TERMS = ["인스타", "인스타그램", "instagram", "insta"];
 const ACTION_TERMS = ["써줘", "작성", "생성", "만들어", "만들어줘", "write", "create", "generate", "draft"];
 const QUERY_TERMS = ["조회", "확인", "상태", "목록", "리스트", "status", "list", "query"];
 
@@ -35,6 +36,10 @@ export const matchNaverBlogIntent = (input: SkillIntentInput): SkillIntentMatch 
 
   const message = input.normalizedMessage.trim();
   if (!message) {
+    return null;
+  }
+
+  if (hasAny(message, INSTAGRAM_TERMS) && !hasAny(message, ["네이버", "블로그", "blog", "naver blog"])) {
     return null;
   }
 

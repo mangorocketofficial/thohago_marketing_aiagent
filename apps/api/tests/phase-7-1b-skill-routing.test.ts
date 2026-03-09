@@ -34,6 +34,7 @@ const buildState = (overrides?: Partial<SessionState>): SessionState => ({
   user_message: null,
   campaign_id: null,
   campaign_survey: null,
+  instagram_survey: null,
   campaign_draft_version: 0,
   campaign_chain_data: null,
   campaign_plan_document: null,
@@ -60,7 +61,7 @@ const buildUserMessageEvent = (content: string, skillTrigger?: string): ResumeEv
 describe("Phase 7-1b skill routing guardrails", () => {
   it("routes explicit skill trigger immediately when no active skill exists", () => {
     const routed = routeSkill({
-      event: buildUserMessageEvent("네이버 블로그 글 작성해줘", "naverblog_generation"),
+      event: buildUserMessageEvent("write blog post", "naverblog_generation"),
       session: buildSession(),
       state: buildState()
     });
@@ -70,9 +71,9 @@ describe("Phase 7-1b skill routing guardrails", () => {
     assert.equal(routed?.skill.id, "naverblog_generation");
   });
 
-  it("keeps active skill continuation even when skill_trigger payload exists", () => {
+  it("reaffirms the explicitly selected skill even when it is already active", () => {
     const routed = routeSkill({
-      event: buildUserMessageEvent("봄맞이 홈카페 인테리어 팁", "naverblog_generation"),
+      event: buildUserMessageEvent("spring interior tips", "naverblog_generation"),
       session: buildSession("await_content_approval"),
       state: buildState({
         active_skill: "naverblog_generation"
@@ -80,13 +81,13 @@ describe("Phase 7-1b skill routing guardrails", () => {
     });
 
     assert.ok(routed);
-    assert.equal(routed?.reason, "active_skill");
+    assert.equal(routed?.reason, "explicit_trigger");
     assert.equal(routed?.skill.id, "naverblog_generation");
   });
 
   it("allows explicit skill trigger to override a different pinned skill", () => {
     const routed = routeSkill({
-      event: buildUserMessageEvent("?몄뒪?洹몃옩 寃뚯떆臾?留뚮뱾?댁쨾", "instagram_generation"),
+      event: buildUserMessageEvent("create instagram card for recruitment", "instagram_generation"),
       session: buildSession(),
       state: buildState({
         active_skill: "naverblog_generation",
@@ -111,6 +112,21 @@ describe("Phase 7-1b skill routing guardrails", () => {
 
     assert.ok(routed);
     assert.equal(routed?.reason, "intent");
+    assert.equal(routed?.skill.id, "instagram_generation");
+  });
+
+  it("keeps instagram routing for explicit instagram trigger on posting phrasing", () => {
+    const routed = routeSkill({
+      event: buildUserMessageEvent("인스타그램 포스팅 작성", "instagram_generation"),
+      session: buildSession(),
+      state: buildState({
+        active_skill: "instagram_generation",
+        skill_lock_id: "instagram_generation"
+      })
+    });
+
+    assert.ok(routed);
+    assert.equal(routed?.reason, "explicit_trigger");
     assert.equal(routed?.skill.id, "instagram_generation");
   });
 });

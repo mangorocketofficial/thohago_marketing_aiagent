@@ -90,7 +90,7 @@ const asTemplateDefinitionArray = (value: unknown): TemplateDefinition[] => {
 
 type UseInstagramPreviewRuntimeParams = {
   contentId: string;
-  templateId: string;
+  activeTemplateId: string;
   slides: InstagramEditorSlide[];
   activityFolder: string;
   expectedUpdatedAt: string;
@@ -101,19 +101,18 @@ type UseInstagramPreviewRuntimeParams = {
 type RecomposeSlideInput = {
   slides: InstagramEditorSlide[];
   slideIndex: number;
-  templateId?: string;
   persistMetadata?: boolean;
 };
 
 type RecomposeAllInput = {
   slides: InstagramEditorSlide[];
-  templateId?: string;
   persistMetadata?: boolean;
 };
 
 const toMetadataSlidesPayload = (slides: InstagramEditorSlide[]) =>
   slides.map((slide, index) => ({
     slideIndex: index,
+    templateId: slide.templateId,
     role: slide.role,
     overlayTexts: slide.overlayTexts,
     imageFileIds: slide.imageFileIds,
@@ -123,6 +122,7 @@ const toMetadataSlidesPayload = (slides: InstagramEditorSlide[]) =>
 const toComposeSlidesPayload = (slides: InstagramEditorSlide[]) =>
   slides.map((slide, index) => ({
     slideIndex: index,
+    templateId: slide.templateId,
     overlayTexts: slide.overlayTexts,
     imagePaths: slide.imagePaths,
     imageFileIds: slide.imageFileIds
@@ -133,7 +133,7 @@ const toComposeSlidesPayload = (slides: InstagramEditorSlide[]) =>
  */
 export const useInstagramPreviewRuntime = ({
   contentId,
-  templateId,
+  activeTemplateId,
   slides,
   activityFolder,
   expectedUpdatedAt,
@@ -170,14 +170,15 @@ export const useInstagramPreviewRuntime = ({
   }, [loadTemplates]);
 
   const currentTemplate = useMemo(
-    () => templates.find((template) => template.id === templateId) ?? DEFAULT_TEMPLATE,
-    [templateId, templates]
+    () => templates.find((template) => template.id === activeTemplateId) ?? DEFAULT_TEMPLATE,
+    [activeTemplateId, templates]
   );
   const requiredImageCount = currentTemplate.photos.filter((slot) => !slot.optional).length;
   const maxImageCount = currentTemplate.photos.length;
 
   const persistMetadata = useCallback(
-    async (nextTemplateId: string, nextSlides: InstagramEditorSlide[]) => {
+    async (nextSlides: InstagramEditorSlide[]) => {
+      const nextTemplateId = nextSlides[0]?.templateId ?? activeTemplateId;
       const saveResult = await window.desktopRuntime.content.saveInstagramMetadata({
         contentId,
         templateId: nextTemplateId,
@@ -196,11 +197,11 @@ export const useInstagramPreviewRuntime = ({
       }
       return true;
     },
-    [contentId, onMetadataUpdatedAt, onNotice]
+    [activeTemplateId, contentId, onMetadataUpdatedAt, onNotice]
   );
 
   const requestRecomposeSlide = useCallback(
-    async ({ slides: nextSlides, slideIndex, templateId: nextTemplateId = templateId, persistMetadata: shouldPersist = true }: RecomposeSlideInput) => {
+    async ({ slides: nextSlides, slideIndex, persistMetadata: shouldPersist = true }: RecomposeSlideInput) => {
       const targetSlide = nextSlides[slideIndex];
       if (!targetSlide) {
         return;
@@ -213,7 +214,7 @@ export const useInstagramPreviewRuntime = ({
       const composeResult = await window.desktopRuntime.content.composeLocal({
         contentId,
         slideIndex,
-        templateId: nextTemplateId,
+        templateId: targetSlide.templateId,
         overlayTexts: targetSlide.overlayTexts,
         ...(targetSlide.imagePaths.length > 0 ? { imagePaths: targetSlide.imagePaths } : {}),
         ...(targetSlide.imageFileIds.length > 0 ? { imageFileIds: targetSlide.imageFileIds } : {}),
@@ -237,7 +238,7 @@ export const useInstagramPreviewRuntime = ({
       });
 
       if (shouldPersist) {
-        const saved = await persistMetadata(nextTemplateId, nextSlides);
+        const saved = await persistMetadata(nextSlides);
         if (!saved) {
           setIsRecomposing(false);
           return;
@@ -247,14 +248,15 @@ export const useInstagramPreviewRuntime = ({
       setIsRecomposing(false);
       onNotice("");
     },
-    [contentId, onNotice, persistMetadata, templateId]
+    [contentId, onNotice, persistMetadata]
   );
 
   const requestRecomposeAll = useCallback(
-    async ({ slides: nextSlides, templateId: nextTemplateId = templateId, persistMetadata: shouldPersist = true }: RecomposeAllInput) => {
+    async ({ slides: nextSlides, persistMetadata: shouldPersist = true }: RecomposeAllInput) => {
       const seq = requestSeqRef.current + 1;
       requestSeqRef.current = seq;
       setIsRecomposing(true);
+      const nextTemplateId = nextSlides[0]?.templateId ?? activeTemplateId;
 
       const composeResult = await window.desktopRuntime.content.composeCarousel({
         contentId,
@@ -280,7 +282,7 @@ export const useInstagramPreviewRuntime = ({
       setSlideImageUrls(nextImageUrls);
 
       if (shouldPersist) {
-        const saved = await persistMetadata(nextTemplateId, nextSlides);
+        const saved = await persistMetadata(nextSlides);
         if (!saved) {
           setIsRecomposing(false);
           return;
@@ -290,7 +292,7 @@ export const useInstagramPreviewRuntime = ({
       setIsRecomposing(false);
       onNotice("");
     },
-    [contentId, onNotice, persistMetadata, templateId]
+    [activeTemplateId, contentId, onNotice, persistMetadata]
   );
 
   const queueRecomposeSlide = useCallback(

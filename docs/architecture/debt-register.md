@@ -153,3 +153,14 @@ Reason
 
 Affects
 Phase 8-3 hardening
+
+DEBT-015
+
+Description
+Deterministic Instagram carousel fallback still uses generic role-based overlay copy when the repair LLM also misses the `slides` contract.
+
+Reason
+7-4 Patch prioritized reliably returning multi-slide drafts first; template-aware localized slide copy generation was deferred so generation never falls back to a single image again.
+
+Affects
+Phase 7-4 polish

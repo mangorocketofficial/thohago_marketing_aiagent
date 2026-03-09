@@ -98,4 +98,26 @@ describe("Phase 7-2d image selection ranking", () => {
     assert.equal(selected.length, 1);
     assert.equal(selected[0]?.fileId, "safe");
   });
+
+  it("supports carousel-sized selections above four images", () => {
+    const selected = rankAndSelectCandidates({
+      queryText: "volunteer outdoor campaign",
+      requiredCount: 6,
+      candidates: Array.from({ length: 6 }, (_, index) =>
+        buildCandidate({
+          fileId: `carousel-${index + 1}`,
+          relativePath: `activity/carousel-${index + 1}.jpg`,
+          searchText: `volunteer outdoor campaign image ${index + 1}`,
+          sceneTags: [`cluster-${index + 1}`],
+          modifiedAtMs: 6000 - index
+        })
+      )
+    });
+
+    assert.equal(selected.length, 6);
+    assert.deepEqual(
+      selected.map((entry) => entry.fileId),
+      ["carousel-1", "carousel-2", "carousel-3", "carousel-4", "carousel-5", "carousel-6"]
+    );
+  });
 });

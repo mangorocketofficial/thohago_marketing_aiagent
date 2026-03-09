@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, it } from "node:test";
 import sharp from "sharp";
-import { composeInstagramImage } from "@repo/media-engine";
+import { composeCarouselImages, composeInstagramImage } from "@repo/media-engine";
 
 const fixtureImagePath = fileURLToPath(
   new URL("../../../assets/template1/composite_test_01.png", import.meta.url)
@@ -29,5 +29,39 @@ describe("Phase 7-2a image composer", () => {
     assert.equal(result.height, 1080);
     assert.equal(metadata.width, 1080);
     assert.equal(metadata.height, 1080);
+  });
+
+  it("composes carousel slides with different template ids", async () => {
+    const result = await composeCarouselImages({
+      templateId: "koica_cover_01",
+      slides: [
+        {
+          templateId: "koica_story_02",
+          userImages: [path.resolve(fixtureImagePath)],
+          overlayTexts: {
+            title: "Story slide",
+            author: "Team"
+          }
+        },
+        {
+          templateId: "koica_cta_04",
+          userImages: [path.resolve(fixtureImagePath)],
+          overlayTexts: {
+            title: "Join now",
+            author: "koica.example"
+          }
+        }
+      ],
+      outputFormat: "png"
+    });
+
+    assert.equal(result.slides.length, 2);
+    for (const slide of result.slides) {
+      const metadata = await sharp(slide.buffer).metadata();
+      assert.equal(slide.width, 1080);
+      assert.equal(slide.height, 1080);
+      assert.equal(metadata.width, 1080);
+      assert.equal(metadata.height, 1080);
+    }
   });
 });

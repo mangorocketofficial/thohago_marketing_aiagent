@@ -12,7 +12,7 @@ const STRONG_PHRASES = [
 
 const PLATFORM_TERMS = ["인스타", "인스타그램", "instagram", "insta"];
 const BLOG_TERMS = ["블로그", "naver blog", "네이버 블로그", "blog post"];
-const CONTENT_TERMS = ["게시물", "포스트", "피드", "카드뉴스", "post", "feed"];
+const CONTENT_TERMS = ["게시물", "포스트", "포스팅", "피드", "카드뉴스", "post", "feed", "posting"];
 const ACTION_TERMS = ["만들어", "생성", "작성", "올려", "create", "make", "generate", "draft"];
 const IMAGE_TERMS = ["이미지", "사진", "디자인", "image", "photo"];
 const QUERY_TERMS = ["분석", "인사이트", "팔로워", "통계", "analytics", "insight", "status", "list", "조회"];

@@ -87,28 +87,20 @@ export const routeSkill = (params: {
   const explicitTrigger = asString(payload.skill_trigger, "").trim().toLowerCase();
   if (explicitTrigger) {
     const explicitSkill = registry.findById(explicitTrigger);
-    if (
-      explicitSkill &&
-      explicitSkill.handlesEvents.includes("user_message")
-    ) {
+    if (explicitSkill && explicitSkill.handlesEvents.includes("user_message")) {
       const pinnedSkillId = params.state.skill_lock_id || params.state.active_skill || null;
-      if (pinnedSkillId && pinnedSkillId !== explicitSkill.id) {
-        return {
-          skill: explicitSkill,
-          reason: "explicit_trigger",
-          confidence: 1,
-          note: "explicit_trigger_override_active_or_lock"
-        };
-      }
-
-      if (!params.state.active_skill && !params.state.skill_lock_id) {
-        return {
-          skill: explicitSkill,
-          reason: "explicit_trigger",
-          confidence: 1,
-          note: "explicit_trigger_initial_routing"
-        };
-      }
+      const note =
+        !pinnedSkillId
+          ? "explicit_trigger_initial_routing"
+          : pinnedSkillId === explicitSkill.id
+            ? "explicit_trigger_reaffirm_active_or_lock"
+            : "explicit_trigger_override_active_or_lock";
+      return {
+        skill: explicitSkill,
+        reason: "explicit_trigger",
+        confidence: 1,
+        note
+      };
     }
   }
 

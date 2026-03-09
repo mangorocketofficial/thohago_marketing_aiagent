@@ -141,7 +141,7 @@ export const loadExistingGeneratedResult = async (params: {
     topic: asString(metadata.topic, params.topic) || params.topic,
     caption: asString(row.body, ""),
     model: asString(metadata.generation_model, "claude") === "gpt-4o-mini" ? "gpt-4o-mini" : "claude",
-    templateId: asString(metadata.template_id, "koica_cover_01"),
+    templateId: legacy.templateId,
     overlayTexts: legacy.overlayTexts,
     imageFileIds: legacy.imageFileIds,
     selectedImagePaths: legacy.imagePaths,
@@ -198,6 +198,7 @@ export const insertDraftInstagramContent = async (params: {
   const scheduledAt = /^\d{4}-\d{2}-\d{2}$/.test(params.slot.scheduled_date)
     ? `${params.slot.scheduled_date}T09:00:00.000Z`
     : null;
+  const primaryTemplateId = params.slides[0]?.templateId ?? params.templateId;
 
   const { data, error } = await supabaseAdmin
     .from("contents")
@@ -219,7 +220,7 @@ export const insertDraftInstagramContent = async (params: {
         activity_folder: params.activityFolder,
         campaign_id: params.slot.campaign_id,
         hashtags: params.hashtags,
-        template_id: params.templateId,
+        template_id: primaryTemplateId,
         overlay_texts: params.overlayTexts,
         image_file_ids: params.selectedImageFileIds,
         image_paths: params.selectedImagePaths,

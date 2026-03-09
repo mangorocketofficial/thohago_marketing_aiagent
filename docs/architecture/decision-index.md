@@ -197,3 +197,14 @@ Use DB-backed report and run tables as the canonical autonomous analytics loop, 
 
 Reason
 The loop needed durable retries, cooldown enforcement, report history, and UI-readable full markdown without depending on local filesystem state or process-local memory.
+
+## D-019
+
+Phase
+7-4 Patch
+
+Decision
+Backfill Instagram carousel drafts with a repair LLM pass and deterministic 4-slide fallback when the first generation result omits `slides`.
+
+Reason
+User-visible failure was not storage or editor support but generation reliability; repairing the draft after the first miss preserved existing downstream carousel contracts while making normal feed generation consistently multi-slide.
